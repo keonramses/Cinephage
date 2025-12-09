@@ -45,7 +45,6 @@ Self-hosted media management. Search torrents, grab downloads, organize your lib
 - [Monitoring Tasks](#monitoring-tasks)
 - [Subtitle System](#subtitle-system)
 - [API Reference](#api-reference)
-- [Project Structure](#project-structure)
 - [Development](#development)
 - [Troubleshooting](#troubleshooting)
 - [Security](#security)
@@ -675,85 +674,6 @@ Cinephage provides a REST API for all functionality:
 
 ---
 
-## Project Structure
-
-```
-cinephage/
-├── src/
-│   ├── routes/                    # SvelteKit pages and API endpoints
-│   │   ├── api/                   # REST API endpoints
-│   │   │   ├── discover/          # TMDB discovery
-│   │   │   ├── indexers/          # Indexer management
-│   │   │   ├── library/           # Library operations
-│   │   │   ├── queue/             # Download queue
-│   │   │   ├── search/            # Search operations
-│   │   │   ├── subtitles/         # Subtitle management
-│   │   │   └── streaming/         # Streaming endpoints
-│   │   ├── movies/                # Movie browse pages
-│   │   ├── tv/                    # TV series pages
-│   │   ├── library/               # Library pages
-│   │   ├── queue/                 # Queue page
-│   │   ├── discover/              # Discovery page
-│   │   └── settings/              # Settings pages
-│   ├── lib/
-│   │   ├── components/            # Reusable Svelte components
-│   │   │   ├── indexers/          # Indexer UI components
-│   │   │   ├── library/           # Library UI components
-│   │   │   ├── queue/             # Queue UI components
-│   │   │   ├── search/            # Search UI components
-│   │   │   ├── subtitles/         # Subtitle UI components
-│   │   │   └── ui/                # Generic UI components
-│   │   ├── server/                # Backend services
-│   │   │   ├── db/                # Database schema (Drizzle)
-│   │   │   ├── indexers/          # Indexer engine
-│   │   │   ├── downloadClients/   # qBittorrent integration
-│   │   │   ├── library/           # Library management
-│   │   │   ├── monitoring/        # Automated tasks
-│   │   │   ├── quality/           # Quality filtering
-│   │   │   ├── scoring/           # Release scoring
-│   │   │   ├── subtitles/         # Subtitle providers
-│   │   │   ├── streaming/         # Streaming services
-│   │   │   └── workers/           # Background workers
-│   │   ├── types/                 # TypeScript type definitions
-│   │   └── utils/                 # Utility functions
-│   └── test/                      # Test files
-├── data/
-│   └── indexers/
-│       └── definitions/           # Cardigann YAML indexer definitions
-├── drizzle/                       # Database migrations
-├── deploy/                        # Deployment files (systemd service)
-├── static/                        # Static assets
-└── scripts/                       # Utility scripts
-```
-
-### Key Components
-
-**Indexer Engine** (`src/lib/server/indexers/`)
-- `IndexerManager.ts` - Manages all indexer instances
-- `loader/` - YAML definition loading and parsing
-- `runtime/` - Dynamic indexer execution
-- `search/` - Search orchestration and result handling
-- `engine/` - Selector, filter, and template engines
-
-**Download System** (`src/lib/server/downloadClients/`)
-- `DownloadClientManager.ts` - Client abstraction layer
-- `qbittorrent/` - qBittorrent WebUI integration
-- `monitoring/` - Download progress tracking
-- `import/` - File import and organization
-
-**Library** (`src/lib/server/library/`)
-- `disk-scan.ts` - Filesystem scanning
-- `library-watcher.ts` - Real-time file monitoring
-- `media-matcher.ts` - TMDB matching logic
-- `media-info.ts` - ffprobe integration
-
-**Scoring** (`src/lib/server/scoring/`)
-- `scorer.ts` - Score calculation engine
-- `profiles.ts` - Built-in profile definitions
-- `formats/` - Format-specific scoring rules
-
----
-
 ## Development
 
 ### Setup
@@ -886,12 +806,15 @@ Note: GitHub Issues are for bugs and feature requests. For general questions, pl
 
 Inspired by and learned from:
 
-- **[Radarr](https://github.com/Radarr/Radarr)** (GPLv3) - download management, monitoring, quality logic
+- **[EncDec Endpoints](https://github.com/AzartX47/EncDecEndpoints)** - Primary inspiration for streaming functionality, API toolkit for encryption/decryption
+- **[Radarr](https://github.com/Radarr/Radarr)** (GPLv3) - Download management, monitoring, quality logic
 - **[Sonarr](https://github.com/Sonarr/Sonarr)** (GPLv3) - TV handling, episode monitoring, season packs
-- **[Prowlarr](https://github.com/Prowlarr/Prowlarr)** (GPLv3) - indexer system, Cardigann format, health tracking
-- **[Bazarr](https://github.com/morpheus65535/bazarr)** (GPLv3) - subtitle provider architecture
-- **[Seerr](https://github.com/seerr-team/seerr)** (MIT) - modern UI patterns
+- **[Prowlarr](https://github.com/Prowlarr/Prowlarr)** (GPLv3) - Indexer system, Cardigann format, health tracking
+- **[Bazarr](https://github.com/morpheus65535/bazarr)** (GPLv3) - Subtitle provider architecture
+- **[Seerr](https://github.com/seerr-team/seerr)** (MIT) - Modern UI patterns
 - **[FlareSolverr](https://github.com/FlareSolverr/FlareSolverr)** (MIT) - Cloudflare handling
+- **[Flyx](https://github.com/Vynx-Velvet/Flyx-main)** - Movie/TV discovery inspiration
+- **[Dictionarry](https://github.com/Dictionarry-Hub/database)** - Quality scoring database
 
 Uses TMDB for metadata and qBittorrent for downloads.
 
