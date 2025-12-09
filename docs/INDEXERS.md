@@ -1,6 +1,6 @@
 # Indexers
 
-Cinephage includes built-in support for torrent indexers using Cardigann-compatible YAML definitions. No external tools like Jackett or Prowlarr are required for basic functionality.
+Cinephage includes built-in support for 23+ torrent indexers using both Cardigann-compatible YAML definitions and native TypeScript implementations. No external tools like Jackett or Prowlarr are required for basic functionality.
 
 This document serves as both usage documentation and a comprehensive catalog of indexers in the torrent ecosystem.
 
@@ -58,8 +58,8 @@ This document serves as both usage documentation and a comprehensive catalog of 
 | Indexer | Content | Status | Notes |
 |---------|---------|--------|-------|
 | Nyaa.si | Anime, Manga, LNs | ✅ Supported | Primary anime source |
-| SubsPlease | Anime simulcasts | 📋 Planned | Fast simulcast releases |
-| Anidex | Multi-language anime | 📋 Planned | Good for non-English |
+| SubsPlease | Anime simulcasts | ✅ Supported | Fast simulcast releases |
+| Anidex | Multi-language anime | ✅ Supported | Good for non-English |
 | Tokyo Toshokan | Anime, Japanese media | 📋 Planned | Japanese content |
 | AnimeTosho | Anime | 📋 Planned | NZB + torrents |
 | AniRena | Anime | 📋 Planned | Anime community |
@@ -110,8 +110,8 @@ DHT search engines and multi-tracker aggregators.
 | BTDig | DHT search | ✅ Supported | Indexes DHT network directly |
 | BitSearch | Aggregator | ✅ Supported | Multi-site search |
 | Solidtorrents | DHT aggregator | ✅ Supported | Clean interface |
-| Knaben | Aggregator | 📋 Planned | Indexes 30+ sites |
-| TorrentsCSV | DHT database | 📋 Planned | Open database |
+| Knaben | Aggregator | ✅ Supported | Indexes 30+ sites |
+| TorrentsCSV | DHT database | ✅ Supported | Open database |
 | Torrent Paradise | DHT search | 📋 Planned | Decentralized |
 | BT4G | Meta-search | 📋 Planned | 91M+ results |
 | iDope | Aggregator | 📋 Planned | Clean, ad-free |
@@ -129,22 +129,22 @@ Private trackers require invitation or application. Use Torznab integration for 
 
 | Tracker | Content | Status | Notes |
 |---------|---------|--------|-------|
-| IPTorrents | General | 📋 Planned | ~700k torrents, largest general |
+| IPTorrents | General | ✅ Supported | ~700k torrents, largest general |
 | TorrentLeech | General, 0DAY | 📋 Planned | Fast pre-times |
-| TorrentDay | General | 📋 Planned | Good variety |
+| TorrentDay | General | ✅ Supported | Good variety |
 | FileList | General | 📋 Planned | Romanian, excellent |
 | AlphaRatio | General | 📋 Planned | Scene releases |
 | DigitalCore | General | 📋 Planned | |
-| Aither | General | 📋 Planned | Unit3D-based |
-| SpeedCD | General | 📋 Planned | |
-| SceneTime | Scene releases | 📋 Planned | |
+| Aither | General | ✅ Supported | Unit3D-based |
+| SpeedCD | General | ✅ Supported | |
+| SceneTime | Scene releases | ✅ Supported | |
 
 ### Movies
 
 | Tracker | Content | Status | Notes |
 |---------|---------|--------|-------|
 | PassThePopcorn (PTP) | Movies | 🔌 Torznab | Elite, closed registration |
-| BeyondHD | HD/UHD Movies | 📋 Planned | Remuxes, quality encodes |
+| BeyondHD | HD/UHD Movies | ✅ Supported | Remuxes, quality encodes |
 | HDBits | Elite HD | 🔌 Torznab | Top-tier, very exclusive |
 | Blutopia | Movies, TV | 📋 Planned | Unit3D-based |
 | PrivateHD | HD content | 📋 Planned | |
@@ -192,7 +192,7 @@ Private trackers require invitation or application. Use Torznab integration for 
 
 | Tracker | Content | Status | Notes |
 |---------|---------|--------|-------|
-| OldToonsWorld | Classic cartoons | 📋 Planned | Nostalgic content |
+| OldToonsWorld | Classic cartoons | ✅ Supported | Nostalgic content |
 | HD-Space | HD content | 📋 Planned | |
 | HDTorrents | HD content | 📋 Planned | |
 | Anthelion | eBooks, audiobooks | 📋 Planned | |
@@ -224,6 +224,8 @@ Usenet support is planned for future releases.
 
 Quick reference of indexers with working built-in definitions:
 
+### YAML Definitions
+
 | Indexer | Type | Definition File |
 |---------|------|-----------------|
 | 1337x | Public | `1337x.yaml` |
@@ -238,6 +240,24 @@ Quick reference of indexers with working built-in definitions:
 | BitSearch | Aggregator | `bitsearch.yaml` |
 | Solidtorrents | Aggregator | `solidtorrents.yaml` |
 | Torznab | Protocol | `torznab.yaml` |
+
+### TypeScript Definitions
+
+Native TypeScript implementations with better type safety and maintainability:
+
+| Indexer | Type | Definition |
+|---------|------|------------|
+| SubsPlease | Public (Anime) | `SubsPlease.ts` |
+| Anidex | Public (Anime) | `Anidex.ts` |
+| Knaben | Aggregator | `Knaben.ts` |
+| TorrentsCSV | Aggregator | `TorrentsCSV.ts` |
+| IPTorrents | Private | `IPTorrents.ts` |
+| TorrentDay | Private | `TorrentDay.ts` |
+| SpeedCD | Private | `SpeedCD.ts` |
+| SceneTime | Private | `SceneTime.ts` |
+| BeyondHD | Private | `BeyondHD.ts` |
+| Aither | Private | `Aither.ts` |
+| OldToonsWorld | Private | `OldToonsWorld.ts` |
 
 ---
 

@@ -26,7 +26,7 @@
 | | |
 |---|---|
 | **Modern Stack** | SvelteKit 5, Svelte 5, TailwindCSS 4 — fast, reactive, and maintainable |
-| **Built-in Indexers** | 20+ indexer definitions run natively. No Jackett or Prowlarr required |
+| **Built-in Indexers** | 23+ indexer definitions run natively. No Jackett or Prowlarr required |
 | **Smart Quality Scoring** | 100+ format attributes with customizable profiles |
 | **Single Database** | Just SQLite. No external services or complex setup |
 
@@ -35,7 +35,7 @@
 ## Features
 
 - **Content Discovery** — Browse TMDB for movies and TV, trending content, full metadata, watch providers
-- **Multi-Indexer Search** — 20+ built-in public indexers, Torznab support for Prowlarr/Jackett, parallel search with deduplication
+- **Multi-Indexer Search** — 23+ built-in indexers (public + private), Torznab support for Prowlarr/Jackett, parallel search with deduplication
 - **Quality Scoring** — 4 built-in profiles (Best, Efficient, Micro, Streaming), scores resolution, audio, HDR, release group → [Details](docs/QUALITY-PROFILES.md)
 - **Automated Downloads** — qBittorrent integration with categories, priority handling, auto-import, path mapping
 - **Library Management** — Real-time file watching, scheduled scans, auto-match to TMDB, media info via ffprobe
@@ -102,6 +102,7 @@ See [Configuration Guide](docs/CONFIGURATION.md) for detailed setup.
 | [Monitoring](docs/MONITORING.md) | Automated tasks configuration |
 | [Subtitles](docs/SUBTITLES.md) | Providers, language profiles |
 | [API Reference](docs/API.md) | REST API endpoints |
+| [Roadmap](docs/ROADMAP.md) | Planned features, known limitations |
 | [Deployment](DEPLOYMENT.md) | Production setup, systemd, reverse proxy |
 | [Troubleshooting](TROUBLESHOOTING.md) | Common issues and solutions |
 
@@ -131,19 +132,22 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for development guidelines.
 
 ## Acknowledgments
 
-Inspired by and learned from:
+Cinephage is an original implementation inspired by these excellent projects:
 
-- **[EncDec Endpoints](https://github.com/AzartX47/EncDecEndpoints)** — Primary inspiration for streaming functionality
-- **[Radarr](https://github.com/Radarr/Radarr)** — Download management, monitoring, quality logic
-- **[Sonarr](https://github.com/Sonarr/Sonarr)** — TV handling, episode monitoring, season packs
-- **[Prowlarr](https://github.com/Prowlarr/Prowlarr)** — Indexer system, Cardigann format, health tracking
-- **[Bazarr](https://github.com/morpheus65535/bazarr)** — Subtitle provider architecture
-- **[Seerr](https://github.com/seerr-team/seerr)** — Modern UI patterns
-- **[FlareSolverr](https://github.com/FlareSolverr/FlareSolverr)** — Cloudflare handling
-- **[Flyx](https://github.com/Vynx-Velvet/Flyx-main)** — Movie/TV discovery inspiration
-- **[Dictionarry](https://github.com/Dictionarry-Hub/database)** — Quality scoring database
+| Project | License | Inspiration |
+|---------|---------|-------------|
+| [Radarr](https://github.com/Radarr/Radarr) | GPL-3.0 | Download management, monitoring, quality logic |
+| [Sonarr](https://github.com/Sonarr/Sonarr) | GPL-3.0 | TV handling, episode monitoring, season packs |
+| [Prowlarr](https://github.com/Prowlarr/Prowlarr) | GPL-3.0 | Indexer system, Cardigann format, health tracking |
+| [EncDec Endpoints](https://github.com/AzartX47/EncDecEndpoints) | MIT | Streaming functionality |
+| [Bazarr](https://github.com/morpheus65535/bazarr) | GPL-3.0 | Subtitle provider architecture |
+| [Overseerr](https://github.com/sct/overseerr) | MIT | Modern UI patterns |
+| [FlareSolverr](https://github.com/FlareSolverr/FlareSolverr) | MIT | Cloudflare handling |
+| [Dictionarry](https://github.com/Dictionarry-Hub/database) | — | Quality scoring database |
 
-Uses TMDB for metadata and qBittorrent for downloads.
+Uses [TMDB](https://www.themoviedb.org/) for metadata and [qBittorrent](https://www.qbittorrent.org/) for downloads.
+
+See [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md) for complete attribution details.
 
 ---
 
