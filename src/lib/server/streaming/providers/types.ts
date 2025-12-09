@@ -221,6 +221,9 @@ export interface ServerConfig {
 export interface ExtractOptions extends SearchParams {
 	/** Specific provider to use (skip fallback) */
 	provider?: StreamingProviderId;
+
+	/** Whether to use parallel extraction (default: true when multiple providers available) */
+	parallel?: boolean;
 }
 
 /**

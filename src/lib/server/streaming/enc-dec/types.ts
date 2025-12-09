@@ -32,7 +32,9 @@ export type DecryptionProvider =
 	| 'xprime' // XPrime
 	| 'hexa' // Hexa
 	| 'kisskh' // KissKH
-	| 'onetouchtv'; // OneTouchTV
+	| 'onetouchtv' // OneTouchTV
+	| 'mega' // Megaup hoster
+	| 'rapid'; // Rapidshare hoster
 
 // ============================================================================
 // Request Types
@@ -76,6 +78,26 @@ export interface HexaDecryptPayload extends DecryptPayload {
 export interface KissKHDecryptPayload {
 	/** Subtitle URL to decrypt */
 	url: string;
+}
+
+/**
+ * Megaup hoster decryption payload
+ */
+export interface MegaupDecryptPayload {
+	/** Encrypted text from /media/{id} endpoint */
+	text: string;
+	/** User-Agent header value (required for proper decryption) */
+	agent: string;
+}
+
+/**
+ * Rapidshare hoster decryption payload
+ */
+export interface RapidshareDecryptPayload {
+	/** Encrypted text from /media/{id} endpoint */
+	text: string;
+	/** User-Agent header value (required for proper decryption) */
+	agent: string;
 }
 
 /**
@@ -248,6 +270,54 @@ export interface KissKHSubtitle {
 	default?: boolean;
 }
 
+/**
+ * Megaup hoster decrypted response
+ */
+export interface MegaupStream {
+	/** Direct stream URL */
+	stream?: string;
+	/** Alternative stream field */
+	file?: string;
+	/** Backup URL field */
+	url?: string;
+	/** Stream sources array */
+	sources?: Array<{
+		file: string;
+		type?: string;
+		quality?: string;
+	}>;
+	/** Subtitle tracks */
+	tracks?: Array<{
+		file: string;
+		label: string;
+		kind?: string;
+	}>;
+}
+
+/**
+ * Rapidshare hoster decrypted response
+ */
+export interface RapidshareStream {
+	/** Direct stream URL */
+	stream?: string;
+	/** Alternative stream field */
+	file?: string;
+	/** Backup URL field */
+	url?: string;
+	/** Stream sources array */
+	sources?: Array<{
+		file: string;
+		type?: string;
+		quality?: string;
+	}>;
+	/** Subtitle tracks */
+	tracks?: Array<{
+		file: string;
+		label: string;
+		kind?: string;
+	}>;
+}
+
 // ============================================================================
 // Error Types
 // ============================================================================
@@ -357,3 +427,53 @@ export type AnimeKaiSearchResponse = AnimeKaiDbItem[];
  * AnimeKai find response (same format as search)
  */
 export type AnimeKaiFindResponse = AnimeKaiDbItem[];
+
+// ============================================================================
+// YFlix Database Types (Content ID Lookup)
+// ============================================================================
+
+/**
+ * YFlix database entry info
+ */
+export interface YFlixEntry {
+	/** English title */
+	title_en: string;
+	/** Content type */
+	type: 'movie' | 'tv';
+	/** Release year */
+	year: number;
+	/** Watch URL path (e.g., "/movie/12345-title-slug") */
+	flix_watch: string;
+	/** YFlix content ID - THIS IS WHAT WE NEED */
+	flix_id: string;
+	/** TMDB ID */
+	tmdb_id: number;
+	/** IMDB ID */
+	imdb_id: string;
+	/** Total episode count (for TV shows) */
+	episode_count?: number;
+}
+
+/**
+ * YFlix episode info
+ */
+export interface YFlixEpisode {
+	/** Episode title */
+	title: string;
+	/** Episode ID (used for fetching servers) - THIS SKIPS AN API CALL! */
+	eid: string;
+}
+
+/**
+ * YFlix database item with info and episodes
+ */
+export interface YFlixDbItem {
+	info: YFlixEntry;
+	/** Episodes organized by season -> episode number -> episode data */
+	episodes: Record<string, Record<string, YFlixEpisode>>;
+}
+
+/**
+ * YFlix find/search response (array of items)
+ */
+export type YFlixDbResponse = YFlixDbItem[];

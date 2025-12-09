@@ -36,7 +36,7 @@ export class OneTouchTVProvider extends BaseProvider {
 		id: 'onetouchtv',
 		name: 'OneTouchTV',
 		priority: 80,
-		enabledByDefault: false, // Requires content ID lookup - enable when needed
+		enabledByDefault: true, // Content ID lookup works reliably
 		supportsMovies: false, // TV only
 		supportsTv: true,
 		supportsAnime: false,

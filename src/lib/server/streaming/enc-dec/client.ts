@@ -18,11 +18,17 @@ import {
 	type KissKHDecryptPayload,
 	type KissKHEncryptParams,
 	type MappleSessionResult,
+	type MegaupDecryptPayload,
+	type MegaupStream,
 	type ParseHtmlPayload,
+	type RapidshareDecryptPayload,
+	type RapidshareStream,
 	type StringResult,
 	type VideasyDecryptPayload,
 	type VidstackDecryptPayload,
-	type VidstackTokenResult
+	type VidstackTokenResult,
+	type YFlixDbItem,
+	type YFlixDbResponse
 } from './types';
 
 const streamLog = { logCategory: 'streams' as const };
@@ -421,6 +427,56 @@ export class EncDecClient {
 	}
 
 	// --------------------------------------------------------------------------
+	// Hoster Decryption Methods
+	// --------------------------------------------------------------------------
+
+	/**
+	 * Megaup hoster decryption (requires agent field)
+	 * POST /api/dec-mega
+	 *
+	 * @param payload - Contains encrypted text and User-Agent
+	 * @returns Decrypted stream data
+	 */
+	async decryptMegaup(payload: MegaupDecryptPayload): Promise<MegaupStream> {
+		try {
+			logger.debug('Decrypting Megaup stream', streamLog);
+			const response = await this.post<EncDecResponse<MegaupStream>>('/dec-mega', payload);
+			return response.result;
+		} catch (error) {
+			logger.error('Megaup decryption failed', { error, ...streamLog });
+			throw new EncDecApiError(
+				'mega',
+				'decrypt',
+				undefined,
+				error instanceof Error ? error.message : String(error)
+			);
+		}
+	}
+
+	/**
+	 * Rapidshare hoster decryption (requires agent field)
+	 * POST /api/dec-rapid
+	 *
+	 * @param payload - Contains encrypted text and User-Agent
+	 * @returns Decrypted stream data
+	 */
+	async decryptRapidshare(payload: RapidshareDecryptPayload): Promise<RapidshareStream> {
+		try {
+			logger.debug('Decrypting Rapidshare stream', streamLog);
+			const response = await this.post<EncDecResponse<RapidshareStream>>('/dec-rapid', payload);
+			return response.result;
+		} catch (error) {
+			logger.error('Rapidshare decryption failed', { error, ...streamLog });
+			throw new EncDecApiError(
+				'rapid',
+				'decrypt',
+				undefined,
+				error instanceof Error ? error.message : String(error)
+			);
+		}
+	}
+
+	// --------------------------------------------------------------------------
 	// HTML Parsing
 	// --------------------------------------------------------------------------
 
@@ -518,6 +574,72 @@ export class EncDecClient {
 				undefined,
 				error instanceof Error ? error.message : String(error)
 			);
+		}
+	}
+
+	// --------------------------------------------------------------------------
+	// YFlix Database Methods (Content ID Lookup)
+	// --------------------------------------------------------------------------
+
+	/**
+	 * Find YFlix entry by external ID
+	 * GET /db/flix/find?tmdb_id={id} or ?imdb_id={id} or ?flix_id={id}
+	 *
+	 * Returns the full item including episode IDs, which can skip an API call!
+	 */
+	async findYFlixById(options: {
+		tmdb_id?: string | number;
+		imdb_id?: string;
+		flix_id?: string;
+		type?: 'movie' | 'tv';
+	}): Promise<YFlixDbItem | null> {
+		try {
+			logger.debug('Finding YFlix by ID', { ...options, ...streamLog });
+
+			const params: Record<string, string> = {};
+			if (options.tmdb_id) params.tmdb_id = options.tmdb_id.toString();
+			else if (options.imdb_id) params.imdb_id = options.imdb_id;
+			else if (options.flix_id) params.flix_id = options.flix_id;
+			else {
+				throw new Error('At least one ID parameter is required');
+			}
+
+			if (options.type) params.type = options.type;
+
+			const response = await this.getDb<YFlixDbResponse>('/db/flix/find', params);
+			return response[0] ?? null;
+		} catch (error) {
+			// Don't throw on not found - just return null
+			if (error instanceof Error && error.message.includes('404')) {
+				return null;
+			}
+			logger.debug('YFlix find failed (may not exist in DB)', { ...options, ...streamLog });
+			return null;
+		}
+	}
+
+	/**
+	 * Search YFlix database for content by title
+	 * GET /db/flix/search?query={query}&type={type}&year={year}
+	 *
+	 * Use findYFlixById when TMDB/IMDB IDs are available - it's more reliable.
+	 */
+	async searchYFlix(
+		query: string,
+		options?: { type?: 'movie' | 'tv'; year?: number }
+	): Promise<YFlixDbItem[]> {
+		try {
+			logger.debug('Searching YFlix database', { query, ...options, ...streamLog });
+
+			const params: Record<string, string> = { query };
+			if (options?.type) params.type = options.type;
+			if (options?.year) params.year = options.year.toString();
+
+			const response = await this.getDb<YFlixDbResponse>('/db/flix/search', params);
+			return response ?? [];
+		} catch (error) {
+			logger.debug('YFlix search failed', { query, error, ...streamLog });
+			return [];
 		}
 	}
 }

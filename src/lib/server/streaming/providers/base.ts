@@ -8,6 +8,7 @@
 
 import { logger } from '$lib/logging';
 import { type EncDecClient, getEncDecClient } from '../enc-dec';
+import { resolveEmbed, canResolveEmbed, type HosterResult } from '../hosters';
 import type {
 	IStreamProvider,
 	ProviderConfig,
@@ -304,5 +305,97 @@ export abstract class BaseProvider implements IStreamProvider {
 	 */
 	protected encodeParam(value: string): string {
 		return encodeURIComponent(value);
+	}
+
+	// --------------------------------------------------------------------------
+	// Embed Resolution (Hoster Integration)
+	// --------------------------------------------------------------------------
+
+	/**
+	 * Check if a URL is an embed URL that can be resolved by a hoster
+	 */
+	protected isEmbedUrl(url: string): boolean {
+		return canResolveEmbed(url);
+	}
+
+	/**
+	 * Resolve an embed URL to actual stream sources using hosters
+	 *
+	 * Use this when a provider returns an embed URL instead of a direct stream.
+	 * Hosters like Megaup and Rapidshare can extract the actual HLS stream.
+	 *
+	 * @param embedUrl - The embed URL to resolve
+	 * @returns Stream results from the hoster, or empty array if resolution fails
+	 */
+	protected async resolveEmbedUrl(embedUrl: string): Promise<StreamResult[]> {
+		logger.debug('Resolving embed URL via hoster', {
+			provider: this.config.id,
+			embedUrl,
+			...streamLog
+		});
+
+		const result = await resolveEmbed(embedUrl);
+
+		if (!result || !result.success || result.sources.length === 0) {
+			logger.debug('Embed resolution failed or returned no sources', {
+				provider: this.config.id,
+				embedUrl,
+				hoster: result?.hoster,
+				error: result?.error,
+				...streamLog
+			});
+			return [];
+		}
+
+		logger.debug('Embed resolution successful', {
+			provider: this.config.id,
+			hoster: result.hoster,
+			sourceCount: result.sources.length,
+			durationMs: result.durationMs,
+			...streamLog
+		});
+
+		// Convert hoster sources to StreamResults
+		return result.sources.map((source) =>
+			this.createStreamResult(source.url, {
+				quality: source.quality,
+				title: `${this.config.name} Stream`,
+				streamType: source.type === 'mp4' ? 'mp4' : 'hls'
+			})
+		);
+	}
+
+	/**
+	 * Try to resolve a URL - if it's an embed URL, resolve it; otherwise return as-is
+	 *
+	 * @param url - URL that might be an embed or direct stream
+	 * @returns Stream results - resolved from embed or created from direct URL
+	 */
+	protected async resolveOrCreateStream(url: string): Promise<StreamResult[]> {
+		// Check if this is an embed URL that needs resolution
+		if (this.isEmbedUrl(url)) {
+			const resolved = await this.resolveEmbedUrl(url);
+			if (resolved.length > 0) {
+				return resolved;
+			}
+			// Fall through to create direct stream if resolution fails
+			logger.debug('Embed resolution failed, treating as direct URL', {
+				provider: this.config.id,
+				url,
+				...streamLog
+			});
+		}
+
+		// Treat as direct stream URL
+		if (this.isValidStreamUrl(url)) {
+			return [
+				this.createStreamResult(url, {
+					quality: this.extractQuality(url),
+					title: `${this.config.name} Stream`
+				})
+			];
+		}
+
+		return [];
 	}
 }
