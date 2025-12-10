@@ -1,4 +1,4 @@
-import { integer, sqliteTable, text, primaryKey } from 'drizzle-orm/sqlite-core';
+import { integer, sqliteTable, text, primaryKey, index } from 'drizzle-orm/sqlite-core';
 import { relations } from 'drizzle-orm';
 import { randomUUID } from 'node:crypto';
 
@@ -49,42 +49,46 @@ export const indexers = sqliteTable('indexers', {
  * Indexer Status - Persists health, failures, and backoff state across restarts.
  * Tracks indexer reliability and auto-disables failing indexers with exponential backoff.
  */
-export const indexerStatus = sqliteTable('indexer_status', {
-	indexerId: text('indexer_id')
-		.primaryKey()
-		.references(() => indexers.id, { onDelete: 'cascade' }),
+export const indexerStatus = sqliteTable(
+	'indexer_status',
+	{
+		indexerId: text('indexer_id')
+			.primaryKey()
+			.references(() => indexers.id, { onDelete: 'cascade' }),
 
-	// Health state
-	health: text('health', { enum: ['healthy', 'warning', 'failing', 'disabled'] })
-		.notNull()
-		.default('healthy'),
+		// Health state
+		health: text('health', { enum: ['healthy', 'warning', 'failing', 'disabled'] })
+			.notNull()
+			.default('healthy'),
 
-	// Failure tracking
-	consecutiveFailures: integer('consecutive_failures').notNull().default(0),
-	totalRequests: integer('total_requests').notNull().default(0),
-	totalFailures: integer('total_failures').notNull().default(0),
+		// Failure tracking
+		consecutiveFailures: integer('consecutive_failures').notNull().default(0),
+		totalRequests: integer('total_requests').notNull().default(0),
+		totalFailures: integer('total_failures').notNull().default(0),
 
-	// Auto-disable state
-	isDisabled: integer('is_disabled', { mode: 'boolean' }).notNull().default(false),
-	disabledAt: text('disabled_at'),
-	disabledUntil: text('disabled_until'),
+		// Auto-disable state
+		isDisabled: integer('is_disabled', { mode: 'boolean' }).notNull().default(false),
+		disabledAt: text('disabled_at'),
+		disabledUntil: text('disabled_until'),
 
-	// Last activity
-	lastSuccess: text('last_success'),
-	lastFailure: text('last_failure'),
+		// Last activity
+		lastSuccess: text('last_success'),
+		lastFailure: text('last_failure'),
 
-	// Performance metrics
-	avgResponseTime: integer('avg_response_time'),
+		// Performance metrics
+		avgResponseTime: integer('avg_response_time'),
 
-	// Recent failures as JSON array (max 10)
-	recentFailures: text('recent_failures', { mode: 'json' })
-		.$type<Array<{ timestamp: string; message: string; requestUrl?: string }>>()
-		.default([]),
+		// Recent failures as JSON array (max 10)
+		recentFailures: text('recent_failures', { mode: 'json' })
+			.$type<Array<{ timestamp: string; message: string; requestUrl?: string }>>()
+			.default([]),
 
-	// Timestamps
-	createdAt: text('created_at').$defaultFn(() => new Date().toISOString()),
-	updatedAt: text('updated_at').$defaultFn(() => new Date().toISOString())
-});
+		// Timestamps
+		createdAt: text('created_at').$defaultFn(() => new Date().toISOString()),
+		updatedAt: text('updated_at').$defaultFn(() => new Date().toISOString())
+	},
+	(table) => [index('idx_indexer_status_health').on(table.health, table.isDisabled)]
+);
 
 // Relations for indexer status
 export const indexerStatusRelations = relations(indexerStatus, ({ one }) => ({
@@ -292,45 +296,49 @@ export const rootFolders = sqliteTable('root_folders', {
 /**
  * Movies - Movies added to the library (linked to TMDB)
  */
-export const movies = sqliteTable('movies', {
-	id: text('id')
-		.primaryKey()
-		.$defaultFn(() => randomUUID()),
-	tmdbId: integer('tmdb_id').notNull().unique(),
-	imdbId: text('imdb_id'),
-	title: text('title').notNull(),
-	originalTitle: text('original_title'),
-	year: integer('year'),
-	overview: text('overview'),
-	posterPath: text('poster_path'),
-	backdropPath: text('backdrop_path'),
-	runtime: integer('runtime'), // Minutes
-	genres: text('genres', { mode: 'json' }).$type<string[]>(),
-	// Path to the movie folder (relative to root folder)
-	path: text('path').notNull(),
-	rootFolderId: text('root_folder_id').references(() => rootFolders.id, { onDelete: 'set null' }),
-	// Legacy quality preset (for filtering - to be deprecated)
-	qualityPresetId: text('quality_preset_id').references(() => qualityPresets.id, {
-		onDelete: 'set null'
-	}),
-	// Quality profile for scoring and filtering releases
-	scoringProfileId: text('scoring_profile_id').references(() => scoringProfiles.id, {
-		onDelete: 'set null'
-	}),
-	// Language profile for subtitle preferences (deferred reference - languageProfiles defined later)
-	languageProfileId: text('language_profile_id'),
-	// Whether to monitor for upgrades
-	monitored: integer('monitored', { mode: 'boolean' }).default(true),
-	// Minimum availability before searching (announced, inCinemas, released, preDb)
-	minimumAvailability: text('minimum_availability').default('released'),
-	added: text('added').$defaultFn(() => new Date().toISOString()),
-	// Cached: does this movie have a file?
-	hasFile: integer('has_file', { mode: 'boolean' }).default(false),
-	// Whether to search for subtitles for this movie
-	wantsSubtitles: integer('wants_subtitles', { mode: 'boolean' }).default(true),
-	// Last time this movie was searched for releases (ISO timestamp)
-	lastSearchTime: text('last_search_time')
-});
+export const movies = sqliteTable(
+	'movies',
+	{
+		id: text('id')
+			.primaryKey()
+			.$defaultFn(() => randomUUID()),
+		tmdbId: integer('tmdb_id').notNull().unique(),
+		imdbId: text('imdb_id'),
+		title: text('title').notNull(),
+		originalTitle: text('original_title'),
+		year: integer('year'),
+		overview: text('overview'),
+		posterPath: text('poster_path'),
+		backdropPath: text('backdrop_path'),
+		runtime: integer('runtime'), // Minutes
+		genres: text('genres', { mode: 'json' }).$type<string[]>(),
+		// Path to the movie folder (relative to root folder)
+		path: text('path').notNull(),
+		rootFolderId: text('root_folder_id').references(() => rootFolders.id, { onDelete: 'set null' }),
+		// Legacy quality preset (for filtering - to be deprecated)
+		qualityPresetId: text('quality_preset_id').references(() => qualityPresets.id, {
+			onDelete: 'set null'
+		}),
+		// Quality profile for scoring and filtering releases
+		scoringProfileId: text('scoring_profile_id').references(() => scoringProfiles.id, {
+			onDelete: 'set null'
+		}),
+		// Language profile for subtitle preferences (deferred reference - languageProfiles defined later)
+		languageProfileId: text('language_profile_id'),
+		// Whether to monitor for upgrades
+		monitored: integer('monitored', { mode: 'boolean' }).default(true),
+		// Minimum availability before searching (announced, inCinemas, released, preDb)
+		minimumAvailability: text('minimum_availability').default('released'),
+		added: text('added').$defaultFn(() => new Date().toISOString()),
+		// Cached: does this movie have a file?
+		hasFile: integer('has_file', { mode: 'boolean' }).default(false),
+		// Whether to search for subtitles for this movie
+		wantsSubtitles: integer('wants_subtitles', { mode: 'boolean' }).default(true),
+		// Last time this movie was searched for releases (ISO timestamp)
+		lastSearchTime: text('last_search_time')
+	},
+	(table) => [index('idx_movies_monitored_hasfile').on(table.monitored, table.hasFile)]
+);
 
 /**
  * Movie Files - Actual movie files on disk
@@ -386,52 +394,56 @@ export const movieFiles = sqliteTable('movie_files', {
 /**
  * Series - TV series added to the library (linked to TMDB)
  */
-export const series = sqliteTable('series', {
-	id: text('id')
-		.primaryKey()
-		.$defaultFn(() => randomUUID()),
-	tmdbId: integer('tmdb_id').notNull().unique(),
-	tvdbId: integer('tvdb_id'),
-	imdbId: text('imdb_id'),
-	title: text('title').notNull(),
-	originalTitle: text('original_title'),
-	year: integer('year'), // First air year
-	overview: text('overview'),
-	posterPath: text('poster_path'),
-	backdropPath: text('backdrop_path'),
-	status: text('status'), // 'Continuing', 'Ended', 'Upcoming'
-	network: text('network'),
-	genres: text('genres', { mode: 'json' }).$type<string[]>(),
-	// Path to the series folder (relative to root folder)
-	path: text('path').notNull(),
-	rootFolderId: text('root_folder_id').references(() => rootFolders.id, { onDelete: 'set null' }),
-	// Legacy quality preset (for filtering - to be deprecated)
-	qualityPresetId: text('quality_preset_id').references(() => qualityPresets.id, {
-		onDelete: 'set null'
-	}),
-	// Quality profile for scoring and filtering releases
-	scoringProfileId: text('scoring_profile_id').references(() => scoringProfiles.id, {
-		onDelete: 'set null'
-	}),
-	// Language profile for subtitle preferences (deferred reference - languageProfiles defined later)
-	languageProfileId: text('language_profile_id'),
-	// Whether to monitor for new episodes
-	monitored: integer('monitored', { mode: 'boolean' }).default(true),
-	// How to handle new seasons/episodes added after initial add: 'all' | 'none'
-	monitorNewItems: text('monitor_new_items').default('all'),
-	// Whether to monitor specials (Season 0)
-	monitorSpecials: integer('monitor_specials', { mode: 'boolean' }).default(false),
-	// Use season folders (e.g., /Season 01/)
-	seasonFolder: integer('season_folder', { mode: 'boolean' }).default(true),
-	// Series type for episode naming/searching: 'standard', 'anime', 'daily'
-	seriesType: text('series_type').default('standard'),
-	added: text('added').$defaultFn(() => new Date().toISOString()),
-	// Cached stats
-	episodeCount: integer('episode_count').default(0),
-	episodeFileCount: integer('episode_file_count').default(0),
-	// Whether to search for subtitles for this series (inherited by episodes by default)
-	wantsSubtitles: integer('wants_subtitles', { mode: 'boolean' }).default(true)
-});
+export const series = sqliteTable(
+	'series',
+	{
+		id: text('id')
+			.primaryKey()
+			.$defaultFn(() => randomUUID()),
+		tmdbId: integer('tmdb_id').notNull().unique(),
+		tvdbId: integer('tvdb_id'),
+		imdbId: text('imdb_id'),
+		title: text('title').notNull(),
+		originalTitle: text('original_title'),
+		year: integer('year'), // First air year
+		overview: text('overview'),
+		posterPath: text('poster_path'),
+		backdropPath: text('backdrop_path'),
+		status: text('status'), // 'Continuing', 'Ended', 'Upcoming'
+		network: text('network'),
+		genres: text('genres', { mode: 'json' }).$type<string[]>(),
+		// Path to the series folder (relative to root folder)
+		path: text('path').notNull(),
+		rootFolderId: text('root_folder_id').references(() => rootFolders.id, { onDelete: 'set null' }),
+		// Legacy quality preset (for filtering - to be deprecated)
+		qualityPresetId: text('quality_preset_id').references(() => qualityPresets.id, {
+			onDelete: 'set null'
+		}),
+		// Quality profile for scoring and filtering releases
+		scoringProfileId: text('scoring_profile_id').references(() => scoringProfiles.id, {
+			onDelete: 'set null'
+		}),
+		// Language profile for subtitle preferences (deferred reference - languageProfiles defined later)
+		languageProfileId: text('language_profile_id'),
+		// Whether to monitor for new episodes
+		monitored: integer('monitored', { mode: 'boolean' }).default(true),
+		// How to handle new seasons/episodes added after initial add: 'all' | 'none'
+		monitorNewItems: text('monitor_new_items').default('all'),
+		// Whether to monitor specials (Season 0)
+		monitorSpecials: integer('monitor_specials', { mode: 'boolean' }).default(false),
+		// Use season folders (e.g., /Season 01/)
+		seasonFolder: integer('season_folder', { mode: 'boolean' }).default(true),
+		// Series type for episode naming/searching: 'standard', 'anime', 'daily'
+		seriesType: text('series_type').default('standard'),
+		added: text('added').$defaultFn(() => new Date().toISOString()),
+		// Cached stats
+		episodeCount: integer('episode_count').default(0),
+		episodeFileCount: integer('episode_file_count').default(0),
+		// Whether to search for subtitles for this series (inherited by episodes by default)
+		wantsSubtitles: integer('wants_subtitles', { mode: 'boolean' }).default(true)
+	},
+	(table) => [index('idx_series_monitored').on(table.monitored)]
+);
 
 /**
  * Seasons - TV seasons (for tracking monitoring per season)
@@ -459,32 +471,40 @@ export const seasons = sqliteTable('seasons', {
 /**
  * Episodes - Individual TV episodes
  */
-export const episodes = sqliteTable('episodes', {
-	id: text('id')
-		.primaryKey()
-		.$defaultFn(() => randomUUID()),
-	seriesId: text('series_id')
-		.notNull()
-		.references(() => series.id, { onDelete: 'cascade' }),
-	seasonId: text('season_id').references(() => seasons.id, { onDelete: 'set null' }),
-	tmdbId: integer('tmdb_id'),
-	tvdbId: integer('tvdb_id'),
-	seasonNumber: integer('season_number').notNull(),
-	episodeNumber: integer('episode_number').notNull(),
-	absoluteEpisodeNumber: integer('absolute_episode_number'),
-	title: text('title'),
-	overview: text('overview'),
-	airDate: text('air_date'),
-	runtime: integer('runtime'), // Minutes
-	// Whether to monitor this episode
-	monitored: integer('monitored', { mode: 'boolean' }).default(true),
-	// Cached: does this episode have a file?
-	hasFile: integer('has_file', { mode: 'boolean' }).default(false),
-	// Override series-level subtitle preference (null = inherit from series)
-	wantsSubtitlesOverride: integer('wants_subtitles_override', { mode: 'boolean' }),
-	// Last time this episode was searched for releases (ISO timestamp)
-	lastSearchTime: text('last_search_time')
-});
+export const episodes = sqliteTable(
+	'episodes',
+	{
+		id: text('id')
+			.primaryKey()
+			.$defaultFn(() => randomUUID()),
+		seriesId: text('series_id')
+			.notNull()
+			.references(() => series.id, { onDelete: 'cascade' }),
+		seasonId: text('season_id').references(() => seasons.id, { onDelete: 'set null' }),
+		tmdbId: integer('tmdb_id'),
+		tvdbId: integer('tvdb_id'),
+		seasonNumber: integer('season_number').notNull(),
+		episodeNumber: integer('episode_number').notNull(),
+		absoluteEpisodeNumber: integer('absolute_episode_number'),
+		title: text('title'),
+		overview: text('overview'),
+		airDate: text('air_date'),
+		runtime: integer('runtime'), // Minutes
+		// Whether to monitor this episode
+		monitored: integer('monitored', { mode: 'boolean' }).default(true),
+		// Cached: does this episode have a file?
+		hasFile: integer('has_file', { mode: 'boolean' }).default(false),
+		// Override series-level subtitle preference (null = inherit from series)
+		wantsSubtitlesOverride: integer('wants_subtitles_override', { mode: 'boolean' }),
+		// Last time this episode was searched for releases (ISO timestamp)
+		lastSearchTime: text('last_search_time')
+	},
+	(table) => [
+		index('idx_episodes_series_season').on(table.seriesId, table.seasonNumber),
+		index('idx_episodes_monitored_hasfile').on(table.monitored, table.hasFile),
+		index('idx_episodes_airdate').on(table.airDate)
+	]
+);
 
 /**
  * Episode Files - Actual episode files on disk
@@ -622,90 +642,98 @@ export const librarySettings = sqliteTable('library_settings', {
  * Download Queue - Active and pending downloads being tracked
  * Links to media items (movies/series/episodes) for automatic import
  */
-export const downloadQueue = sqliteTable('download_queue', {
-	id: text('id')
-		.primaryKey()
-		.$defaultFn(() => randomUUID()),
+export const downloadQueue = sqliteTable(
+	'download_queue',
+	{
+		id: text('id')
+			.primaryKey()
+			.$defaultFn(() => randomUUID()),
 
-	// Download client info
-	downloadClientId: text('download_client_id')
-		.notNull()
-		.references(() => downloadClients.id, { onDelete: 'cascade' }),
-	// Hash/ID from the download client (torrent hash, NZB ID, etc.)
-	downloadId: text('download_id').notNull(),
-	// Info hash from the release/magnet (reliable identifier)
-	infoHash: text('info_hash'),
+		// Download client info
+		downloadClientId: text('download_client_id')
+			.notNull()
+			.references(() => downloadClients.id, { onDelete: 'cascade' }),
+		// Hash/ID from the download client (torrent hash, NZB ID, etc.)
+		downloadId: text('download_id').notNull(),
+		// Info hash from the release/magnet (reliable identifier)
+		infoHash: text('info_hash'),
 
-	// Release info
-	title: text('title').notNull(),
-	indexerId: text('indexer_id'),
-	indexerName: text('indexer_name'),
-	// Original download/magnet URL
-	downloadUrl: text('download_url'),
-	magnetUrl: text('magnet_url'),
-	// Protocol: 'torrent' | 'usenet' | 'streaming'
-	protocol: text('protocol').notNull().default('torrent'),
+		// Release info
+		title: text('title').notNull(),
+		indexerId: text('indexer_id'),
+		indexerName: text('indexer_name'),
+		// Original download/magnet URL
+		downloadUrl: text('download_url'),
+		magnetUrl: text('magnet_url'),
+		// Protocol: 'torrent' | 'usenet' | 'streaming'
+		protocol: text('protocol').notNull().default('torrent'),
 
-	// Linked media (at least one should be set)
-	movieId: text('movie_id').references(() => movies.id, { onDelete: 'set null' }),
-	seriesId: text('series_id').references(() => series.id, { onDelete: 'set null' }),
-	// For episode-specific grabs (JSON array of episode IDs)
-	episodeIds: text('episode_ids', { mode: 'json' }).$type<string[]>(),
-	// Season number for season pack grabs
-	seasonNumber: integer('season_number'),
+		// Linked media (at least one should be set)
+		movieId: text('movie_id').references(() => movies.id, { onDelete: 'set null' }),
+		seriesId: text('series_id').references(() => series.id, { onDelete: 'set null' }),
+		// For episode-specific grabs (JSON array of episode IDs)
+		episodeIds: text('episode_ids', { mode: 'json' }).$type<string[]>(),
+		// Season number for season pack grabs
+		seasonNumber: integer('season_number'),
 
-	// Status tracking
-	// 'queued' | 'downloading' | 'paused' | 'completed' | 'importing' | 'imported' | 'failed' | 'seeding' | 'removed'
-	status: text('status').notNull().default('queued'),
-	// Download progress (0.0 - 1.0)
-	progress: text('progress').default('0'), // Stored as text for decimal precision
-	// Size in bytes
-	size: integer('size'),
-	// Download/upload speeds in bytes/sec (cached from last poll)
-	downloadSpeed: integer('download_speed').default(0),
-	uploadSpeed: integer('upload_speed').default(0),
-	// ETA in seconds (cached from last poll)
-	eta: integer('eta'),
-	// Current seed ratio
-	ratio: text('ratio').default('0'),
+		// Status tracking
+		// 'queued' | 'downloading' | 'paused' | 'completed' | 'importing' | 'imported' | 'failed' | 'seeding' | 'removed'
+		status: text('status').notNull().default('queued'),
+		// Download progress (0.0 - 1.0)
+		progress: text('progress').default('0'), // Stored as text for decimal precision
+		// Size in bytes
+		size: integer('size'),
+		// Download/upload speeds in bytes/sec (cached from last poll)
+		downloadSpeed: integer('download_speed').default(0),
+		uploadSpeed: integer('upload_speed').default(0),
+		// ETA in seconds (cached from last poll)
+		eta: integer('eta'),
+		// Current seed ratio
+		ratio: text('ratio').default('0'),
 
-	// Paths
-	// Client-reported download path (may differ from actual path)
-	clientDownloadPath: text('client_download_path'),
-	// Actual path on disk after path mapping applied
-	outputPath: text('output_path'),
-	// Path where files were imported to (in root folder)
-	importedPath: text('imported_path'),
+		// Paths
+		// Client-reported download path (may differ from actual path)
+		clientDownloadPath: text('client_download_path'),
+		// Actual path on disk after path mapping applied
+		outputPath: text('output_path'),
+		// Path where files were imported to (in root folder)
+		importedPath: text('imported_path'),
 
-	// Quality info (from parsed release name)
-	quality: text('quality', { mode: 'json' }).$type<{
-		resolution?: string;
-		source?: string;
-		codec?: string;
-		hdr?: string;
-	}>(),
+		// Quality info (from parsed release name)
+		quality: text('quality', { mode: 'json' }).$type<{
+			resolution?: string;
+			source?: string;
+			codec?: string;
+			hdr?: string;
+		}>(),
 
-	// Timestamps
-	addedAt: text('added_at').$defaultFn(() => new Date().toISOString()),
-	// When download started (first saw progress > 0)
-	startedAt: text('started_at'),
-	// When download reached 100%
-	completedAt: text('completed_at'),
-	// When import finished
-	importedAt: text('imported_at'),
+		// Timestamps
+		addedAt: text('added_at').$defaultFn(() => new Date().toISOString()),
+		// When download started (first saw progress > 0)
+		startedAt: text('started_at'),
+		// When download reached 100%
+		completedAt: text('completed_at'),
+		// When import finished
+		importedAt: text('imported_at'),
 
-	// Error tracking
-	errorMessage: text('error_message'),
-	// Number of import attempts
-	importAttempts: integer('import_attempts').default(0),
-	lastAttemptAt: text('last_attempt_at'),
+		// Error tracking
+		errorMessage: text('error_message'),
+		// Number of import attempts
+		importAttempts: integer('import_attempts').default(0),
+		lastAttemptAt: text('last_attempt_at'),
 
-	// Flags
-	// Whether this was an automatic grab or manual
-	isAutomatic: integer('is_automatic', { mode: 'boolean' }).default(false),
-	// Whether this is an upgrade for existing file
-	isUpgrade: integer('is_upgrade', { mode: 'boolean' }).default(false)
-});
+		// Flags
+		// Whether this was an automatic grab or manual
+		isAutomatic: integer('is_automatic', { mode: 'boolean' }).default(false),
+		// Whether this is an upgrade for existing file
+		isUpgrade: integer('is_upgrade', { mode: 'boolean' }).default(false)
+	},
+	(table) => [
+		index('idx_download_queue_status').on(table.status),
+		index('idx_download_queue_movie').on(table.movieId),
+		index('idx_download_queue_series').on(table.seriesId)
+	]
+);
 
 /**
  * Download History - Permanent record of completed/failed downloads
@@ -795,35 +823,43 @@ export const monitoringSettings = sqliteTable('monitoring_settings', {
  * Blocklist - Tracks releases that should not be grabbed again
  * Prevents re-downloading failed or problematic releases
  */
-export const blocklist = sqliteTable('blocklist', {
-	id: text('id')
-		.primaryKey()
-		.$defaultFn(() => randomUUID()),
-	// What was blocked
-	title: text('title').notNull(),
-	infoHash: text('info_hash'),
-	indexerId: text('indexer_id').references(() => indexers.id, { onDelete: 'set null' }),
-	// Associated content (at least one must be set)
-	movieId: text('movie_id').references(() => movies.id, { onDelete: 'cascade' }),
-	seriesId: text('series_id').references(() => series.id, { onDelete: 'cascade' }),
-	episodeIds: text('episode_ids', { mode: 'json' }).$type<string[]>(),
-	// Why it was blocked
-	reason: text('reason').notNull(), // 'download_failed', 'import_failed', 'quality_mismatch', 'manual'
-	message: text('message'),
-	// Source information for matching
-	sourceTitle: text('source_title'),
-	quality: text('quality', { mode: 'json' }).$type<{
-		resolution?: string;
-		source?: string;
-		codec?: string;
-		hdr?: string;
-	}>(),
-	size: integer('size'),
-	protocol: text('protocol'), // 'torrent' | 'usenet' | 'streaming'
-	// Timestamps
-	createdAt: text('created_at').$defaultFn(() => new Date().toISOString()),
-	expiresAt: text('expires_at') // Optional expiration (null = permanent)
-});
+export const blocklist = sqliteTable(
+	'blocklist',
+	{
+		id: text('id')
+			.primaryKey()
+			.$defaultFn(() => randomUUID()),
+		// What was blocked
+		title: text('title').notNull(),
+		infoHash: text('info_hash'),
+		indexerId: text('indexer_id').references(() => indexers.id, { onDelete: 'set null' }),
+		// Associated content (at least one must be set)
+		movieId: text('movie_id').references(() => movies.id, { onDelete: 'cascade' }),
+		seriesId: text('series_id').references(() => series.id, { onDelete: 'cascade' }),
+		episodeIds: text('episode_ids', { mode: 'json' }).$type<string[]>(),
+		// Why it was blocked
+		reason: text('reason').notNull(), // 'download_failed', 'import_failed', 'quality_mismatch', 'manual'
+		message: text('message'),
+		// Source information for matching
+		sourceTitle: text('source_title'),
+		quality: text('quality', { mode: 'json' }).$type<{
+			resolution?: string;
+			source?: string;
+			codec?: string;
+			hdr?: string;
+		}>(),
+		size: integer('size'),
+		protocol: text('protocol'), // 'torrent' | 'usenet' | 'streaming'
+		// Timestamps
+		createdAt: text('created_at').$defaultFn(() => new Date().toISOString()),
+		expiresAt: text('expires_at') // Optional expiration (null = permanent)
+	},
+	(table) => [
+		index('idx_blocklist_movie').on(table.movieId),
+		index('idx_blocklist_series').on(table.seriesId),
+		index('idx_blocklist_infohash').on(table.infoHash)
+	]
+);
 
 /**
  * Delay Profiles - Configures grab delays based on protocol and quality
@@ -896,39 +932,47 @@ export const pendingReleases = sqliteTable('pending_releases', {
 	supersededBy: text('superseded_by') // ID of release that superseded this one
 });
 
-export const monitoringHistory = sqliteTable('monitoring_history', {
-	id: text('id')
-		.primaryKey()
-		.$defaultFn(() => randomUUID()),
-	// Task type that triggered this action
-	taskType: text('task_type').notNull(), // 'missing', 'upgrade', 'new_episode', 'cutoff_unmet'
+export const monitoringHistory = sqliteTable(
+	'monitoring_history',
+	{
+		id: text('id')
+			.primaryKey()
+			.$defaultFn(() => randomUUID()),
+		// Task type that triggered this action
+		taskType: text('task_type').notNull(), // 'missing', 'upgrade', 'new_episode', 'cutoff_unmet'
 
-	// Linked media (at least one should be set)
-	movieId: text('movie_id').references(() => movies.id, { onDelete: 'cascade' }),
-	seriesId: text('series_id').references(() => series.id, { onDelete: 'cascade' }),
-	seasonNumber: integer('season_number'),
-	episodeId: text('episode_id').references(() => episodes.id, { onDelete: 'cascade' }),
+		// Linked media (at least one should be set)
+		movieId: text('movie_id').references(() => movies.id, { onDelete: 'cascade' }),
+		seriesId: text('series_id').references(() => series.id, { onDelete: 'cascade' }),
+		seasonNumber: integer('season_number'),
+		episodeId: text('episode_id').references(() => episodes.id, { onDelete: 'cascade' }),
 
-	// Status of this monitoring action
-	// 'searching' | 'found' | 'grabbed' | 'no_results' | 'skipped' | 'error'
-	status: text('status').notNull(),
+		// Status of this monitoring action
+		// 'searching' | 'found' | 'grabbed' | 'no_results' | 'skipped' | 'error'
+		status: text('status').notNull(),
 
-	// Search results
-	releasesFound: integer('releases_found').default(0),
-	releaseGrabbed: text('release_grabbed'), // Title of release that was grabbed
-	queueItemId: text('queue_item_id'), // Link to download queue if grabbed
+		// Search results
+		releasesFound: integer('releases_found').default(0),
+		releaseGrabbed: text('release_grabbed'), // Title of release that was grabbed
+		queueItemId: text('queue_item_id'), // Link to download queue if grabbed
 
-	// Upgrade tracking
-	isUpgrade: integer('is_upgrade', { mode: 'boolean' }).default(false),
-	oldScore: integer('old_score'), // Previous file score (for upgrades)
-	newScore: integer('new_score'), // New release score (for upgrades)
+		// Upgrade tracking
+		isUpgrade: integer('is_upgrade', { mode: 'boolean' }).default(false),
+		oldScore: integer('old_score'), // Previous file score (for upgrades)
+		newScore: integer('new_score'), // New release score (for upgrades)
 
-	// Timestamps
-	executedAt: text('executed_at').$defaultFn(() => new Date().toISOString()),
+		// Timestamps
+		executedAt: text('executed_at').$defaultFn(() => new Date().toISOString()),
 
-	// Error info
-	errorMessage: text('error_message')
-});
+		// Error info
+		errorMessage: text('error_message')
+	},
+	(table) => [
+		index('idx_monitoring_history_movie').on(table.movieId),
+		index('idx_monitoring_history_series').on(table.seriesId),
+		index('idx_monitoring_history_episode').on(table.episodeId)
+	]
+);
 
 // ============================================================================
 // SUBTITLE MANAGEMENT TABLES
@@ -1006,41 +1050,48 @@ export const subtitleProviders = sqliteTable('subtitle_providers', {
 /**
  * Subtitles - Subtitle files on disk linked to movies/episodes
  */
-export const subtitles = sqliteTable('subtitles', {
-	id: text('id')
-		.primaryKey()
-		.$defaultFn(() => randomUUID()),
+export const subtitles = sqliteTable(
+	'subtitles',
+	{
+		id: text('id')
+			.primaryKey()
+			.$defaultFn(() => randomUUID()),
 
-	// Link to media (one must be set)
-	movieId: text('movie_id').references(() => movies.id, { onDelete: 'cascade' }),
-	episodeId: text('episode_id').references(() => episodes.id, { onDelete: 'cascade' }),
+		// Link to media (one must be set)
+		movieId: text('movie_id').references(() => movies.id, { onDelete: 'cascade' }),
+		episodeId: text('episode_id').references(() => episodes.id, { onDelete: 'cascade' }),
 
-	// File info
-	relativePath: text('relative_path').notNull(),
-	language: text('language').notNull(), // ISO 639-1 code
+		// File info
+		relativePath: text('relative_path').notNull(),
+		language: text('language').notNull(), // ISO 639-1 code
 
-	// Subtitle properties
-	isForced: integer('is_forced', { mode: 'boolean' }).default(false),
-	isHearingImpaired: integer('is_hearing_impaired', { mode: 'boolean' }).default(false),
-	format: text('format').notNull(), // 'srt', 'ass', 'sub', 'vtt'
+		// Subtitle properties
+		isForced: integer('is_forced', { mode: 'boolean' }).default(false),
+		isHearingImpaired: integer('is_hearing_impaired', { mode: 'boolean' }).default(false),
+		format: text('format').notNull(), // 'srt', 'ass', 'sub', 'vtt'
 
-	// Source info (null if manually added or discovered on disk)
-	providerId: text('provider_id').references(() => subtitleProviders.id, { onDelete: 'set null' }),
-	providerSubtitleId: text('provider_subtitle_id'), // External ID from provider
+		// Source info (null if manually added or discovered on disk)
+		providerId: text('provider_id').references(() => subtitleProviders.id, { onDelete: 'set null' }),
+		providerSubtitleId: text('provider_subtitle_id'), // External ID from provider
 
-	// Scoring info (how well it matched)
-	matchScore: integer('match_score'),
-	isHashMatch: integer('is_hash_match', { mode: 'boolean' }).default(false),
+		// Scoring info (how well it matched)
+		matchScore: integer('match_score'),
+		isHashMatch: integer('is_hash_match', { mode: 'boolean' }).default(false),
 
-	// File metadata
-	size: integer('size'),
+		// File metadata
+		size: integer('size'),
 
-	// Sync correction applied (milliseconds offset)
-	syncOffset: integer('sync_offset').default(0),
-	wasSynced: integer('was_synced', { mode: 'boolean' }).default(false),
+		// Sync correction applied (milliseconds offset)
+		syncOffset: integer('sync_offset').default(0),
+		wasSynced: integer('was_synced', { mode: 'boolean' }).default(false),
 
-	dateAdded: text('date_added').$defaultFn(() => new Date().toISOString())
-});
+		dateAdded: text('date_added').$defaultFn(() => new Date().toISOString())
+	},
+	(table) => [
+		index('idx_subtitles_movie').on(table.movieId),
+		index('idx_subtitles_episode').on(table.episodeId)
+	]
+);
 
 /**
  * Subtitle History - Audit trail of all subtitle actions

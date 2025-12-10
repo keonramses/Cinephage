@@ -10,9 +10,23 @@ import type {
 } from '$lib/types/tmdb';
 import { TMDB } from '$lib/config/constants';
 import { logger } from '$lib/logging';
+import { tmdbCache, getCacheKey } from './tmdb-cache';
 
 export const tmdb = {
 	async fetch(endpoint: string, options: RequestInit = {}, skipFilters = false) {
+		// Ensure endpoint starts with /
+		const path = endpoint.startsWith('/') ? endpoint : `/${endpoint}`;
+
+		// Check cache first (only for GET requests which is the default)
+		const isGetRequest = !options.method || options.method === 'GET';
+		if (isGetRequest) {
+			const cacheKey = getCacheKey(path, skipFilters);
+			const cached = tmdbCache.get(cacheKey);
+			if (cached) {
+				return cached;
+			}
+		}
+
 		const [apiKeySetting, filtersSetting] = await Promise.all([
 			db.query.settings.findFirst({ where: eq(settings.key, 'tmdb_api_key') }),
 			db.query.settings.findFirst({ where: eq(settings.key, 'global_filters') })
@@ -31,8 +45,6 @@ export const tmdb = {
 			}
 		}
 
-		// Ensure endpoint starts with /
-		const path = endpoint.startsWith('/') ? endpoint : `/${endpoint}`;
 		const url = new URL(TMDB.BASE_URL + path);
 
 		// Add API key
@@ -123,6 +135,12 @@ export const tmdb = {
 			});
 		}
 
+		// Cache successful response (after filtering)
+		if (isGetRequest) {
+			const cacheKey = getCacheKey(path, skipFilters);
+			tmdbCache.set(cacheKey, data, path);
+		}
+
 		return data;
 	},
 	async getMovie(id: number): Promise<MovieDetails> {
@@ -190,6 +208,21 @@ export const tmdb = {
 			endpoint += `&first_air_date_year=${year}`;
 		}
 		return this.fetch(endpoint, {}, skipFilters) as Promise<SearchResult>;
+	},
+
+	/**
+	 * Get cache statistics for monitoring
+	 */
+	getCacheStats() {
+		return tmdbCache.getStats();
+	},
+
+	/**
+	 * Clear the TMDB response cache
+	 * @param pattern - Optional pattern to match against cache keys
+	 */
+	clearCache(pattern?: string) {
+		return tmdbCache.invalidate(pattern);
 	}
 };
 
