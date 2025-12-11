@@ -1,5 +1,5 @@
-import type { ReleaseResult, SearchCriteria } from '../core';
-import { isMovieSearch, isTvSearch, isMusicSearch, isBookSearch } from '../core';
+import type { ReleaseResult, SearchCriteria } from '../types';
+import { isMovieSearch, isTvSearch, isMusicSearch, isBookSearch } from '../types';
 import * as crypto from 'crypto';
 
 /**

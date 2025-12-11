@@ -1,24 +1,25 @@
 ---
 id: eztv
 name: EZTV
-description: TV show torrents
+description: TV show torrents via JSON API
 type: public
 language: en-US
 encoding: UTF-8
 requestdelay: 2
 
 links:
-  - https://eztvx.to
+  - https://eztv.yt
 legacylinks:
+  - https://eztvx.to
   - https://eztv.re
   - https://eztv.wf
   - https://eztv.tf
-  - https://eztv.yt
   - https://eztv.ch
 
 caps:
   modes:
-    tv-search: [imdbid]
+    search: [q]
+    tv-search: [q, imdbid]
   categories:
     '5000': TV
   categorymappings:
@@ -29,24 +30,19 @@ caps:
 
 search:
   paths:
+    # IMDB lookup via API - if imdb_id is empty, returns recent torrents
     - path: /api/get-torrents
       method: get
       inputs:
-        imdb_id: '{{ .Query.IMDBID | trimPrefix "tt" }}'
+        imdb_id: '{{ .Query.IMDBIDShort }}'
         limit: '100'
         page: '1'
     - path: /api/get-torrents
       method: get
       inputs:
-        imdb_id: '{{ .Query.IMDBID | trimPrefix "tt" }}'
+        imdb_id: '{{ .Query.IMDBIDShort }}'
         limit: '100'
         page: '2'
-    - path: /api/get-torrents
-      method: get
-      inputs:
-        imdb_id: '{{ .Query.IMDBID | trimPrefix "tt" }}'
-        limit: '100'
-        page: '3'
 
   response:
     type: json
@@ -61,7 +57,7 @@ search:
       selector: id
       filters:
         - name: prepend
-          args: 'https://eztvx.to/ep/'
+          args: 'https://eztv.yt/ep/'
     download:
       selector: torrent_url
     magnet:

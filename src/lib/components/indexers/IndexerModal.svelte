@@ -161,12 +161,12 @@
 	$effect(() => {
 		if (open) {
 			// Only reset when modal opens, not when derived values change
-			const initialDefId = indexer?.implementation ?? '';
+			const initialDefId = indexer?.definitionId ?? '';
 			const def = definitions.find((d) => d.id === initialDefId);
 
 			selectedDefinitionId = initialDefId;
 			name = indexer?.name ?? def?.name ?? '';
-			url = indexer?.url ?? def?.siteUrl ?? '';
+			url = indexer?.baseUrl ?? def?.siteUrl ?? '';
 			enabled = indexer?.enabled ?? true;
 			priority = indexer?.priority ?? 25;
 			settings = { ...(indexer?.settings ?? {}) };
@@ -208,8 +208,8 @@
 	function getFormData(): IndexerFormData {
 		return {
 			name,
-			implementation: selectedDefinitionId,
-			url,
+			definitionId: selectedDefinitionId,
+			baseUrl: url,
 			alternateUrls,
 			enabled,
 			priority,
@@ -457,6 +457,35 @@
 				<!-- Simplified form for internal indexers (like Cinephage Stream) -->
 				{#if isInternalIndexer}
 					<div class="space-y-4">
+						<!-- External URL for streaming access -->
+						{#if isStreaming}
+							<div class="form-control">
+								<label class="label py-1" for="internal-url">
+									<span class="label-text">External URL</span>
+									<span class="label-text-alt text-xs">Required for streaming</span>
+								</label>
+								<input
+									id="internal-url"
+									type="url"
+									class="input-bordered input input-sm {urlError() ? 'input-error' : ''}"
+									bind:value={url}
+									onblur={() => (urlTouched = true)}
+									placeholder="http://192.168.1.100:3000"
+								/>
+								{#if urlError()}
+									<p class="label py-0">
+										<span class="label-text-alt text-error">{urlError()}</span>
+									</p>
+								{:else}
+									<p class="label py-0">
+										<span class="label-text-alt text-xs">
+											The external URL where Jellyfin/Kodi can reach this server
+										</span>
+									</p>
+								{/if}
+							</div>
+						{/if}
+
 						<div class="grid grid-cols-2 gap-4">
 							<div class="form-control">
 								<label class="label py-1" for="priority">

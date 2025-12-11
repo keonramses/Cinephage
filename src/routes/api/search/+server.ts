@@ -1,8 +1,8 @@
 import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
 import { getIndexerManager } from '$lib/server/indexers/IndexerManager';
-import type { SearchCriteria } from '$lib/server/indexers/core';
-import { getCategoriesForSearchType } from '$lib/server/indexers/core';
+import type { SearchCriteria } from '$lib/server/indexers/types';
+import { getCategoriesForSearchType } from '$lib/server/indexers/types';
 import {
 	searchQuerySchema,
 	searchCriteriaSchema,

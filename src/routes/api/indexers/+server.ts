@@ -16,7 +16,7 @@ export const GET: RequestHandler = async () => {
 	const redactedIndexers = all.map((indexer) => ({
 		...indexer,
 		settings: Object.fromEntries(
-			Object.entries(indexer.settings).map(([key, value]) => {
+			Object.entries(indexer.settings ?? {}).map(([key, value]) => {
 				const lowerKey = key.toLowerCase();
 				if (
 					lowerKey.includes('key') ||
@@ -60,12 +60,12 @@ export const POST: RequestHandler = async ({ request }) => {
 	const manager = await getIndexerManager();
 
 	// Verify the definition exists
-	const definition = manager.getDefinition(validated.implementation);
+	const definition = manager.getDefinition(validated.definitionId);
 	if (!definition) {
 		return json(
 			{
 				error: 'Invalid definition',
-				details: `Unknown indexer definition: ${validated.implementation}`
+				details: `Unknown indexer definition: ${validated.definitionId}`
 			},
 			{ status: 400 }
 		);
@@ -74,18 +74,18 @@ export const POST: RequestHandler = async ({ request }) => {
 	try {
 		const created = await manager.createIndexer({
 			name: validated.name,
-			definitionId: validated.implementation,
-			baseUrl: validated.url,
+			definitionId: validated.definitionId,
+			baseUrl: validated.baseUrl,
 			alternateUrls: validated.alternateUrls,
 			enabled: validated.enabled,
 			priority: validated.priority,
-			settings: validated.settings ?? {},
+			settings: (validated.settings ?? {}) as Record<string, string>,
 
 			// Search capability toggles
 			enableAutomaticSearch: validated.enableAutomaticSearch,
 			enableInteractiveSearch: validated.enableInteractiveSearch,
 
-			// Torrent seeding settings
+			// Torrent seeding settings (stored in protocolSettings)
 			minimumSeeders: validated.minimumSeeders,
 			seedRatio: validated.seedRatio ?? null,
 			seedTime: validated.seedTime ?? null,

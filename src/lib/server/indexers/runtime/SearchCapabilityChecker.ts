@@ -6,16 +6,14 @@
  * - NO fallback to text search - prevents garbage results
  */
 
-import type { IndexerCapabilities } from '../core/capabilities';
-import type { SearchCriteria } from '../core/searchCriteria';
+import type { IndexerCapabilities, SearchCriteria, SearchType } from '../types';
 import {
 	canHandleSearchType,
 	supportsParam,
 	isMovieSearch,
 	isTvSearch,
-	indexerHasCategoriesForSearchType,
-	type SearchType
-} from '../core';
+	indexerHasCategoriesForSearchType
+} from '../types';
 
 /**
  * Checks whether an indexer can handle given search criteria.

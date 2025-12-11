@@ -134,3 +134,6 @@ export interface CachedTmdbIds {
 // Global caches for streaming with proper types
 export const streamCache = new LRUCache<string>(STREAM_CACHE_MAX_SIZE, STREAM_CACHE_TTL_MS);
 export const tmdbCache = new LRUCache<CachedTmdbIds>(TMDB_CACHE_MAX_SIZE, TMDB_CACHE_TTL_MS);
+
+// Re-export multi-level cache for advanced caching scenarios
+export * from './cache/index';

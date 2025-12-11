@@ -3,6 +3,11 @@
  *
  * Schema for YAML-based indexer definitions. Compatible with Prowlarr/Jackett
  * definition format for community portability.
+ *
+ * Extended to support all protocols:
+ * - Torrent: Standard HTTP-based torrent indexers
+ * - Usenet: Newznab/Spotweb indexers for NZB files
+ * - Streaming: Internal library streaming (database queries)
  */
 
 import { z } from 'zod';
@@ -75,6 +80,81 @@ export const categoryMappingSchema = z.object({
 export type CategoryMapping = z.infer<typeof categoryMappingSchema>;
 
 // ============================================================================
+// Protocol Configuration Blocks
+// ============================================================================
+
+/**
+ * Torrent protocol-specific configuration
+ */
+export const torrentProtocolConfigSchema = z.object({
+	supportsMagnet: z.boolean().optional().default(true),
+	supportsInfoHash: z.boolean().optional().default(true),
+	// Freeleech detection patterns
+	freeleechPatterns: z.array(z.string()).optional(),
+	// Internal release detection patterns
+	internalPatterns: z.array(z.string()).optional()
+});
+
+export type TorrentProtocolConfig = z.infer<typeof torrentProtocolConfigSchema>;
+
+/**
+ * Usenet protocol-specific configuration
+ */
+export const usenetProtocolConfigSchema = z.object({
+	apiType: z.enum(['newznab', 'spotweb', 'custom']).optional().default('newznab'),
+	supportsCategories: z.boolean().optional().default(true),
+	defaultApiPath: z.string().optional().default('/api'),
+	// Extended Newznab attributes to extract
+	extendedAttributes: z
+		.array(
+			z.object({
+				name: z.string(),
+				attribute: z.string()
+			})
+		)
+		.optional()
+});
+
+export type UsenetProtocolConfig = z.infer<typeof usenetProtocolConfigSchema>;
+
+/**
+ * Streaming protocol-specific configuration
+ */
+export const streamingProtocolConfigSchema = z.object({
+	// 'internal' queries local library database, 'external' uses HTTP
+	type: z.enum(['internal', 'external']).optional().default('external'),
+	// Data source: 'database' for internal library, 'http' for external APIs
+	dataSource: z.enum(['database', 'http']).optional().default('http'),
+	// Available quality tiers
+	qualityTiers: z.array(z.string()).optional().default(['4k', '1080p', '720p', '480p']),
+	// Streaming provider definitions
+	providers: z
+		.array(
+			z.object({
+				id: z.string(),
+				name: z.string(),
+				enabled: z.boolean().optional().default(true),
+				supportsMovies: z.boolean().optional().default(true),
+				supportsTv: z.boolean().optional().default(true)
+			})
+		)
+		.optional()
+});
+
+export type StreamingProtocolConfig = z.infer<typeof streamingProtocolConfigSchema>;
+
+/**
+ * Combined protocol configuration - only one should be present based on protocol type
+ */
+export const protocolConfigSchema = z.object({
+	torrent: torrentProtocolConfigSchema.optional(),
+	usenet: usenetProtocolConfigSchema.optional(),
+	streaming: streamingProtocolConfigSchema.optional()
+});
+
+export type ProtocolConfig = z.infer<typeof protocolConfigSchema>;
+
+// ============================================================================
 // Capabilities Block
 // ============================================================================
 
@@ -126,11 +206,54 @@ export type PageTestBlock = z.infer<typeof pageTestBlockSchema>;
 // Login Block
 // ============================================================================
 
+/**
+ * API Key authentication configuration
+ */
+export const apiKeyAuthSchema = z.object({
+	// Where to send the API key: header, query parameter, or both
+	location: z.enum(['header', 'query', 'both']).optional().default('query'),
+	// Header name if using header location (default: X-Api-Key)
+	headerName: z.string().optional().default('X-Api-Key'),
+	// Query parameter name if using query location (default: apikey)
+	queryParam: z.string().optional().default('apikey'),
+	// Prefix for the header value (e.g., 'Bearer ')
+	prefix: z.string().optional(),
+	// Source template for the API key value (e.g., '{{ .Config.apikey }}')
+	source: z.string().optional()
+});
+
+export type ApiKeyAuth = z.infer<typeof apiKeyAuthSchema>;
+
+/**
+ * Passkey authentication configuration (URL-embedded keys)
+ */
+export const passkeyAuthSchema = z.object({
+	// URL template containing the passkey (e.g., '/torrents/rss/{{ .Config.passkey }}')
+	urlTemplate: z.string().optional()
+});
+
+export type PasskeyAuth = z.infer<typeof passkeyAuthSchema>;
+
+/**
+ * Basic HTTP authentication configuration
+ */
+export const basicAuthSchema = z.object({
+	// Username source template
+	username: z.string().optional(),
+	// Password source template
+	password: z.string().optional()
+});
+
+export type BasicAuth = z.infer<typeof basicAuthSchema>;
+
 export const loginBlockSchema = z.object({
 	path: z.string().optional(),
 	submitpath: z.string().optional(),
 	cookies: z.array(z.string()).optional(),
-	method: z.enum(['post', 'form', 'cookie', 'get', 'oneurl']).optional(),
+	// Extended method options including apikey, basic, passkey, none
+	method: z
+		.enum(['post', 'form', 'cookie', 'get', 'oneurl', 'apikey', 'basic', 'passkey', 'none'])
+		.optional(),
 	form: z.string().optional(),
 	selectors: z.boolean().optional(),
 	inputs: z.record(z.string(), z.string()).optional(),
@@ -139,7 +262,11 @@ export const loginBlockSchema = z.object({
 	error: z.array(errorBlockSchema).optional(),
 	test: pageTestBlockSchema.optional(),
 	captcha: captchaBlockSchema.optional(),
-	headers: z.record(z.string(), z.array(z.string())).optional()
+	headers: z.record(z.string(), z.array(z.string())).optional(),
+	// Extended auth method configurations
+	apikey: apiKeyAuthSchema.optional(),
+	passkey: passkeyAuthSchema.optional(),
+	basic: basicAuthSchema.optional()
 });
 
 export type LoginBlock = z.infer<typeof loginBlockSchema>;
@@ -219,10 +346,93 @@ export const fieldDefinitionSchema = z.union([selectorBlockSchema, z.string()]);
 export type FieldDefinition = z.infer<typeof fieldDefinitionSchema>;
 
 // ============================================================================
+// Database Query Block (for internal streaming indexer)
+// ============================================================================
+
+/**
+ * Database query condition for WHERE clauses
+ */
+export const queryConditionSchema = z.object({
+	// Field name in the database table
+	field: z.string(),
+	// Comparison operator
+	operator: z
+		.enum(['eq', 'ne', 'gt', 'gte', 'lt', 'lte', 'like', 'in', 'notnull'])
+		.optional()
+		.default('eq'),
+	// Value (can use template variables like '{{ .Query.TMDBID }}')
+	value: z.union([z.string(), z.number(), z.boolean(), z.array(z.string())]),
+	// If true, condition is only applied when value is non-empty
+	optional: z.boolean().optional().default(false)
+});
+
+export type QueryCondition = z.infer<typeof queryConditionSchema>;
+
+/**
+ * Database join configuration
+ */
+export const queryJoinSchema = z.object({
+	// Table to join
+	table: z.string(),
+	// Join condition (e.g., 'movies.id = streams.movieId')
+	on: z.string(),
+	// Join type
+	type: z.enum(['inner', 'left', 'right']).optional().default('inner')
+});
+
+export type QueryJoin = z.infer<typeof queryJoinSchema>;
+
+/**
+ * Output field mapping for database results
+ */
+export const outputMappingSchema = z.object({
+	// Maps to ReleaseResult.guid
+	guid: z.string(),
+	// Maps to ReleaseResult.title
+	title: z.string(),
+	// Maps to ReleaseResult.downloadUrl (for streaming: 'stream://movie/{tmdbId}')
+	downloadUrl: z.string(),
+	// Maps to ReleaseResult.size (can be fixed or template)
+	size: z.union([z.string(), z.number()]).optional(),
+	// Maps to ReleaseResult.publishDate
+	publishDate: z.string().optional(),
+	// Maps to ReleaseResult.commentsUrl
+	commentsUrl: z.string().optional(),
+	// Streaming-specific: quality tier
+	quality: z.string().optional(),
+	// Streaming-specific: provider ID
+	provider: z.string().optional()
+});
+
+export type OutputMapping = z.infer<typeof outputMappingSchema>;
+
+/**
+ * Database query definition for internal indexers (streaming)
+ */
+export const databaseQuerySchema = z.object({
+	// Primary table to query
+	table: z.string(),
+	// Optional joins
+	join: z.union([queryJoinSchema, z.array(queryJoinSchema)]).optional(),
+	// WHERE conditions
+	conditions: z.array(queryConditionSchema).optional(),
+	// Output mapping - how to transform DB rows to ReleaseResult
+	outputMapping: outputMappingSchema,
+	// Content type this query handles
+	contentType: z.enum(['movie', 'tv', 'episode']).optional()
+});
+
+export type DatabaseQuery = z.infer<typeof databaseQuerySchema>;
+
+// ============================================================================
 // Search Block
 // ============================================================================
 
 export const searchBlockSchema = z.object({
+	// Search type: 'http' for external requests, 'database' for internal queries
+	type: z.enum(['http', 'database']).optional().default('http'),
+
+	// HTTP search configuration (original fields)
 	path: z.string().optional(),
 	paths: z.array(searchPathBlockSchema).optional(),
 	headers: z.record(z.string(), z.union([z.string(), z.array(z.string())])).optional(),
@@ -232,7 +442,12 @@ export const searchBlockSchema = z.object({
 	error: z.array(errorBlockSchema).optional(),
 	preprocessingfilters: z.array(filterBlockSchema).optional(),
 	rows: rowsBlockSchema.optional(),
-	fields: z.record(z.string(), fieldDefinitionSchema).optional()
+	fields: z.record(z.string(), fieldDefinitionSchema).optional(),
+
+	// Database query configuration (for streaming protocol with dataSource: 'database')
+	movieQuery: databaseQuerySchema.optional(),
+	tvQuery: databaseQuerySchema.optional(),
+	episodeQuery: databaseQuerySchema.optional()
 });
 
 export type SearchBlock = z.infer<typeof searchBlockSchema>;
@@ -298,6 +513,8 @@ export const yamlDefinitionSchema = z.object({
 	type: z.enum(['public', 'semi-private', 'private']).default('public'),
 	language: z.string().default('en-US'),
 	encoding: z.string().default('UTF-8'),
+	// Protocol type: torrent, usenet, or streaming
+	protocol: z.enum(['torrent', 'usenet', 'streaming']).default('torrent'),
 	requestdelay: z.number().optional(),
 
 	// URLs
@@ -308,6 +525,9 @@ export const yamlDefinitionSchema = z.object({
 	followredirect: z.boolean().optional(),
 	testlinktorrent: z.boolean().optional(),
 	certificates: z.array(z.string()).optional(),
+
+	// Protocol-specific configuration
+	protocolConfig: protocolConfigSchema.optional(),
 
 	// User settings
 	settings: z.array(settingsFieldSchema).optional(),

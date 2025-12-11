@@ -26,7 +26,7 @@ import { logger } from '$lib/logging/index.js';
 import { db } from '$lib/server/db/index.js';
 import { movieFiles, series, episodes, episodeFiles } from '$lib/server/db/schema.js';
 import { eq, and, inArray } from 'drizzle-orm';
-import type { SearchCriteria } from '$lib/server/indexers/core/index.js';
+import type { SearchCriteria } from '$lib/server/indexers/types';
 
 interface SearchForMovieParams {
 	movieId: string;

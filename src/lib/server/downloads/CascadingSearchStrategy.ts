@@ -23,7 +23,7 @@ import { createChildLogger } from '$lib/logging';
 import { db } from '$lib/server/db/index.js';
 import { episodes } from '$lib/server/db/schema.js';
 import { eq, and, inArray } from 'drizzle-orm';
-import type { SearchCriteria } from '$lib/server/indexers/core/index.js';
+import type { SearchCriteria } from '$lib/server/indexers/types';
 import type { ScoringProfile } from '$lib/server/scoring/types.js';
 
 const logger = createChildLogger({ module: 'CascadingSearchStrategy' });

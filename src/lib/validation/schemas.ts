@@ -24,30 +24,34 @@ export const torznabConfigSchema = z.object({
 
 /**
  * Schema for creating a new indexer.
- * The `implementation` field is now the YAML definition ID.
+ * YAML-only architecture: all indexers are defined by YAML definitions.
  */
 export const indexerCreateSchema = z.object({
 	name: z.string().min(1, 'Name is required').max(100, 'Name must be 100 characters or less'),
-	/** YAML definition ID (e.g., 'yts', '1337x', 'torznab') */
-	implementation: z.string().regex(/^[a-z0-9-]+$/, 'Must be a valid definition ID'),
-	url: z.string().url('Must be a valid URL'),
+	/** YAML definition ID (e.g., 'knaben', 'anidex', 'torrentday') */
+	definitionId: z.string().regex(/^[a-z0-9-]+$/, 'Must be a valid definition ID'),
+	baseUrl: z.string().url('Must be a valid URL'),
 	/** Alternative/fallback URLs */
 	alternateUrls: z.array(z.string().url('Must be a valid URL')).default([]),
-	apiKey: z.string().optional().nullable(),
-	protocol: indexerProtocolSchema,
 	enabled: z.boolean().default(true),
 	priority: z.number().int().min(1).max(100).default(25),
-	config: z.record(z.string(), z.unknown()).optional().nullable(),
-	/** User-provided settings for YAML indexers */
-	settings: z.record(z.string(), z.string()).optional().nullable(),
+	/** User-provided settings for YAML indexers (apiKey, cookie, passkey, etc.) */
+	settings: z
+		.record(z.string(), z.union([z.string(), z.number(), z.boolean()]))
+		.optional()
+		.nullable(),
 
 	// Search capability toggles
 	enableAutomaticSearch: z.boolean().default(true),
 	enableInteractiveSearch: z.boolean().default(true),
 
-	// Torrent seeding settings
+	// Torrent seeding settings (stored in protocolSettings JSON)
 	minimumSeeders: z.number().int().min(0).default(1),
-	seedRatio: z.string().optional().nullable(), // Decimal as string (e.g., "1.0")
+	seedRatio: z
+		.string()
+		.regex(/^\d+(\.\d+)?$/, 'Must be a valid decimal number (e.g., "1.0", "2.5")')
+		.optional()
+		.nullable(), // Decimal as string (e.g., "1.0")
 	seedTime: z.number().int().min(0).optional().nullable(), // Minutes
 	packSeedTime: z.number().int().min(0).optional().nullable(), // Minutes
 	preferMagnetUrl: z.boolean().default(false)
@@ -63,13 +67,13 @@ export const indexerUpdateSchema = indexerCreateSchema.partial();
  */
 export const indexerTestSchema = z.object({
 	name: z.string().min(1),
-	implementation: z.string().regex(/^[a-z0-9-]+$/),
-	url: z.string().url(),
+	definitionId: z.string().regex(/^[a-z0-9-]+$/),
+	baseUrl: z.string().url(),
 	alternateUrls: z.array(z.string().url()).default([]),
-	apiKey: z.string().optional().nullable(),
-	protocol: indexerProtocolSchema,
-	config: z.record(z.string(), z.unknown()).optional().nullable(),
-	settings: z.record(z.string(), z.string()).optional().nullable()
+	settings: z
+		.record(z.string(), z.union([z.string(), z.number(), z.boolean()]))
+		.optional()
+		.nullable()
 });
 
 // ============================================================
@@ -378,7 +382,11 @@ export const downloadClientCreateSchema = z.object({
 	initialState: downloadInitialStateSchema.default('start'),
 
 	// Seeding limits
-	seedRatioLimit: z.string().optional().nullable(),
+	seedRatioLimit: z
+		.string()
+		.regex(/^\d+(\.\d+)?$/, 'Must be a valid decimal number (e.g., "1.0", "2.5")')
+		.optional()
+		.nullable(),
 	seedTimeLimit: z.number().int().min(0).optional().nullable(),
 
 	// Path mapping

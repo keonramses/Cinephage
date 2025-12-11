@@ -9,5 +9,8 @@ export {
 	checkStreamAvailability,
 	checkHlsAvailability,
 	fetchPlaylist,
+	fetchAndRewritePlaylist,
+	rewritePlaylistUrls,
+	ensureVodPlaylist,
 	type FetchOptions
 } from './http';

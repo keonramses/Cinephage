@@ -3,7 +3,7 @@
  * Maps between different indexer category schemes and Newznab standard.
  */
 
-import { Category, isMovieCategory, isTvCategory } from '../core/types';
+import { Category, isMovieCategory, isTvCategory } from '../types';
 import { getRootCategory } from './newznabCategories';
 
 /** Map YTS quality to categories */

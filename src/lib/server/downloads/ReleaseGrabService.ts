@@ -15,6 +15,7 @@ import { getDownloadClientManager } from '$lib/server/downloadClients/DownloadCl
 import { downloadMonitor } from '$lib/server/downloadClients/monitoring/index.js';
 import { ReleaseParser } from '$lib/server/indexers/parser/ReleaseParser.js';
 import { getDownloadResolutionService } from './DownloadResolutionService.js';
+import { getNzbValidationService } from './nzb/index.js';
 import { strmService, StrmService, getStreamingBaseUrl } from '$lib/server/streaming/index.js';
 import { fileExists } from '$lib/server/downloadClients/import/index.js';
 import { mediaInfoService } from '$lib/server/library/media-info.js';
@@ -34,7 +35,7 @@ import { randomUUID } from 'node:crypto';
 import { statSync } from 'node:fs';
 import { unlink } from 'node:fs/promises';
 import { join, relative } from 'node:path';
-import type { EnhancedReleaseResult } from '$lib/server/indexers/core/releaseResult.js';
+import type { EnhancedReleaseResult } from '$lib/server/indexers/types';
 import type { DownloadInfo } from '$lib/server/downloadClients/core/interfaces.js';
 
 const logger = createChildLogger({ module: 'ReleaseGrabService' });
@@ -100,13 +101,16 @@ class ReleaseGrabService {
 		});
 
 		try {
-			// Handle streaming protocol specially - create .strm file directly
-			if (release.protocol === 'streaming') {
-				return await this.handleStreamingGrab(release, options);
+			// Route based on release protocol
+			switch (release.protocol) {
+				case 'streaming':
+					return await this.handleStreamingGrab(release, options);
+				case 'usenet':
+					return await this.handleUsenetGrab(release, options);
+				case 'torrent':
+				default:
+					return await this.handleTorrentGrab(release, options);
 			}
-
-			// Handle torrent/usenet via download client
-			return await this.handleTorrentGrab(release, options);
 		} catch (error) {
 			const message = error instanceof Error ? error.message : 'Unknown error';
 			logger.error('[ReleaseGrab] Failed to grab release', {
@@ -272,6 +276,151 @@ class ReleaseGrabService {
 				queueItemId: queueItem.id
 			});
 		}
+
+		return {
+			success: true,
+			releaseName: release.title,
+			queueItemId: queueItem.id,
+			episodesCovered: episodeIds
+		};
+	}
+
+	/**
+	 * Handle usenet release - fetch NZB and send to SABnzbd/NZBGet
+	 */
+	private async handleUsenetGrab(
+		release: EnhancedReleaseResult,
+		options: GrabOptions
+	): Promise<GrabResult> {
+		const { mediaType, movieId, seriesId, episodeIds, seasonNumber, isAutomatic, isUpgrade } =
+			options;
+
+		const clientManager = getDownloadClientManager();
+		const usenetClient = await clientManager.getClientForProtocol('usenet');
+
+		if (!usenetClient) {
+			logger.warn('[ReleaseGrab] No enabled usenet download clients');
+			return { success: false, error: 'No enabled usenet download clients configured' };
+		}
+
+		const { client: clientConfig, instance: clientInstance } = usenetClient;
+
+		// Determine category based on media type
+		const category = mediaType === 'movie' ? clientConfig.movieCategory : clientConfig.tvCategory;
+		const paused = clientConfig.initialState === 'pause';
+
+		// Parse quality from release title
+		const parsed = parser.parse(release.title);
+		const quality = {
+			resolution: parsed.resolution ?? undefined,
+			source: parsed.source ?? undefined,
+			codec: parsed.codec ?? undefined,
+			hdr: parsed.hdr ?? undefined
+		};
+
+		logger.info('[ReleaseGrab] Grabbing usenet release', {
+			title: release.title,
+			indexer: release.indexerName,
+			client: clientConfig.name
+		});
+
+		// Fetch NZB content through the indexer (handles auth/cookies)
+		let nzbContent: Buffer | undefined;
+
+		if (release.downloadUrl) {
+			const indexerManager = await getIndexerManager();
+			const indexer = release.indexerId
+				? await indexerManager.getIndexerInstance(release.indexerId)
+				: null;
+
+			if (indexer && indexer.downloadTorrent) {
+				try {
+					const downloadResult = await indexer.downloadTorrent(release.downloadUrl);
+					if (downloadResult.success && downloadResult.data) {
+						nzbContent = downloadResult.data;
+
+						// Validate NZB structure
+						const nzbValidator = getNzbValidationService();
+						const validation = nzbValidator.validate(nzbContent);
+						if (!validation.valid) {
+							logger.error('[ReleaseGrab] Invalid NZB', {
+								title: release.title,
+								error: validation.error
+							});
+							return { success: false, error: `Invalid NZB: ${validation.error}` };
+						}
+
+						logger.debug('[ReleaseGrab] NZB validated', {
+							title: release.title,
+							fileCount: validation.fileCount,
+							totalSize: validation.totalSize
+						});
+					} else {
+						logger.error('[ReleaseGrab] Failed to fetch NZB', {
+							title: release.title,
+							error: downloadResult.error
+						});
+						return { success: false, error: `Failed to fetch NZB: ${downloadResult.error}` };
+					}
+				} catch (fetchError) {
+					const message = fetchError instanceof Error ? fetchError.message : 'Unknown error';
+					logger.error('[ReleaseGrab] Error fetching NZB', {
+						title: release.title,
+						error: message
+					});
+					return { success: false, error: `Error fetching NZB: ${message}` };
+				}
+			} else {
+				// No indexer instance - try direct URL
+				logger.debug('[ReleaseGrab] Using direct NZB URL (no indexer instance)');
+			}
+		}
+
+		// Add to usenet client
+		let nzoId: string;
+		try {
+			nzoId = await clientInstance.addDownload({
+				nzbFile: nzbContent,
+				downloadUrl: nzbContent ? undefined : release.downloadUrl,
+				title: release.title,
+				category,
+				paused,
+				priority: clientConfig.recentPriority
+			});
+		} catch (addError) {
+			const message = addError instanceof Error ? addError.message : 'Unknown error';
+			logger.error('[ReleaseGrab] Failed to add NZB to client', {
+				title: release.title,
+				client: clientConfig.name,
+				error: message
+			});
+			return { success: false, error: `Failed to add to ${clientConfig.name}: ${message}` };
+		}
+
+		// Create queue record to track the download
+		const queueItem = await downloadMonitor.addToQueue({
+			downloadClientId: clientConfig.id,
+			downloadId: nzoId,
+			title: release.title,
+			indexerId: release.indexerId,
+			indexerName: release.indexerName,
+			downloadUrl: release.downloadUrl,
+			protocol: 'usenet',
+			movieId,
+			seriesId,
+			episodeIds,
+			seasonNumber,
+			quality,
+			isAutomatic: isAutomatic ?? false,
+			isUpgrade: isUpgrade ?? false
+		});
+
+		logger.info('[ReleaseGrab] Usenet release grabbed successfully', {
+			title: release.title,
+			queueItemId: queueItem.id,
+			nzoId,
+			client: clientConfig.name
+		});
 
 		return {
 			success: true,

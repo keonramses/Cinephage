@@ -642,6 +642,40 @@ export class EncDecClient {
 			return [];
 		}
 	}
+
+	// --------------------------------------------------------------------------
+	// Health & Utility Methods
+	// --------------------------------------------------------------------------
+
+	/**
+	 * Get the base URL for the API
+	 */
+	getBaseUrl(): string {
+		return this.baseUrl;
+	}
+
+	/**
+	 * Check if the EncDec API is healthy and reachable
+	 * Performs a lightweight health check
+	 */
+	async isHealthy(): Promise<boolean> {
+		try {
+			// Try a simple endpoint to check connectivity
+			const controller = new AbortController();
+			const timeoutId = setTimeout(() => controller.abort(), 5000);
+
+			const response = await fetch(`${this.baseUrl}/health`, {
+				method: 'GET',
+				headers: DEFAULT_HEADERS,
+				signal: controller.signal
+			});
+
+			clearTimeout(timeoutId);
+			return response.ok || response.status === 404; // 404 means API is reachable but no health endpoint
+		} catch {
+			return false;
+		}
+	}
 }
 
 // ============================================================================

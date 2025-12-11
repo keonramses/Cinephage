@@ -7,7 +7,9 @@ export type DownloadClientImplementation =
 	| 'transmission'
 	| 'deluge'
 	| 'rtorrent'
-	| 'aria2';
+	| 'aria2'
+	| 'sabnzbd'
+	| 'nzbget';
 export type DownloadPriority = 'normal' | 'high' | 'force';
 export type DownloadInitialState = 'start' | 'pause' | 'force';
 export type RootFolderMediaType = 'movie' | 'tv';

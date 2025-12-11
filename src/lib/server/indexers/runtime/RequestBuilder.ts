@@ -8,8 +8,8 @@ import type {
 	SearchBlock,
 	SearchPathBlock
 } from '../schema/yamlDefinition';
-import type { SearchCriteria } from '../core/searchCriteria';
-import { isMovieSearch, isTvSearch } from '../core/searchCriteria';
+import type { SearchCriteria } from '../types';
+import { isMovieSearch, isTvSearch } from '../types';
 import { TemplateEngine } from '../engine/TemplateEngine';
 import { FilterEngine } from '../engine/FilterEngine';
 

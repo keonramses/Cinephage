@@ -1,7 +1,7 @@
 import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
 import { getIndexerManager } from '$lib/server/indexers/IndexerManager';
-import { CINEPHAGE_STREAM_DEFINITION_ID } from '$lib/server/indexers/definitions/registry';
+import { CINEPHAGE_STREAM_DEFINITION_ID } from '$lib/server/indexers/types';
 import { indexerUpdateSchema } from '$lib/validation/schemas';
 import { createChildLogger } from '$lib/logging';
 
@@ -61,17 +61,21 @@ export const PUT: RequestHandler = async ({ params, request }) => {
 
 	// Check if this is the streaming indexer and capture old baseUrl
 	const isStreamingIndexer = existingIndexer.definitionId === CINEPHAGE_STREAM_DEFINITION_ID;
-	const oldBaseUrl = existingIndexer.settings?.baseUrl;
-	const newBaseUrl = validated.settings?.baseUrl;
+	const oldBaseUrl =
+		typeof existingIndexer.settings?.baseUrl === 'string'
+			? existingIndexer.settings.baseUrl
+			: undefined;
+	const newBaseUrl =
+		typeof validated.settings?.baseUrl === 'string' ? validated.settings.baseUrl : undefined;
 
 	try {
 		const updated = await manager.updateIndexer(params.id, {
 			name: validated.name,
 			enabled: validated.enabled,
-			baseUrl: validated.url,
+			baseUrl: validated.baseUrl,
 			alternateUrls: validated.alternateUrls,
 			priority: validated.priority,
-			settings: validated.settings ?? undefined,
+			settings: validated.settings as Record<string, string> | undefined,
 
 			// Search capability toggles
 			enableAutomaticSearch: validated.enableAutomaticSearch,

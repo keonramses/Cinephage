@@ -1,17 +1,13 @@
 /**
  * Indexer Factory
  *
- * Creates indexer instances from either:
- * - YAML definitions
- * - Native TypeScript indexers
- *
- * Uses a single interface regardless of the underlying implementation.
+ * Creates indexer instances from YAML definitions.
+ * Uses a single interface regardless of the underlying definition.
  */
 
-import type { IIndexer, IndexerConfig } from '../core/interfaces';
+import type { IIndexer, IndexerConfig } from '../types';
 import { YamlIndexer } from '../runtime/YamlIndexer';
 import { YamlDefinitionLoader } from './YamlDefinitionLoader';
-import { createNativeIndexer, isNativeIndexer } from '../definitions/registry';
 import { createChildLogger } from '$lib/logging';
 
 const log = createChildLogger({ module: 'IndexerFactory' });
@@ -25,7 +21,7 @@ export class IndexerFactory {
 
 	/**
 	 * Initialize the factory with the YAML loader.
-	 * Must be called before creating YAML-based indexers.
+	 * Must be called before creating indexers.
 	 */
 	async initialize(): Promise<void> {
 		if (!this.yamlLoader) {
@@ -44,37 +40,19 @@ export class IndexerFactory {
 			return cached;
 		}
 
-		// Determine source and create appropriate indexer
-		let indexer: IIndexer;
+		// Ensure loader is ready
+		await this.initialize();
 
-		if (isNativeIndexer(config.definitionId)) {
-			// Native TypeScript indexer
-			indexer = this.createNativeIndexer(config);
-		} else {
-			// YAML indexer - ensure loader is ready
-			await this.initialize();
-			indexer = this.createYamlIndexer(config);
-		}
+		// Create YAML indexer
+		const indexer = this.createYamlIndexer(config);
 
 		// Cache and return
 		this.cache.set(config.id, indexer);
 		log.debug('Created indexer', {
 			id: config.id,
-			definitionId: config.definitionId,
-			type: isNativeIndexer(config.definitionId) ? 'native' : 'yaml'
+			definitionId: config.definitionId
 		});
 
-		return indexer;
-	}
-
-	/**
-	 * Create a native TypeScript indexer.
-	 */
-	private createNativeIndexer(config: IndexerConfig): IIndexer {
-		const indexer = createNativeIndexer(config);
-		if (!indexer) {
-			throw new Error(`Failed to create native indexer: ${config.definitionId}`);
-		}
 		return indexer;
 	}
 
@@ -104,12 +82,6 @@ export class IndexerFactory {
 	 * Check if this factory can create an indexer for the given definition.
 	 */
 	canCreate(definitionId: string): boolean {
-		// Check native first
-		if (isNativeIndexer(definitionId)) {
-			return true;
-		}
-
-		// Then check YAML
 		return this.yamlLoader?.hasDefinition(definitionId) ?? false;
 	}
 

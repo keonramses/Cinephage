@@ -1,73 +1,43 @@
 import { json } from '@sveltejs/kit';
-import { getIndexerManager } from '$lib/server/indexers/IndexerManager';
-import { getAllNativeIndexerDefinitions } from '$lib/server/indexers/definitions/registry';
+import {
+	getDefinitionLoader,
+	initializeDefinitions,
+	toUIDefinition
+} from '$lib/server/indexers/loader';
 
 /**
  * GET /api/indexers/definitions
- * Returns all available indexer definitions (both native TypeScript and YAML).
- * Internal/auto-managed indexers are excluded from this list.
+ * Returns all available indexer definitions from the unified YAML-based system.
+ * Internal/auto-managed indexers (like streaming) are excluded from this list.
  */
 export async function GET() {
-	const manager = await getIndexerManager();
+	// Ensure definitions are loaded
+	const loader = getDefinitionLoader();
+	if (!loader.isLoaded()) {
+		await initializeDefinitions();
+	}
 
-	// Get native TypeScript indexer definitions (excluding internal ones)
-	const nativeDefinitions = getAllNativeIndexerDefinitions()
-		.filter((def) => !def.internal) // Exclude internal indexers like Cinephage Stream
-		.map((def) => ({
-			id: def.id,
-			name: def.name,
-			description: def.description,
-			type: def.type,
-			protocol: def.protocol,
-			siteUrl: def.siteUrl,
-			alternateUrls: def.alternateUrls ?? [],
-			capabilities: {
-				searchModes: {},
-				categories: {},
-				categorymappings: []
-			},
-			settings: def.settings.map((s) => ({
-				name: s.name,
-				type: s.type,
-				label: s.label,
-				required: s.required,
-				default: s.default,
-				helpText: s.helpText,
-				options: s.options
-			}))
-		}));
+	// Get all definitions and convert to UI format
+	const allDefinitions = loader.getAll();
 
-	// Get YAML definitions
-	const yamlDefinitions = manager.getDefinitions().map((def) => ({
-		id: def.id,
-		name: def.name,
-		description: def.description,
-		type: def.type,
-		protocol: 'torrent' as const,
-		siteUrl: def.links[0],
-		alternateUrls: def.links.slice(1),
-		language: def.language,
-		encoding: def.encoding,
-		capabilities: {
-			searchModes: def.caps.modes ?? {},
-			categories: def.caps.categories ?? {},
-			categorymappings: def.caps.categorymappings ?? []
-		},
-		settings: (def.settings ?? []).map((s) => ({
-			name: s.name,
-			type: s.type ?? 'text',
-			label: s.label ?? s.name,
-			required: s.type !== 'checkbox' && s.type !== 'info',
-			default: s.default !== undefined ? String(s.default) : undefined,
-			helpText: undefined,
-			options: s.options
-		}))
-	}));
+	// Map to API response format, excluding internal indexers
+	const definitions = allDefinitions
+		.filter((def) => def.protocol !== 'streaming') // Exclude streaming indexers from public list
+		.map((def) => {
+			const uiDef = toUIDefinition(def);
+			return {
+				id: uiDef.id,
+				name: uiDef.name,
+				description: uiDef.description,
+				type: uiDef.type,
+				protocol: uiDef.protocol,
+				siteUrl: uiDef.siteUrl,
+				alternateUrls: uiDef.alternateUrls,
+				capabilities: uiDef.capabilities,
+				settings: uiDef.settings
+			};
+		})
+		.sort((a, b) => a.name.localeCompare(b.name));
 
-	// Combine and sort by name
-	const allDefinitions = [...nativeDefinitions, ...yamlDefinitions].sort((a, b) =>
-		a.name.localeCompare(b.name)
-	);
-
-	return json(allDefinitions);
+	return json(definitions);
 }

@@ -1,0 +1,49 @@
+---
+# Cinephage Library Streaming Indexer
+# This internal indexer queries the local library database to provide
+# streaming URLs for content in your library.
+#
+# Quality is determined at playback time by the streaming proxy,
+# which extracts streams from providers and selects the best available quality.
+
+id: cinephage-stream
+name: Cinephage Library
+description: Stream content from your local media library via .strm files
+type: private
+protocol: streaming
+language: en-US
+encoding: UTF-8
+
+links:
+  - http://localhost
+
+# Protocol-specific configuration for streaming
+protocolConfig:
+  streaming:
+    type: internal
+    dataSource: database
+
+# Search capabilities
+caps:
+  modes:
+    search: [q]
+    movie-search: [q, tmdbid, imdbid]
+    tv-search: [q, tmdbid, tvdbid, imdbid, season, ep]
+  categories:
+    '2000': Movies
+    '5000': TV
+  categorymappings:
+    - id: Movies
+      cat: '2000'
+      desc: Movies
+      default: true
+    - id: TV
+      cat: '5000'
+      desc: TV Shows
+      default: true
+
+# Search configuration (uses DatabaseQueryExecutor defaults)
+# The executor handles movie/TV queries against the local database
+search:
+  response:
+    type: json

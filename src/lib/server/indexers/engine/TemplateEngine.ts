@@ -9,7 +9,7 @@ import type {
 	TvSearchCriteria,
 	MusicSearchCriteria,
 	BookSearchCriteria
-} from '../core/searchCriteria';
+} from '../types';
 import type { FilterBlock } from '../schema/yamlDefinition';
 import { createSafeRegex, safeReplace } from './safeRegex';
 import { logger } from '$lib/logging';
@@ -779,6 +779,7 @@ export class TemplateEngine {
 
 	/**
 	 * Parse pipe filters from a string like `| filter "args" | filter2`.
+	 * Supports multiple arguments: `| replace "old" "new"` or `| slice 0 1`
 	 */
 	private parsePipeFilters(pipePart: string): FilterBlock[] {
 		const filters: FilterBlock[] = [];
@@ -789,15 +790,66 @@ export class TemplateEngine {
 			const trimmed = part.trim();
 			if (!trimmed) continue;
 
-			// Parse filter name and args: `filterName "arg"` or `filterName`
-			const argMatch = trimmed.match(/^(\w+)(?:\s+(?:"([^"]*)"|'([^']*)'|(\S+)))?$/);
-			if (argMatch) {
-				const name = argMatch[1];
-				const args = argMatch[2] ?? argMatch[3] ?? argMatch[4] ?? undefined;
-				filters.push({ name, args });
-			} else {
-				// Just filter name
+			// Extract filter name (first word)
+			const spaceIdx = trimmed.indexOf(' ');
+			if (spaceIdx === -1) {
+				// No arguments
 				filters.push({ name: trimmed });
+				continue;
+			}
+
+			const name = trimmed.substring(0, spaceIdx);
+			const argsStr = trimmed.substring(spaceIdx + 1).trim();
+
+			// Parse all arguments (quoted strings or unquoted tokens)
+			const args: string[] = [];
+			let remaining = argsStr;
+
+			while (remaining.length > 0) {
+				remaining = remaining.trimStart();
+				if (remaining.length === 0) break;
+
+				if (remaining.startsWith('"')) {
+					// Quoted string
+					const endQuote = remaining.indexOf('"', 1);
+					if (endQuote !== -1) {
+						args.push(remaining.substring(1, endQuote));
+						remaining = remaining.substring(endQuote + 1);
+					} else {
+						// Unterminated quote, take the rest
+						args.push(remaining.substring(1));
+						break;
+					}
+				} else if (remaining.startsWith("'")) {
+					// Single-quoted string
+					const endQuote = remaining.indexOf("'", 1);
+					if (endQuote !== -1) {
+						args.push(remaining.substring(1, endQuote));
+						remaining = remaining.substring(endQuote + 1);
+					} else {
+						args.push(remaining.substring(1));
+						break;
+					}
+				} else {
+					// Unquoted token (until space or end)
+					const nextSpace = remaining.search(/\s/);
+					if (nextSpace !== -1) {
+						args.push(remaining.substring(0, nextSpace));
+						remaining = remaining.substring(nextSpace);
+					} else {
+						args.push(remaining);
+						break;
+					}
+				}
+			}
+
+			// Store args: single arg as string, multiple args as array
+			if (args.length === 0) {
+				filters.push({ name });
+			} else if (args.length === 1) {
+				filters.push({ name, args: args[0] });
+			} else {
+				filters.push({ name, args });
 			}
 		}
 
@@ -846,10 +898,111 @@ export class TemplateEngine {
 					return value;
 				}
 
-			case 'replace':
-				// replace "old" "new" - but we only have one arg in this format
-				// For inline, args might be array-like or space-separated
+			case 'replace': {
+				// replace "old" "new" - args is array of [old, new]
+				if (Array.isArray(args) && args.length >= 2) {
+					const [oldStr, newStr] = args;
+					return value.split(String(oldStr)).join(String(newStr));
+				}
 				return value;
+			}
+
+			case 'slice': {
+				// slice startIndex endIndex (optional) - Go-style slice
+				// slice 0 1 -> first character
+				// slice 1 -> from index 1 to end
+				if (Array.isArray(args)) {
+					const start = parseInt(String(args[0]), 10) || 0;
+					const end = args.length > 1 ? parseInt(String(args[1]), 10) : undefined;
+					return value.slice(start, end);
+				}
+				if (typeof args === 'string') {
+					const start = parseInt(args, 10) || 0;
+					return value.slice(start);
+				}
+				return value;
+			}
+
+			case 'join': {
+				// join separator - joins array-like value with separator
+				// If value is a single string, just return it
+				const separator = typeof args === 'string' ? args : ',';
+				// If the value looks like an array (comma-separated), split and rejoin
+				if (value.includes(',')) {
+					return value
+						.split(',')
+						.map((s) => s.trim())
+						.join(separator);
+				}
+				return value;
+			}
+
+			case 'printf': {
+				// printf format - apply C-style format string
+				// %s = string, %d = integer, %v = value
+				if (typeof args === 'string') {
+					return args.replace(/%[sdvq]/g, () => value);
+				}
+				return value;
+			}
+
+			case 'split': {
+				// split separator index - split by separator and take index
+				if (Array.isArray(args) && args.length >= 2) {
+					const [separator, indexStr] = args;
+					let index = parseInt(String(indexStr), 10);
+					const parts = value.split(String(separator));
+					if (index < 0) index = parts.length + index;
+					return parts[index] ?? '';
+				}
+				return value;
+			}
+
+			case 'prepend': {
+				// prepend "prefix"
+				const prefix = typeof args === 'string' ? args : '';
+				return prefix + value;
+			}
+
+			case 'append': {
+				// append "suffix"
+				const suffix = typeof args === 'string' ? args : '';
+				return value + suffix;
+			}
+
+			case 'first': {
+				// first n - get first n characters
+				const n = parseInt(typeof args === 'string' ? args : '1', 10);
+				return value.substring(0, n);
+			}
+
+			case 'last': {
+				// last n - get last n characters
+				const n = parseInt(typeof args === 'string' ? args : '1', 10);
+				return value.substring(Math.max(0, value.length - n));
+			}
+
+			case 'default': {
+				// default "value" - use default if empty
+				if (!value || value.trim() === '') {
+					return typeof args === 'string' ? args : '';
+				}
+				return value;
+			}
+
+			case 'substring': {
+				// substring start length
+				if (Array.isArray(args)) {
+					const start = parseInt(String(args[0]), 10) || 0;
+					const length = args.length > 1 ? parseInt(String(args[1]), 10) : undefined;
+					return length !== undefined ? value.substr(start, length) : value.substring(start);
+				}
+				if (typeof args === 'string') {
+					const start = parseInt(args, 10) || 0;
+					return value.substring(start);
+				}
+				return value;
+			}
 
 			default:
 				// Unknown filter, return as-is

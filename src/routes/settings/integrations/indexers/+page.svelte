@@ -54,7 +54,7 @@
 		// Add definition names
 		result = result.map((indexer) => ({
 			...indexer,
-			definitionName: data.definitions.find((d) => d.id === indexer.implementation)?.name
+			definitionName: data.definitions.find((d) => d.id === indexer.definitionId)?.name
 		}));
 
 		// Apply filters
@@ -70,7 +70,7 @@
 			const search = filters.search.toLowerCase();
 			result = result.filter(
 				(i) =>
-					i.name.toLowerCase().includes(search) || i.implementation.toLowerCase().includes(search)
+					i.name.toLowerCase().includes(search) || i.definitionId.toLowerCase().includes(search)
 			);
 		}
 
@@ -158,9 +158,8 @@
 				headers: { 'Content-Type': 'application/json' },
 				body: JSON.stringify({
 					name: indexer.name,
-					implementation: indexer.implementation,
-					url: indexer.url,
-					protocol: indexer.protocol,
+					definitionId: indexer.definitionId,
+					baseUrl: indexer.baseUrl,
 					settings: indexer.settings
 				})
 			});
@@ -188,8 +187,8 @@
 				headers: { 'Content-Type': 'application/json' },
 				body: JSON.stringify({
 					name: formData.name,
-					implementation: formData.implementation,
-					url: formData.url,
+					definitionId: formData.definitionId,
+					baseUrl: formData.baseUrl,
 					protocol: formData.protocol,
 					settings: formData.settings
 				})
@@ -208,8 +207,9 @@
 				'data',
 				JSON.stringify({
 					name: formData.name,
-					implementation: formData.implementation,
-					url: formData.url,
+					definitionId: formData.definitionId,
+					baseUrl: formData.baseUrl,
+					alternateUrls: formData.alternateUrls,
 					enabled: formData.enabled,
 					priority: formData.priority,
 					protocol: formData.protocol,
@@ -228,21 +228,35 @@
 				})
 			);
 
+			let response: Response;
+			const headers = { Accept: 'application/json' };
 			if (modalMode === 'edit' && editingIndexer) {
 				form.append('id', editingIndexer.id);
-				await fetch(`?/updateIndexer`, {
+				response = await fetch(`?/updateIndexer`, {
 					method: 'POST',
-					body: form
+					body: form,
+					headers
 				});
 			} else {
-				await fetch(`?/createIndexer`, {
+				response = await fetch(`?/createIndexer`, {
 					method: 'POST',
-					body: form
+					body: form,
+					headers
 				});
+			}
+
+			// Check for errors in the response
+			if (!response.ok) {
+				const result = await response.json();
+				toasts.error(result.data?.indexerError ?? 'Failed to save indexer');
+				return;
 			}
 
 			await invalidateAll();
 			closeModal();
+			toasts.success(modalMode === 'edit' ? 'Indexer updated' : 'Indexer created');
+		} catch (e) {
+			toasts.error(`Failed to save: ${e instanceof Error ? e.message : 'Unknown error'}`);
 		} finally {
 			saving = false;
 		}

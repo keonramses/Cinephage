@@ -71,8 +71,6 @@
 					value={settings[setting.name] ?? ''}
 					oninput={(e) => updateSetting(setting.name, e.currentTarget.value)}
 					required={setting.required}
-					min={setting.validation?.min}
-					max={setting.validation?.max}
 				/>
 			{:else}
 				<input

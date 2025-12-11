@@ -29,30 +29,30 @@ export const POST: RequestHandler = async ({ request }) => {
 	const manager = await getIndexerManager();
 
 	// Verify the definition exists
-	const definition = manager.getDefinition(validated.implementation);
+	const definition = manager.getDefinition(validated.definitionId);
 	if (!definition) {
 		return json(
 			{
 				success: false,
-				error: `Unknown indexer definition: ${validated.implementation}`
+				error: `Unknown indexer definition: ${validated.definitionId}`
 			},
 			{ status: 400 }
 		);
 	}
 
 	try {
-		// Derive protocol from definition (native indexers have explicit protocol, YAML are torrents)
-		const protocol = 'protocol' in definition ? definition.protocol : 'torrent';
+		// Get protocol from YAML definition
+		const protocol = definition.protocol;
 
 		await manager.testIndexer({
 			name: validated.name,
-			definitionId: validated.implementation,
-			baseUrl: validated.url,
+			definitionId: validated.definitionId,
+			baseUrl: validated.baseUrl,
 			alternateUrls: validated.alternateUrls,
 			enabled: true,
 			priority: 25,
 			protocol,
-			settings: validated.settings ?? {},
+			settings: (validated.settings ?? {}) as Record<string, string>,
 
 			// Default values for test (not needed for connectivity test)
 			enableAutomaticSearch: true,

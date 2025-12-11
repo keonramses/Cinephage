@@ -6,6 +6,7 @@
  */
 
 import { logger } from '$lib/logging';
+import { fetchWithTimeout } from './utils/http';
 
 const streamLog = { logCategory: 'streams' as const };
 
@@ -263,41 +264,63 @@ export function selectBestVariant(variants: HLSVariant[]): HLSVariant | null {
 }
 
 /**
- * Fetch HLS master playlist, parse it, and return the best quality variant URL
+ * Result of getBestQualityStreamUrl containing both raw and proxied URLs.
+ */
+export interface BestQualityResult {
+	/** The raw URL of the best quality variant (or master URL if no variants) */
+	rawUrl: string;
+	/** Whether this is the master URL (couldn't find variants) or a specific variant */
+	isMasterUrl: boolean;
+}
+
+/**
+ * Fetch HLS master playlist, parse it, and return the best quality variant URL.
+ *
+ * This fetches the playlist DIRECTLY (not through our proxy) to avoid
+ * server-to-server loopback issues. Returns the raw URL for use with
+ * fetchAndRewritePlaylist.
+ *
+ * @param masterUrl - The master playlist URL
+ * @param referer - Referer header for requests
+ * @returns The raw URL of the best quality variant
  */
 export async function getBestQualityStreamUrl(
 	masterUrl: string,
-	referer: string,
-	proxyBaseUrl: string
-): Promise<string> {
+	referer: string
+): Promise<BestQualityResult> {
 	try {
-		// Fetch the master playlist through our proxy
-		const proxyUrl = `${proxyBaseUrl}/api/streaming/proxy?url=${encodeURIComponent(masterUrl)}&referer=${encodeURIComponent(referer)}`;
+		// Fetch the master playlist DIRECTLY (not through proxy - avoids loopback issues)
+		const response = await fetchWithTimeout(masterUrl, {
+			referer,
+			timeout: 15000,
+			headers: {
+				Accept: '*/*',
+				Origin: referer ? new URL(referer).origin : undefined
+			} as Record<string, string>
+		});
 
-		const response = await fetch(proxyUrl);
 		if (!response.ok) {
 			logger.warn('HLS failed to fetch master playlist', { status: response.status, ...streamLog });
-			// Fall back to original URL
-			return proxyUrl;
+			// Fall back to master URL
+			return { rawUrl: masterUrl, isMasterUrl: true };
 		}
 
 		const playlist = await response.text();
 
 		// Check if this is a master playlist (has #EXT-X-STREAM-INF)
 		if (!playlist.includes('#EXT-X-STREAM-INF')) {
-			// This is already a media playlist, not a master - return as is
+			// This is already a media playlist, not a master
 			logger.debug('HLS not a master playlist, returning original', { ...streamLog });
-			return proxyUrl;
+			return { rawUrl: masterUrl, isMasterUrl: true };
 		}
 
-		// Parse variants - NOTE: the playlist has already been rewritten by the proxy,
-		// so URLs in the playlist are already proxy URLs
+		// Parse variants from the raw playlist
 		const variants = parseHLSMaster(playlist, masterUrl);
 		logger.debug('HLS found quality variants', { count: variants.length, ...streamLog });
 
 		if (variants.length === 0) {
 			logger.debug('HLS no variants found, returning original', { ...streamLog });
-			return proxyUrl;
+			return { rawUrl: masterUrl, isMasterUrl: true };
 		}
 
 		// Log available qualities
@@ -310,7 +333,7 @@ export async function getBestQualityStreamUrl(
 		// Select best variant
 		const best = selectBestVariant(variants);
 		if (!best) {
-			return proxyUrl;
+			return { rawUrl: masterUrl, isMasterUrl: true };
 		}
 
 		const bestRes = best.resolution ? `${best.resolution.width}x${best.resolution.height}` : 'auto';
@@ -320,21 +343,14 @@ export async function getBestQualityStreamUrl(
 			...streamLog
 		});
 
-		// The URL from the parsed playlist is ALREADY a proxy URL (the proxy rewrote it)
-		// So we just return it directly - don't wrap it again!
-		if (best.url.includes('/api/streaming/proxy')) {
-			logger.debug('HLS URL already proxied, returning as-is', { ...streamLog });
-			return best.url;
-		}
-
-		// Only wrap if it's not already proxied (shouldn't happen normally)
-		return `${proxyBaseUrl}/api/streaming/proxy?url=${encodeURIComponent(best.url)}&referer=${encodeURIComponent(referer)}`;
+		// Return the raw best variant URL
+		return { rawUrl: best.url, isMasterUrl: false };
 	} catch (error) {
 		logger.warn('HLS error selecting best quality', {
 			error: error instanceof Error ? error.message : String(error),
 			...streamLog
 		});
-		// Fall back to original proxied master URL
-		return `${proxyBaseUrl}/api/streaming/proxy?url=${encodeURIComponent(masterUrl)}&referer=${encodeURIComponent(referer)}`;
+		// Fall back to master URL
+		return { rawUrl: masterUrl, isMasterUrl: true };
 	}
 }

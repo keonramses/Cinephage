@@ -1,42 +1,45 @@
 /**
  * Types for indexer management UI
+ *
+ * Re-exports canonical types from server for UI consumption.
+ * Also defines UI-specific types that don't belong in the server.
  */
 
-export type IndexerProtocol = 'torrent' | 'usenet' | 'streaming';
-export type IndexerAccessType = 'public' | 'semi-private' | 'private';
+// =============================================================================
+// RE-EXPORT CANONICAL TYPES FROM SERVER
+// =============================================================================
+
+// Core types
+export type {
+	IndexerProtocol,
+	IndexerAccessType,
+	TorrentProtocolSettings,
+	UsenetProtocolSettings,
+	StreamingProtocolSettings
+} from '$lib/server/indexers/types';
+
+// Definition types
+export type {
+	SettingField,
+	IndexerCapabilities as ServerIndexerCapabilities,
+	BaseIndexerDefinition
+} from '$lib/server/indexers/types';
+
+// Loader types (for UI components)
+export type { UIDefinitionSetting as DefinitionSetting } from '$lib/server/indexers/loader/types';
+
+// Config types
+export type {
+	IndexerConfig,
+	IndexerStatus as ServerIndexerStatus
+} from '$lib/server/indexers/types';
+
+// =============================================================================
+// UI-SPECIFIC TYPES
+// =============================================================================
 
 /**
- * Setting field definition from Cardigann indexer definition
- */
-export interface DefinitionSetting {
-	name: string;
-	label: string;
-	type:
-		| 'text'
-		| 'password'
-		| 'checkbox'
-		| 'select'
-		| 'number'
-		| 'info'
-		| 'info_cookie'
-		| 'info_cloudflare'
-		| 'info_useragent'
-		| 'info_category_8000'
-		| 'cardigannCaptcha';
-	required?: boolean;
-	default?: string;
-	placeholder?: string;
-	helpText?: string;
-	options?: Record<string, string>;
-	validation?: {
-		min?: number;
-		max?: number;
-		pattern?: string;
-	};
-}
-
-/**
- * Capabilities from YAML indexer definition
+ * UI-friendly capabilities (simplified from server version)
  */
 export interface IndexerCapabilities {
 	search?: {
@@ -71,9 +74,14 @@ export interface IndexerUIHints {
 	requiresAuth: boolean;
 	/** Whether to show torrent-specific settings (seed ratio, min seeders, etc.) */
 	showTorrentSettings: boolean;
+	/** Whether to show usenet-specific settings */
+	showUsenetSettings: boolean;
 	/** Whether this is a streaming indexer */
 	isStreaming: boolean;
 }
+
+import type { IndexerAccessType, IndexerProtocol } from '$lib/server/indexers/types';
+import type { UIDefinitionSetting } from '$lib/server/indexers/loader/types';
 
 /**
  * Simplified indexer definition from /api/indexers/definitions
@@ -88,7 +96,7 @@ export interface IndexerDefinition {
 	/** Known alternate/mirror URLs from definition */
 	alternateUrls: string[];
 	capabilities: IndexerCapabilities;
-	settings: DefinitionSetting[];
+	settings: UIDefinitionSetting[];
 	/** Pre-computed UI hints for dynamic form rendering */
 	uiHints?: IndexerUIHints;
 }
@@ -101,13 +109,14 @@ export function computeUIHints(
 ): IndexerUIHints {
 	const hasAuthSettings =
 		definition.settings?.some(
-			(s) => s.type === 'password' || s.type === 'text' || s.type === 'info_cookie'
+			(s) => s.type === 'password' || s.type === 'text' || s.name === 'cookie'
 		) ?? false;
 
 	return {
 		requiresAuth:
 			(definition.type === 'private' || definition.type === 'semi-private') && hasAuthSettings,
 		showTorrentSettings: definition.protocol === 'torrent',
+		showUsenetSettings: definition.protocol === 'usenet',
 		isStreaming: definition.protocol === 'streaming'
 	};
 }
@@ -118,15 +127,13 @@ export function computeUIHints(
 export interface Indexer {
 	id: string;
 	name: string;
-	implementation: string;
+	definitionId: string;
 	enabled: boolean;
-	url: string;
+	baseUrl: string;
 	/** Alternative/fallback URLs (tried in order if primary fails) */
 	alternateUrls: string[];
-	apiKey?: string | null;
 	priority: number;
 	protocol: IndexerProtocol;
-	config?: Record<string, unknown> | null;
 	settings?: Record<string, string> | null;
 
 	// Search capability toggles
@@ -134,11 +141,11 @@ export interface Indexer {
 	enableInteractiveSearch: boolean;
 
 	// Torrent seeding settings (only applicable when protocol === 'torrent')
-	minimumSeeders: number;
+	minimumSeeders?: number;
 	seedRatio?: string | null; // Decimal stored as string (e.g., "1.0")
 	seedTime?: number | null; // Minutes
 	packSeedTime?: number | null; // Minutes for season packs
-	preferMagnetUrl: boolean;
+	preferMagnetUrl?: boolean;
 }
 
 /**
@@ -162,16 +169,23 @@ export interface IndexerWithStatus extends Indexer {
 }
 
 /**
- * Form data for creating/updating indexer
+ * Form data for creating/updating indexer.
+ *
+ * Note: The `protocol` field is used client-side for UI purposes (showing protocol-specific
+ * settings). The server ignores this field and derives protocol from the YAML definition.
  */
 export interface IndexerFormData {
 	name: string;
-	implementation: string;
-	url: string;
+	definitionId: string;
+	baseUrl: string;
 	/** Alternative/fallback URLs */
 	alternateUrls: string[];
 	enabled: boolean;
 	priority: number;
+	/**
+	 * Protocol derived from definition - used client-side for UI hints.
+	 * Server ignores this and gets protocol from the YAML definition.
+	 */
 	protocol: IndexerProtocol;
 	settings: Record<string, string>;
 

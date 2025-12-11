@@ -16,11 +16,13 @@ import type {
 	IndexerConfig,
 	IndexerCapabilities,
 	SearchMode,
-	SearchParam
-} from '../core';
-import type { SearchCriteria } from '../core/searchCriteria';
-import type { ReleaseResult } from '../core/releaseResult';
-import type { IndexerProtocol, IndexerAccessType } from '../core/types';
+	SearchParam,
+	SearchCriteria,
+	ReleaseResult,
+	IndexerProtocol,
+	IndexerAccessType,
+	IndexerDownloadResult
+} from '../types';
 import type {
 	YamlDefinition,
 	YamlDefinition as CardigannDefinition
@@ -141,7 +143,7 @@ export class YamlIndexer implements IIndexer {
 		this.baseUrl = config.baseUrl || definition.links[0];
 		this.requestBuilder.setBaseUrl(this.baseUrl);
 		this.templateEngine.setSiteLink(this.baseUrl);
-		this.templateEngine.setConfig(config.settings);
+		this.templateEngine.setConfig(config.settings ?? {});
 
 		this.log = createChildLogger({ indexer: this.name, indexerId: this.id });
 
@@ -432,7 +434,7 @@ export class YamlIndexer implements IIndexer {
 		const context = {
 			indexerId: this.id,
 			baseUrl: this.requestBuilder.getBaseUrl(),
-			settings: this.config.settings
+			settings: this.config.settings ?? {}
 		};
 
 		// Try loading stored cookies first
@@ -513,7 +515,7 @@ export class YamlIndexer implements IIndexer {
 		const context = {
 			baseUrl: this.requestBuilder.getBaseUrl(),
 			cookies: this.cookies,
-			settings: this.config.settings
+			settings: this.config.settings ?? {}
 		};
 
 		const result = await this.downloadHandler.resolveDownload(downloadUrl, context);
@@ -533,7 +535,7 @@ export class YamlIndexer implements IIndexer {
 	 * @param url - The download URL (torrent file URL, not magnet)
 	 * @returns Download result with file data or magnet redirect
 	 */
-	async downloadTorrent(url: string): Promise<import('../core/interfaces').IndexerDownloadResult> {
+	async downloadTorrent(url: string): Promise<IndexerDownloadResult> {
 		const startTime = Date.now();
 
 		this.log.debug('Downloading torrent', { url: url.substring(0, 100) });
@@ -726,7 +728,7 @@ export class YamlIndexer implements IIndexer {
 		await this.authManager.clearCookies({
 			indexerId: this.id,
 			baseUrl: this.requestBuilder.getBaseUrl(),
-			settings: this.config.settings
+			settings: this.config.settings ?? {}
 		});
 	}
 

@@ -9,9 +9,9 @@ import type {
 	ReleaseResult,
 	SearchResult,
 	IndexerSearchResult,
-	RejectedIndexer
-} from '../core';
-import type { EnhancedReleaseResult } from '../core/releaseResult';
+	RejectedIndexer,
+	EnhancedReleaseResult
+} from '../types';
 import {
 	hasSearchableIds,
 	createIdOnlyCriteria,
@@ -21,7 +21,7 @@ import {
 	isMovieSearch,
 	isTvSearch,
 	indexerHasCategoriesForSearchType
-} from '../core';
+} from '../types';
 import { getPersistentStatusTracker, type PersistentStatusTracker } from '../status';
 import { getRateLimitRegistry, type RateLimitRegistry } from '../ratelimit';
 import { getHostRateLimiter, type HostRateLimiter } from '../ratelimit/HostRateLimiter';

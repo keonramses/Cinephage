@@ -14,36 +14,147 @@ export const settings = sqliteTable('settings', {
 	value: text('value').notNull()
 });
 
-export const indexers = sqliteTable('indexers', {
-	id: text('id')
-		.primaryKey()
-		.$defaultFn(() => randomUUID()),
-	name: text('name').notNull(),
-	// For YAML-based indexers, this is the definition ID (e.g., 'yts', '1337x')
-	implementation: text('implementation').notNull(),
-	enabled: integer('enabled', { mode: 'boolean' }).default(true),
-	url: text('url').notNull(),
-	// Alternative/fallback URLs as JSON array (tried in order if primary fails)
-	alternateUrls: text('alternate_urls', { mode: 'json' }).$type<string[]>(),
-	apiKey: text('api_key'),
-	priority: integer('priority').default(25),
-	protocol: text('protocol').notNull(),
-	// Legacy indexer-specific config
-	config: text('config', { mode: 'json' }),
-	// User-provided settings for YAML indexers (apiKey, custom fields, etc.)
-	settings: text('settings', { mode: 'json' }),
+// ============================================================================
+// Indexer Definitions - Cached metadata from YAML files
+// ============================================================================
 
-	// Search capability toggles
-	enableAutomaticSearch: integer('enable_automatic_search', { mode: 'boolean' }).default(true),
-	enableInteractiveSearch: integer('enable_interactive_search', { mode: 'boolean' }).default(true),
+/**
+ * Indexer Definitions - Cached metadata loaded from YAML definition files.
+ * This table stores parsed YAML definitions for quick lookup without
+ * re-reading files on every request.
+ */
+export const indexerDefinitions = sqliteTable(
+	'indexer_definitions',
+	{
+		// Definition ID (e.g., 'knaben', 'nzbgeek', 'cinephage-stream')
+		id: text('id').primaryKey(),
+		name: text('name').notNull(),
+		description: text('description'),
+		// Protocol type
+		protocol: text('protocol', { enum: ['torrent', 'usenet', 'streaming'] }).notNull(),
+		// Access type
+		type: text('type', { enum: ['public', 'semi-private', 'private'] }).notNull(),
+		language: text('language').default('en-US'),
+		// Primary and alternate URLs as JSON arrays
+		urls: text('urls', { mode: 'json' }).$type<string[]>().notNull(),
+		legacyUrls: text('legacy_urls', { mode: 'json' }).$type<string[]>(),
+		// Settings schema for UI generation (JSON array of setting field definitions)
+		settingsSchema: text('settings_schema', { mode: 'json' }).$type<
+			Array<{
+				name: string;
+				type: string;
+				label: string;
+				default?: string | boolean | number;
+				options?: Record<string, string>;
+			}>
+		>(),
+		// Capabilities JSON (search modes, categories, etc.)
+		capabilities: text('capabilities', { mode: 'json' })
+			.$type<{
+				search?: { available: boolean; supportedParams: string[] };
+				tvSearch?: { available: boolean; supportedParams: string[] };
+				movieSearch?: { available: boolean; supportedParams: string[] };
+				musicSearch?: { available: boolean; supportedParams: string[] };
+				bookSearch?: { available: boolean; supportedParams: string[] };
+				categories: Record<string, string>;
+			}>()
+			.notNull(),
+		// Source file info for change detection
+		filePath: text('file_path'),
+		fileHash: text('file_hash'),
+		// Timestamps
+		loadedAt: text('loaded_at').notNull(),
+		updatedAt: text('updated_at').notNull()
+	},
+	(table) => [
+		index('idx_indexer_definitions_protocol').on(table.protocol),
+		index('idx_indexer_definitions_type').on(table.type)
+	]
+);
 
-	// Torrent seeding settings
-	minimumSeeders: integer('minimum_seeders').default(1),
-	seedRatio: text('seed_ratio'), // Stored as text to handle decimal (e.g., "1.0")
-	seedTime: integer('seed_time'), // Minutes
-	packSeedTime: integer('pack_seed_time'), // Minutes for season packs
-	preferMagnetUrl: integer('prefer_magnet_url', { mode: 'boolean' }).default(false)
-});
+export type IndexerDefinitionRecord = typeof indexerDefinitions.$inferSelect;
+export type NewIndexerDefinitionRecord = typeof indexerDefinitions.$inferInsert;
+
+// ============================================================================
+// Indexers - User-configured indexer instances
+// ============================================================================
+
+/**
+ * Protocol-specific settings types
+ */
+export interface TorrentProtocolSettings {
+	minimumSeeders: number;
+	seedRatio: string | null;
+	seedTime: number | null;
+	packSeedTime: number | null;
+	preferMagnetUrl: boolean;
+	rejectDeadTorrents: boolean;
+}
+
+export interface UsenetProtocolSettings {
+	minimumRetention: number | null;
+	maximumRetention: number | null;
+	downloadPriority: 'normal' | 'high' | 'low';
+	preferCompleteNzb: boolean;
+	rejectPasswordProtected: boolean;
+}
+
+export interface StreamingProtocolSettings {
+	baseUrl: string | null;
+	preferredQuality: '4k' | '1080p' | '720p' | '480p' | 'auto';
+	includeInAutoSearch: boolean;
+	enabledProviders: string[] | null;
+	blockedProviders: string[] | null;
+}
+
+export type ProtocolSettings =
+	| TorrentProtocolSettings
+	| UsenetProtocolSettings
+	| StreamingProtocolSettings;
+
+/**
+ * Indexers - User-configured indexer instances.
+ * Each row represents a configured indexer that references a definition.
+ */
+export const indexers = sqliteTable(
+	'indexers',
+	{
+		id: text('id')
+			.primaryKey()
+			.$defaultFn(() => randomUUID()),
+		// User-given display name
+		name: text('name').notNull(),
+		// Reference to the YAML definition ID
+		definitionId: text('definition_id').notNull(),
+		// Enable/disable toggle
+		enabled: integer('enabled', { mode: 'boolean' }).default(true),
+		// Selected base URL (from definition's urls array)
+		baseUrl: text('base_url').notNull(),
+		// Alternate URLs for failover (JSON array)
+		alternateUrls: text('alternate_urls', { mode: 'json' }).$type<string[]>(),
+		// Priority for search ordering (lower = higher priority)
+		priority: integer('priority').default(25),
+		// Search toggles
+		enableAutomaticSearch: integer('enable_automatic_search', { mode: 'boolean' }).default(true),
+		enableInteractiveSearch: integer('enable_interactive_search', { mode: 'boolean' }).default(
+			true
+		),
+		// User-provided settings values (apiKey, cookie, custom fields, etc.)
+		settings: text('settings', { mode: 'json' }).$type<Record<string, string | boolean | number>>(),
+		// Protocol-specific settings (JSON - one of the protocol settings types)
+		protocolSettings: text('protocol_settings', { mode: 'json' }).$type<ProtocolSettings>(),
+		// Timestamps
+		createdAt: text('created_at').$defaultFn(() => new Date().toISOString()),
+		updatedAt: text('updated_at').$defaultFn(() => new Date().toISOString())
+	},
+	(table) => [
+		index('idx_indexers_definition').on(table.definitionId),
+		index('idx_indexers_enabled').on(table.enabled)
+	]
+);
+
+export type IndexerRecord = typeof indexers.$inferSelect;
+export type NewIndexerRecord = typeof indexers.$inferInsert;
 
 /**
  * Indexer Status - Persists health, failures, and backoff state across restarts.
@@ -74,6 +185,8 @@ export const indexerStatus = sqliteTable(
 		// Last activity
 		lastSuccess: text('last_success'),
 		lastFailure: text('last_failure'),
+		// Last error message for quick diagnostics
+		lastErrorMessage: text('last_error_message'),
 
 		// Performance metrics
 		avgResponseTime: integer('avg_response_time'),
@@ -90,11 +203,26 @@ export const indexerStatus = sqliteTable(
 	(table) => [index('idx_indexer_status_health').on(table.health, table.isDisabled)]
 );
 
+export type IndexerStatusRecord = typeof indexerStatus.$inferSelect;
+export type NewIndexerStatusRecord = typeof indexerStatus.$inferInsert;
+
 // Relations for indexer status
 export const indexerStatusRelations = relations(indexerStatus, ({ one }) => ({
 	indexer: one(indexers, {
 		fields: [indexerStatus.indexerId],
 		references: [indexers.id]
+	})
+}));
+
+// Relations for indexers to definitions
+export const indexersRelations = relations(indexers, ({ one }) => ({
+	definition: one(indexerDefinitions, {
+		fields: [indexers.definitionId],
+		references: [indexerDefinitions.id]
+	}),
+	status: one(indexerStatus, {
+		fields: [indexers.id],
+		references: [indexerStatus.indexerId]
 	})
 }));
 

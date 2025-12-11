@@ -16,6 +16,25 @@ import type {
 	DownloadClientImplementation
 } from '$lib/types/downloadClient';
 import { QBittorrentClient } from './qbittorrent/QBittorrentClient';
+import { SABnzbdClient, type SABnzbdConfig } from './sabnzbd';
+
+/**
+ * Protocol type for download clients.
+ */
+export type DownloadClientProtocol = 'torrent' | 'usenet';
+
+/**
+ * Map implementation to protocol.
+ */
+const IMPLEMENTATION_PROTOCOL_MAP: Record<string, DownloadClientProtocol> = {
+	qbittorrent: 'torrent',
+	transmission: 'torrent',
+	deluge: 'torrent',
+	rtorrent: 'torrent',
+	aria2: 'torrent',
+	sabnzbd: 'usenet',
+	nzbget: 'usenet'
+};
 
 /**
  * Configuration for creating/updating a download client.
@@ -221,7 +240,9 @@ export class DownloadClientManager {
 			port: clientConfig.port,
 			useSsl: clientConfig.useSsl,
 			username: clientConfig.username,
-			password: clientConfig.password
+			password: clientConfig.password,
+			implementation: clientConfig.implementation,
+			apiKey: clientConfig.implementation === 'sabnzbd' ? clientConfig.password : undefined
 		});
 	}
 
@@ -237,13 +258,16 @@ export class DownloadClientManager {
 		const config = await this.getClientWithPassword(id);
 		if (!config) return undefined;
 
-		// Create instance
+		// Create instance with implementation-specific config
 		instance = this.createClientInstance({
 			host: config.host,
 			port: config.port,
 			useSsl: config.useSsl,
 			username: config.username,
-			password: config.password
+			password: config.password,
+			implementation: config.implementation,
+			// For SABnzbd, the API key is stored in the password field
+			apiKey: config.implementation === 'sabnzbd' ? config.password : undefined
 		});
 
 		if (instance) {
@@ -273,12 +297,64 @@ export class DownloadClientManager {
 	}
 
 	/**
+	 * Get enabled clients filtered by protocol.
+	 */
+	async getEnabledClientsForProtocol(
+		protocol: DownloadClientProtocol
+	): Promise<Array<{ client: DownloadClient; instance: IDownloadClient }>> {
+		const allClients = await this.getEnabledClients();
+		return allClients.filter(
+			({ client }) => IMPLEMENTATION_PROTOCOL_MAP[client.implementation] === protocol
+		);
+	}
+
+	/**
+	 * Get the first enabled client for a protocol, ordered by priority.
+	 */
+	async getClientForProtocol(
+		protocol: DownloadClientProtocol
+	): Promise<{ client: DownloadClient; instance: IDownloadClient } | undefined> {
+		const clients = await this.getEnabledClientsForProtocol(protocol);
+		if (clients.length === 0) {
+			return undefined;
+		}
+		// Sort by priority (lower = higher priority)
+		clients.sort((a, b) => a.client.priority - b.client.priority);
+		return clients[0];
+	}
+
+	/**
+	 * Get the protocol for a client implementation.
+	 */
+	static getProtocolForImplementation(implementation: string): DownloadClientProtocol {
+		return IMPLEMENTATION_PROTOCOL_MAP[implementation] || 'torrent';
+	}
+
+	/**
 	 * Create a client instance from config.
 	 */
-	private createClientInstance(config: DownloadClientConfig): IDownloadClient | undefined {
-		// For now, we only support QBittorrent
-		// In the future, we'd check config.implementation and return the appropriate client
-		return new QBittorrentClient(config);
+	private createClientInstance(
+		config: DownloadClientConfig & { implementation?: string; apiKey?: string | null }
+	): IDownloadClient | undefined {
+		const implementation = config.implementation || 'qbittorrent';
+
+		switch (implementation) {
+			case 'qbittorrent':
+				return new QBittorrentClient(config);
+
+			case 'sabnzbd':
+				return new SABnzbdClient(config as SABnzbdConfig);
+
+			// Future implementations
+			// case 'nzbget':
+			//   return new NZBGetClient(config);
+			// case 'transmission':
+			//   return new TransmissionClient(config);
+
+			default:
+				logger.warn(`Unsupported download client implementation: ${implementation}`);
+				return undefined;
+		}
 	}
 
 	/**

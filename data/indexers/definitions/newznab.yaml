@@ -1,0 +1,151 @@
+---
+id: newznab
+name: Newznab
+description: Connect to any Newznab-compatible usenet indexer API (NZBgeek, DrunkenSlug, etc.)
+type: private
+language: en-US
+encoding: UTF-8
+protocol: usenet
+requestdelay: 0.2
+
+links:
+  - http://localhost
+
+settings:
+  - name: apikey
+    type: password
+    label: API Key
+
+caps:
+  modes:
+    search: [q]
+    movie-search: [q, imdbid, tmdbid]
+    tv-search: [q, imdbid, tvdbid, season, ep]
+  categories:
+    '2000': Movies
+    '2010': Movies/Foreign
+    '2020': Movies/Other
+    '2030': Movies/SD
+    '2040': Movies/HD
+    '2045': Movies/UHD
+    '2050': Movies/BluRay
+    '2060': Movies/3D
+    '5000': TV
+    '5010': TV/WEB-DL
+    '5020': TV/Foreign
+    '5030': TV/SD
+    '5040': TV/HD
+    '5045': TV/UHD
+    '5050': TV/Other
+    '5060': TV/Sport
+    '5070': TV/Anime
+    '5080': TV/Documentary
+  categorymappings:
+    - id: '2000'
+      cat: Movies
+    - id: '5000'
+      cat: TV
+      default: true
+
+search:
+  paths:
+    # Movie ID search
+    - path: /api
+      method: get
+      categories: [Movies]
+      inputs:
+        t: movie
+        imdbid: '{{ .Query.IMDBID }}'
+        tmdbid: '{{ .Query.TMDBID }}'
+        q: '{{ .Keywords }}'
+        apikey: '{{ .Config.apikey }}'
+        limit: '100'
+
+    # TV ID search
+    - path: /api
+      method: get
+      categories: [TV]
+      inputs:
+        t: tvsearch
+        imdbid: '{{ .Query.IMDBID }}'
+        tvdbid: '{{ .Query.TVDBID }}'
+        season: '{{ .Query.Season }}'
+        ep: '{{ .Query.Ep }}'
+        q: '{{ .Keywords }}'
+        apikey: '{{ .Config.apikey }}'
+        limit: '100'
+
+    # General search
+    - path: /api
+      method: get
+      inputs:
+        t: search
+        q: '{{ .Keywords }}'
+        apikey: '{{ .Config.apikey }}'
+        limit: '100'
+
+  response:
+    type: xml
+
+  rows:
+    selector: rss channel item
+
+  fields:
+    title:
+      selector: title
+    details:
+      selector: comments
+      optional: true
+    download:
+      selector: link
+    guid:
+      selector: guid
+      optional: true
+    date:
+      selector: pubDate
+      filters:
+        - name: dateparse
+          args: 'Mon, 02 Jan 2006 15:04:05 -0700'
+    size:
+      selector: size
+      optional: true
+    grabs:
+      selector: "newznab|attr[name='grabs']"
+      attribute: value
+      optional: true
+    category:
+      selector: category
+      optional: true
+    imdbid:
+      selector: "newznab|attr[name='imdb']"
+      attribute: value
+      optional: true
+    tmdbid:
+      selector: "newznab|attr[name='tmdbid']"
+      attribute: value
+      optional: true
+    tvdbid:
+      selector: "newznab|attr[name='tvdbid']"
+      attribute: value
+      optional: true
+    # Usenet-specific fields
+    poster:
+      selector: "newznab|attr[name='poster']"
+      attribute: value
+      optional: true
+    group:
+      selector: "newznab|attr[name='group']"
+      attribute: value
+      optional: true
+    password:
+      selector: "newznab|attr[name='password']"
+      attribute: value
+      optional: true
+    usenetdate:
+      selector: "newznab|attr[name='usenetdate']"
+      attribute: value
+      optional: true
+    files:
+      selector: "newznab|attr[name='files']"
+      attribute: value
+      optional: true

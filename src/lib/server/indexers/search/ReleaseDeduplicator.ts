@@ -1,4 +1,4 @@
-import type { ReleaseResult } from '../core';
+import type { ReleaseResult } from '../types';
 
 /**
  * Result of deduplication operation.

@@ -9,8 +9,7 @@
  * Cardigann and native indexers.
  */
 
-import type { IndexerCapabilities } from '../core/capabilities';
-import type { IndexerProtocol, IndexerAccessType } from '../core/types';
+import type { IndexerCapabilities, IndexerProtocol, IndexerAccessType } from '../types';
 
 // ============================================================================
 // Settings Field Types
@@ -263,6 +262,7 @@ export interface UIDefinitionSetting {
 	default?: string;
 	helpText?: string;
 	options?: Record<string, string>;
+	placeholder?: string;
 }
 
 /**

@@ -10,12 +10,11 @@ import type {
 	FieldDefinition,
 	SearchPathBlock
 } from '../schema/yamlDefinition';
-import type { ReleaseResult } from '../core/releaseResult';
-import type { Category, IndexerProtocol } from '../core/types';
+import type { ReleaseResult, Category, IndexerProtocol } from '../types';
+import { parseSize } from '../types';
 import { TemplateEngine } from '../engine/TemplateEngine';
 import { FilterEngine } from '../engine/FilterEngine';
 import { SelectorEngine, type JsonValue } from '../engine/SelectorEngine';
-import { parseSize } from '../core/releaseResult';
 import { logger } from '$lib/logging';
 
 export interface ParseResult {

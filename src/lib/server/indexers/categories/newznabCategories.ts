@@ -3,7 +3,7 @@
  * Standard category numbering used by most indexers.
  */
 
-import { Category } from '../core/types';
+import { Category } from '../types';
 
 /** Category metadata */
 export interface CategoryInfo {

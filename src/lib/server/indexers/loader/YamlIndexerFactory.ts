@@ -1,11 +1,15 @@
 /**
  * YAML Indexer Factory
- * Creates YamlIndexer instances from database configs and YAML definitions.
+ * Creates UnifiedIndexer instances from database configs and YAML definitions.
+ *
+ * The UnifiedIndexer correctly handles all three protocols (torrent, usenet, streaming)
+ * by reading the protocol from the YAML definition.
  */
 
-import type { IIndexer, IIndexerFactory, IndexerConfig } from '../core/interfaces';
+import type { IIndexer, IIndexerFactory, IndexerConfig } from '../types';
 import type { YamlDefinition } from '../schema/yamlDefinition';
-import { YamlIndexer } from '../runtime/YamlIndexer';
+import type { IndexerRecord } from '$lib/server/db/schema';
+import { UnifiedIndexer } from '../runtime/UnifiedIndexer';
 import { YamlDefinitionLoader, getYamlDefinitionLoader } from './YamlDefinitionLoader';
 import { createChildLogger } from '$lib/logging';
 
@@ -16,7 +20,7 @@ const log = createChildLogger({ module: 'YamlIndexerFactory' });
  */
 export class YamlIndexerFactory implements IIndexerFactory {
 	private definitionLoader: YamlDefinitionLoader;
-	private indexerCache: Map<string, YamlIndexer> = new Map();
+	private indexerCache: Map<string, UnifiedIndexer> = new Map();
 
 	constructor(definitionLoader: YamlDefinitionLoader) {
 		this.definitionLoader = definitionLoader;
@@ -31,6 +35,7 @@ export class YamlIndexerFactory implements IIndexerFactory {
 
 	/**
 	 * Create an indexer instance from config.
+	 * Uses UnifiedIndexer which correctly handles all protocols (torrent, usenet, streaming).
 	 */
 	createIndexer(config: IndexerConfig): IIndexer {
 		// Check cache first
@@ -45,9 +50,49 @@ export class YamlIndexerFactory implements IIndexerFactory {
 			throw new Error(`Definition not found: ${config.definitionId}`);
 		}
 
-		// Create indexer
-		const indexer = new YamlIndexer({
-			config,
+		// Build IndexerRecord from IndexerConfig
+		// This adapts the IndexerConfig interface to what UnifiedIndexer expects
+		// Filter out undefined values from settings (IndexerRecord doesn't allow undefined)
+		const cleanSettings = config.settings
+			? (Object.fromEntries(
+					Object.entries(config.settings).filter(([, v]) => v !== undefined)
+				) as Record<string, string | boolean | number>)
+			: null;
+
+		const record: IndexerRecord = {
+			id: config.id,
+			name: config.name,
+			definitionId: config.definitionId,
+			enabled: config.enabled,
+			baseUrl: config.baseUrl,
+			alternateUrls: config.alternateUrls ?? null,
+			priority: config.priority ?? 25,
+			enableAutomaticSearch: config.enableAutomaticSearch,
+			enableInteractiveSearch: config.enableInteractiveSearch,
+			settings: cleanSettings,
+			protocolSettings: null, // Will be set below if needed
+			createdAt: new Date().toISOString(),
+			updatedAt: new Date().toISOString()
+		};
+
+		// Build protocol settings from config (for torrent indexers)
+		let protocolSettings = undefined;
+		if (definition.protocol === 'torrent') {
+			protocolSettings = {
+				minimumSeeders: config.minimumSeeders ?? 1,
+				seedRatio: config.seedRatio ?? null,
+				seedTime: config.seedTime ?? null,
+				packSeedTime: config.packSeedTime ?? null,
+				preferMagnetUrl: config.preferMagnetUrl ?? false,
+				rejectDeadTorrents: true
+			};
+		}
+
+		// Create indexer using UnifiedIndexer
+		const indexer = new UnifiedIndexer({
+			record,
+			settings: cleanSettings ?? {},
+			protocolSettings,
 			definition,
 			rateLimit: definition.requestdelay
 				? { requests: 1, periodMs: definition.requestdelay * 1000 }
@@ -57,7 +102,11 @@ export class YamlIndexerFactory implements IIndexerFactory {
 		// Cache it
 		this.indexerCache.set(config.id, indexer);
 
-		log.debug('Created indexer', { id: config.id, definitionId: config.definitionId });
+		log.debug('Created indexer', {
+			id: config.id,
+			definitionId: config.definitionId,
+			protocol: definition.protocol
+		});
 
 		return indexer;
 	}

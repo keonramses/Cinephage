@@ -331,20 +331,9 @@ export interface EncDecError {
 	status?: number;
 }
 
-/**
- * Custom error class for EncDec API failures
- */
-export class EncDecApiError extends Error {
-	constructor(
-		public provider: string,
-		public operation: 'encrypt' | 'decrypt' | 'parse' | 'token' | 'session' | 'search',
-		public statusCode?: number,
-		message?: string
-	) {
-		super(message || `EncDec ${operation} failed for ${provider}`);
-		this.name = 'EncDecApiError';
-	}
-}
+// Re-export EncDecApiError from unified types for backward compatibility
+export { EncDecApiError } from '../types/error';
+export type { EncDecOperation } from '../types/error';
 
 // ============================================================================
 // Database Search Types (Content ID Lookup)

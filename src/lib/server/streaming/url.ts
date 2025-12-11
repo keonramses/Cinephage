@@ -6,11 +6,33 @@
  */
 
 import { getStreamingIndexerSettings } from './settings';
+import { logger } from '$lib/logging';
 
 // Cache the database baseUrl to avoid repeated DB queries on every request
 let cachedBaseUrl: string | null = null;
 let cacheExpiry = 0;
 const CACHE_TTL_MS = 30000; // 30 seconds
+
+const streamLog = { logCategory: 'streams' as const };
+
+/**
+ * Check if a URL is a localhost/loopback address that won't work for external clients.
+ */
+function isLocalhostUrl(url: string): boolean {
+	try {
+		const parsed = new URL(url);
+		const host = parsed.hostname.toLowerCase();
+		return (
+			host === 'localhost' ||
+			host === '127.0.0.1' ||
+			host === '::1' ||
+			host === '[::1]' ||
+			host.startsWith('127.')
+		);
+	} catch {
+		return false;
+	}
+}
 
 /**
  * Get the base URL for generating stream URLs (synchronous version).
@@ -52,14 +74,33 @@ export function getBaseUrl(request: Request): string {
  * 2. X-Forwarded headers (for reverse proxy setups like nginx/traefik)
  * 3. Request URL (fallback to request origin)
  *
+ * IMPORTANT: Localhost URLs are rejected since they won't work for external clients.
+ * Users must configure an external URL in the Cinephage Stream indexer settings.
+ *
  * @param request - The incoming request object
  * @returns The base URL to use for generating stream/proxy URLs
+ * @throws Error if the resolved URL is localhost (configuration required)
  */
 export async function getBaseUrlAsync(request: Request): Promise<string> {
 	// 1. Check database settings (and update cache)
 	const settings = await getStreamingIndexerSettings();
 	if (settings?.baseUrl) {
 		const baseUrl = settings.baseUrl.replace(/\/$/, '');
+
+		// Reject localhost URLs - they won't work for external clients
+		if (isLocalhostUrl(baseUrl)) {
+			logger.error(
+				'Streaming base URL is set to localhost which will not work for external clients',
+				{
+					configuredUrl: baseUrl,
+					...streamLog
+				}
+			);
+			throw new Error(
+				'Streaming base URL cannot be localhost. Please configure the external URL in Settings → Integrations → Indexers → Cinephage Stream.'
+			);
+		}
+
 		cachedBaseUrl = baseUrl;
 		cacheExpiry = Date.now() + CACHE_TTL_MS;
 		return baseUrl;
@@ -70,12 +111,30 @@ export async function getBaseUrlAsync(request: Request): Promise<string> {
 	const forwardedProto = request.headers.get('x-forwarded-proto') || 'http';
 
 	if (forwardedHost) {
-		return `${forwardedProto}://${forwardedHost}`;
+		const proxyUrl = `${forwardedProto}://${forwardedHost}`;
+		if (!isLocalhostUrl(proxyUrl)) {
+			return proxyUrl;
+		}
 	}
 
-	// 3. Fallback to request URL origin
+	// 3. Fallback to request URL origin - but reject localhost
 	const url = new URL(request.url);
-	return `${url.protocol}//${url.host}`;
+	const fallbackUrl = `${url.protocol}//${url.host}`;
+
+	if (isLocalhostUrl(fallbackUrl)) {
+		logger.error(
+			'No external URL configured for streaming and request came from localhost',
+			{
+				requestUrl: request.url,
+				...streamLog
+			}
+		);
+		throw new Error(
+			'Streaming requires an external URL. Please configure the External URL in Settings → Integrations → Indexers → Cinephage Stream.'
+		);
+	}
+
+	return fallbackUrl;
 }
 
 /**

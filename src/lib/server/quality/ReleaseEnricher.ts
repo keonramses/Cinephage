@@ -8,7 +8,7 @@
  * 4. Filter rejected releases
  */
 
-import type { ReleaseResult, EnhancedReleaseResult } from '../indexers/core/releaseResult.js';
+import type { ReleaseResult, EnhancedReleaseResult } from '../indexers/types';
 import { parseRelease } from '../indexers/parser/index.js';
 import { qualityFilter, QualityFilter, type EnhancedQualityResult } from './QualityFilter.js';
 import { tmdbMatcher, TmdbMatcher, type TmdbHint } from './TmdbMatcher.js';

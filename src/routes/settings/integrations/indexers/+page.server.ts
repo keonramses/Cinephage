@@ -19,17 +19,31 @@ export const load: PageServerLoad = async () => {
 		await initializeDefinitions();
 	}
 
+	// Helper to convert settings to string values only
+	const toStringSettings = (
+		settings: Record<string, unknown> | undefined
+	): Record<string, string> | null => {
+		if (!settings) return null;
+		const result: Record<string, string> = {};
+		for (const [key, value] of Object.entries(settings)) {
+			if (value !== undefined && value !== null) {
+				result[key] = String(value);
+			}
+		}
+		return Object.keys(result).length > 0 ? result : null;
+	};
+
 	// Map to UI types
 	const indexers: Indexer[] = indexerConfigs.map((config) => ({
 		id: config.id,
 		name: config.name,
-		implementation: config.definitionId,
+		definitionId: config.definitionId,
 		enabled: config.enabled,
-		url: config.baseUrl,
+		baseUrl: config.baseUrl,
 		alternateUrls: config.alternateUrls,
 		priority: config.priority,
 		protocol: config.protocol,
-		settings: config.settings,
+		settings: toStringSettings(config.settings),
 
 		// Search capability toggles
 		enableAutomaticSearch: config.enableAutomaticSearch,
@@ -57,8 +71,10 @@ export const load: PageServerLoad = async () => {
 
 export const actions: Actions = {
 	createIndexer: async ({ request }) => {
+		console.log('[createIndexer] Action called');
 		const data = await request.formData();
 		const jsonData = data.get('data');
+		console.log('[createIndexer] jsonData:', jsonData);
 
 		if (!jsonData || typeof jsonData !== 'string') {
 			return fail(400, { indexerError: 'Invalid request data' });
@@ -81,7 +97,7 @@ export const actions: Actions = {
 		const manager = await getIndexerManager();
 
 		// Verify definition exists
-		const definition = manager.getDefinition(result.data.implementation);
+		const definition = manager.getDefinition(result.data.definitionId);
 		if (!definition) {
 			return fail(400, { indexerError: 'Unknown indexer definition' });
 		}
@@ -89,12 +105,12 @@ export const actions: Actions = {
 		try {
 			await manager.createIndexer({
 				name: result.data.name,
-				definitionId: result.data.implementation,
-				baseUrl: result.data.url,
+				definitionId: result.data.definitionId,
+				baseUrl: result.data.baseUrl,
 				alternateUrls: result.data.alternateUrls,
 				enabled: result.data.enabled,
 				priority: result.data.priority,
-				settings: result.data.settings ?? {},
+				settings: (result.data.settings ?? {}) as Record<string, string>,
 
 				// Search capability toggles
 				enableAutomaticSearch: result.data.enableAutomaticSearch,
@@ -148,10 +164,10 @@ export const actions: Actions = {
 			await manager.updateIndexer(id, {
 				name: result.data.name,
 				enabled: result.data.enabled,
-				baseUrl: result.data.url,
+				baseUrl: result.data.baseUrl,
 				alternateUrls: result.data.alternateUrls,
 				priority: result.data.priority,
-				settings: result.data.settings ?? undefined,
+				settings: result.data.settings as Record<string, string> | undefined,
 
 				// Search capability toggles
 				enableAutomaticSearch: result.data.enableAutomaticSearch,

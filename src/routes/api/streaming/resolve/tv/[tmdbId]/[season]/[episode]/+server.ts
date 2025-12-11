@@ -7,7 +7,7 @@
  */
 
 import type { RequestHandler } from './$types';
-import { fetchPlaylist } from '$lib/server/streaming/utils';
+import { fetchAndRewritePlaylist } from '$lib/server/streaming/utils';
 import { StreamWorker, streamWorkerRegistry, workerManager } from '$lib/server/workers';
 import { getPreferredLanguagesForSeries } from '$lib/server/streaming/language-profile-helper';
 
@@ -69,14 +69,19 @@ export const GET: RequestHandler = async ({ params, request }) => {
 			await import('$lib/server/streaming');
 		const baseUrl = await getBaseUrlAsync(request);
 
-		// Check cache first
+		// Cache key stores { rawUrl, referer } as JSON for direct fetching
 		const cacheKey = `stream:tv:${tmdbId}:${seasonNum}:${episodeNum}:best`;
-		const cachedBestUrl = streamCache.get(cacheKey) as string | undefined;
+		const cachedJson = streamCache.get(cacheKey);
 
-		if (cachedBestUrl) {
-			worker?.cacheHit();
-			// Fetch and return the playlist directly (Jellyfin doesn't follow redirects)
-			return await fetchPlaylist(cachedBestUrl);
+		if (cachedJson) {
+			try {
+				const cached = JSON.parse(cachedJson) as { rawUrl: string; referer: string };
+				worker?.cacheHit();
+				// Fetch the playlist directly and rewrite URLs for proxy
+				return await fetchAndRewritePlaylist(cached.rawUrl, cached.referer, baseUrl);
+			} catch {
+				// Invalid cache entry, continue with extraction
+			}
 		}
 
 		// Try to get metadata from TMDB (optional - but needed for anime providers)
@@ -149,17 +154,17 @@ export const GET: RequestHandler = async ({ params, request }) => {
 		worker?.extractionSucceeded(result.provider || 'unknown', workingSource.quality);
 
 		// Get the best quality stream URL by parsing the HLS master playlist
-		const bestQualityUrl = await getBestQualityStreamUrl(
+		// This returns the RAW URL, not a proxy URL
+		const bestResult = await getBestQualityStreamUrl(
 			workingSource.url,
-			workingSource.referer,
-			baseUrl
+			workingSource.referer
 		);
 
-		// Cache the best quality URL
-		streamCache.set(cacheKey, bestQualityUrl);
+		// Cache the raw URL and referer for future requests (as JSON string)
+		streamCache.set(cacheKey, JSON.stringify({ rawUrl: bestResult.rawUrl, referer: workingSource.referer }));
 
-		// Fetch and return the playlist directly (Jellyfin doesn't follow redirects)
-		return await fetchPlaylist(bestQualityUrl);
+		// Fetch the playlist directly and rewrite URLs for proxy (no server-to-server loopback)
+		return await fetchAndRewritePlaylist(bestResult.rawUrl, workingSource.referer, baseUrl);
 	} catch (error) {
 		const errorMessage = error instanceof Error ? error.message : 'Unknown error';
 		worker?.fail(errorMessage);

@@ -29,6 +29,20 @@
       "when": 1765343224305,
       "tag": "0003_mean_polaris",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "6",
+      "when": 1733875200000,
+      "tag": "0004_indexer_protocol_settings",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "6",
+      "when": 1733875300000,
+      "tag": "0005_indexer_system_v2",
+      "breakpoints": true
     }
   ]
 }

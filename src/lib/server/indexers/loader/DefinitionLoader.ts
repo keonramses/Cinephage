@@ -1,10 +1,7 @@
 /**
  * Definition Loader
  *
- * Loads indexer definitions from all sources:
- * - YAML files (YAML format)
- * - Native TypeScript indexers
- *
+ * Loads indexer definitions from YAML files.
  * Provides a single interface for accessing all available indexer definitions.
  */
 
@@ -21,11 +18,6 @@ import type {
 import { toDefinitionSummary } from './types';
 import type { YamlDefinition } from '../schema/yamlDefinition';
 import { safeValidateYamlDefinition } from '../schema/yamlDefinition';
-import {
-	getAllNativeIndexerDefinitions,
-	type NativeIndexerDefinition
-} from '../definitions/registry';
-import { NewznabCategory } from '../definitions/base/Categories';
 
 const log = createChildLogger({ module: 'DefinitionLoader' });
 
@@ -52,303 +44,21 @@ export class DefinitionLoader {
 	}
 
 	/**
-	 * Load all definitions from all sources.
+	 * Load all definitions from YAML files.
 	 */
 	async loadAll(): Promise<void> {
 		this.definitions.clear();
 		this.errors = [];
 
-		// Load native TypeScript indexers first
-		this.loadNativeIndexers();
-
-		// Then load YAML definitions (won't overwrite native if same ID)
+		// Load all YAML definitions
 		await this.loadYamlDefinitions();
 
 		this.loaded = true;
 
 		log.info('Loaded all definitions', {
 			total: this.definitions.size,
-			native: this.getNativeCount(),
-			yaml: this.getYamlCount(),
 			errors: this.errors.length
 		});
-	}
-
-	/**
-	 * Load native TypeScript indexers into the unified registry.
-	 */
-	private loadNativeIndexers(): void {
-		const nativeDefs = getAllNativeIndexerDefinitions();
-
-		for (const def of nativeDefs) {
-			try {
-				const unified = this.convertNativeDefinition(def);
-				this.definitions.set(unified.id, unified);
-				log.debug('Loaded native indexer', { id: unified.id });
-			} catch (error) {
-				const msg = error instanceof Error ? error.message : String(error);
-				this.errors.push({ source: `native:${def.id}`, error: msg });
-				log.warn('Failed to load native indexer', { id: def.id, error: msg });
-			}
-		}
-	}
-
-	/**
-	 * Convert a native TypeScript indexer definition to unified format.
-	 */
-	private convertNativeDefinition(def: NativeIndexerDefinition): IndexerDefinition {
-		// Get settings based on type
-		const settings = this.getNativeSettings(def);
-
-		// Get URLs from known native indexers
-		const urls = this.getNativeUrls(def.id);
-
-		return {
-			id: def.id,
-			name: def.name,
-			description: def.description,
-			language: 'en-US', // Most are English
-			type: def.type,
-			protocol: def.protocol,
-			source: 'native',
-			urls,
-			settings,
-			categories: [], // Native indexers handle categories internally
-			supportedCategories: this.getNativeSupportedCategories(def.id),
-			capabilities: {
-				search: { available: true, supportedParams: ['q'] },
-				tvSearch: { available: true, supportedParams: ['q', 'season', 'ep', 'imdbId'] },
-				movieSearch: { available: true, supportedParams: ['q', 'imdbId'] },
-				musicSearch: { available: false, supportedParams: [] },
-				bookSearch: { available: false, supportedParams: [] },
-				categories: new Map(),
-				supportsPagination: true,
-				supportsInfoHash: false,
-				limitMax: 100,
-				limitDefault: 50
-			},
-			requestDelay: 2,
-			loadedAt: new Date()
-		};
-	}
-
-	/**
-	 * Get settings fields for a native indexer.
-	 *
-	 * Settings are sourced from the registry definition if available,
-	 * otherwise falls back to legacy tracker-specific auth configuration.
-	 */
-	private getNativeSettings(def: NativeIndexerDefinition): SettingField[] {
-		// Use settings from registry if available (preferred)
-		if (def.settings && def.settings.length > 0) {
-			return def.settings.map((s) => ({
-				name: s.name,
-				type: s.type as SettingField['type'],
-				label: s.label,
-				helpText: s.helpText,
-				required: s.required ?? false,
-				default: s.default,
-				placeholder: s.placeholder,
-				options: s.options
-			}));
-		}
-
-		// Legacy fallback: generate auth configuration from tracker ID
-		const authConfig = this.getTrackerAuthConfig(def.id);
-		const settings: SettingField[] = [...authConfig.settings];
-
-		// Add common optional settings for private trackers
-		if (def.type === 'private' || def.type === 'semi-private') {
-			// Most trackers support freeleech filter
-			if (this.trackerSupportsFreeleech(def.id)) {
-				settings.push({
-					name: 'freeleechOnly',
-					type: 'checkbox',
-					label: 'Freeleech Only',
-					helpText: 'Only return freeleech torrents',
-					default: false
-				});
-			}
-
-			// SpeedCD-specific
-			if (def.id === 'speedcd') {
-				settings.push({
-					name: 'excludeArchives',
-					type: 'checkbox',
-					label: 'Exclude Archives',
-					helpText: 'Exclude RAR/archive files from results',
-					default: false
-				});
-			}
-
-			// BeyondHD-specific filters
-			if (def.id === 'beyondhd') {
-				settings.push(
-					{
-						name: 'limitedOnly',
-						type: 'checkbox',
-						label: 'Limited Only',
-						helpText: 'Only return limited UL torrents',
-						default: false
-					},
-					{
-						name: 'refundOnly',
-						type: 'checkbox',
-						label: 'Refund Only',
-						helpText: 'Only return refund torrents',
-						default: false
-					},
-					{
-						name: 'rewindOnly',
-						type: 'checkbox',
-						label: 'Rewind Only',
-						helpText: 'Only return rewind torrents',
-						default: false
-					}
-				);
-			}
-		}
-
-		return settings;
-	}
-
-	/**
-	 * Tracker-specific authentication configuration.
-	 */
-	private getTrackerAuthConfig(trackerId: string): {
-		authMethod: string;
-		settings: SettingField[];
-	} {
-		// Trackers using API Key authentication
-		if (trackerId === 'beyondhd') {
-			return {
-				authMethod: 'apikey',
-				settings: [
-					{
-						name: 'apiKey',
-						type: 'password',
-						label: 'API Key',
-						helpText: 'Your BeyondHD API key (32 characters). Get it from your profile settings.',
-						required: true,
-						placeholder: 'xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx'
-					},
-					{
-						name: 'rssKey',
-						type: 'password',
-						label: 'RSS Key',
-						helpText: 'Your BeyondHD RSS key (32 characters). Get it from your profile settings.',
-						required: true,
-						placeholder: 'xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx'
-					}
-				]
-			};
-		}
-
-		// IPTorrents requires cookie + user-agent
-		if (trackerId === 'iptorrents') {
-			return {
-				authMethod: 'cookie',
-				settings: [
-					{
-						name: 'cookie',
-						type: 'text',
-						label: 'Cookie',
-						helpText:
-							'Your IPTorrents login cookie. Copy from browser DevTools (Application > Cookies).',
-						required: true,
-						placeholder: 'uid=xxxxx; pass=xxxxx; ...'
-					},
-					{
-						name: 'userAgent',
-						type: 'text',
-						label: 'User-Agent',
-						helpText:
-							'Your browser User-Agent string. Must match the browser you copied cookies from. Required for some features.',
-						required: false,
-						placeholder: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) ...'
-					}
-				]
-			};
-		}
-
-		// Default: cookie-based authentication
-		return {
-			authMethod: 'cookie',
-			settings: [
-				{
-					name: 'cookie',
-					type: 'text',
-					label: 'Cookie',
-					helpText:
-						'Your login cookie from the browser. Copy from browser DevTools (Application > Cookies).',
-					required: true,
-					placeholder: 'uid=xxxxx; pass=xxxxx'
-				}
-			]
-		};
-	}
-
-	/**
-	 * Check if a tracker supports freeleech filtering.
-	 */
-	private trackerSupportsFreeleech(trackerId: string): boolean {
-		const supportsFreeleech = [
-			'iptorrents',
-			'torrentday',
-			'scenetime',
-			'beyondhd',
-			'speedcd',
-			'oldtoonsworld'
-		];
-		return supportsFreeleech.includes(trackerId);
-	}
-
-	/**
-	 * Get URLs for known native indexers.
-	 */
-	private getNativeUrls(id: string): string[] {
-		const urlMap: Record<string, string[]> = {
-			anidex: ['https://anidex.info/'],
-			subsplease: ['https://subsplease.org/'],
-			torrentscsv: ['https://torrents-csv.com/'],
-			knaben: ['https://knaben.eu/'],
-			iptorrents: ['https://iptorrents.com/', 'https://iptorrents.me/'],
-			torrentday: ['https://torrentday.com/', 'https://tday.love/'],
-			scenetime: ['https://www.scenetime.com/'],
-			beyondhd: ['https://beyond-hd.me/'],
-			speedcd: ['https://speed.cd/'],
-			oldtoonsworld: ['https://oldtoons.world/']
-		};
-		return urlMap[id] ?? [];
-	}
-
-	/**
-	 * Get supported Newznab categories for native indexers.
-	 */
-	private getNativeSupportedCategories(id: string): number[] {
-		// Most trackers support these basic categories
-		const movieTv = [
-			NewznabCategory.Movies,
-			NewznabCategory.MoviesSD,
-			NewznabCategory.MoviesHD,
-			NewznabCategory.MoviesUHD,
-			NewznabCategory.TV,
-			NewznabCategory.TVSD,
-			NewznabCategory.TVHD,
-			NewznabCategory.TVUHD
-		];
-
-		const anime = [NewznabCategory.TVAnime];
-
-		// Customize per indexer
-		const categoryMap: Record<string, number[]> = {
-			anidex: anime,
-			subsplease: anime,
-			oldtoonsworld: [...anime, ...movieTv],
-			default: movieTv
-		};
-
-		return categoryMap[id] ?? categoryMap['default'];
 	}
 
 	/**
@@ -399,9 +109,9 @@ export class DefinitionLoader {
 
 			const yamlDef = validationResult.data;
 
-			// Don't overwrite native definitions
+			// Skip duplicates (first definition loaded wins)
 			if (this.definitions.has(yamlDef.id)) {
-				log.debug('Skipping YAML definition - native version exists', { id: yamlDef.id });
+				log.debug('Skipping duplicate YAML definition', { id: yamlDef.id });
 				return;
 			}
 
@@ -476,10 +186,10 @@ export class DefinitionLoader {
 		return {
 			id: def.id,
 			name: def.name,
-			description: def.description ?? `${def.name} torrent indexer`,
+			description: def.description ?? `${def.name} indexer`,
 			language: def.language ?? 'en-US',
 			type: this.mapAccessType(def.type),
-			protocol: 'torrent',
+			protocol: def.protocol ?? 'torrent',
 			source: 'yaml',
 			urls: def.links ?? [],
 			legacyUrls: def.legacylinks,

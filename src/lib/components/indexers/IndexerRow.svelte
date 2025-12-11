@@ -52,7 +52,7 @@
 
 	<!-- Definition -->
 	<td class="text-base-content/70">
-		{indexer.definitionName ?? indexer.implementation}
+		{indexer.definitionName ?? indexer.definitionId}
 	</td>
 
 	<!-- Protocol -->
@@ -95,9 +95,9 @@
 
 	<!-- URL -->
 	<td class="max-w-[200px]">
-		<div class="tooltip" data-tip={indexer.url}>
+		<div class="tooltip" data-tip={indexer.baseUrl}>
 			<span class="block truncate text-sm text-base-content/70">
-				{truncateUrl(indexer.url)}
+				{truncateUrl(indexer.baseUrl)}
 			</span>
 		</div>
 	</td>

@@ -12,6 +12,7 @@
 
 	// Available download client definitions
 	const clientDefinitions: DownloadClientDefinition[] = [
+		// Torrent clients
 		{
 			id: 'qbittorrent',
 			name: 'qBittorrent',
@@ -60,6 +61,27 @@
 			protocol: 'torrent',
 			supportsCategories: false,
 			supportsPriority: false,
+			supportsSeedingLimits: false
+		},
+		// Usenet clients
+		{
+			id: 'sabnzbd',
+			name: 'SABnzbd',
+			description: 'Popular open-source Usenet downloader with web interface',
+			defaultPort: 8080,
+			protocol: 'usenet',
+			supportsCategories: true,
+			supportsPriority: true,
+			supportsSeedingLimits: false
+		},
+		{
+			id: 'nzbget',
+			name: 'NZBGet',
+			description: 'Lightweight, high-performance Usenet downloader',
+			defaultPort: 6789,
+			protocol: 'usenet',
+			supportsCategories: true,
+			supportsPriority: true,
 			supportsSeedingLimits: false
 		}
 	];
@@ -125,6 +147,10 @@
 	const hasPassword = $derived(client?.hasPassword ?? false);
 	const selectedDefinition = $derived(
 		implementation ? clientDefinitions.find((d) => d.id === implementation) : null
+	);
+	// Check if selected client uses API key auth (SABnzbd)
+	const usesApiKey = $derived(
+		selectedDefinition?.protocol === 'usenet' && selectedDefinition?.id === 'sabnzbd'
 	);
 
 	// Reset form when modal opens or client changes
@@ -241,7 +267,16 @@
 								<div class="card-body p-4">
 									<div class="flex items-start justify-between gap-2">
 										<div class="flex-1">
-											<h3 class="font-semibold">{def.name}</h3>
+											<div class="flex items-center gap-2">
+												<h3 class="font-semibold">{def.name}</h3>
+												<span
+													class="badge badge-sm {def.protocol === 'usenet'
+														? 'badge-secondary'
+														: 'badge-primary'}"
+												>
+													{def.protocol}
+												</span>
+											</div>
 											<p class="mt-1 text-sm text-base-content/60">{def.description}</p>
 										</div>
 										<div class="badge badge-outline badge-sm">:{def.defaultPort}</div>
@@ -331,24 +366,12 @@
 								</div>
 							</div>
 
-							<div class="grid grid-cols-2 gap-3">
-								<div class="form-control">
-									<label class="label py-1" for="username">
-										<span class="label-text">Username</span>
-									</label>
-									<input
-										id="username"
-										type="text"
-										class="input-bordered input input-sm"
-										bind:value={username}
-										placeholder="admin"
-									/>
-								</div>
-
+							{#if usesApiKey}
+								<!-- API Key auth for SABnzbd -->
 								<div class="form-control">
 									<label class="label py-1" for="password">
 										<span class="label-text">
-											Password
+											API Key
 											{#if mode === 'edit' && hasPassword}
 												<span class="text-xs opacity-50">(blank to keep)</span>
 											{/if}
@@ -359,10 +382,51 @@
 										type="password"
 										class="input-bordered input input-sm"
 										bind:value={password}
-										placeholder={mode === 'edit' && hasPassword ? '********' : ''}
+										placeholder={mode === 'edit' && hasPassword
+											? '********'
+											: 'Find in SABnzbd Config > General'}
 									/>
+									<div class="label py-1">
+										<span class="label-text-alt text-xs">
+											Found in SABnzbd Config &gt; General &gt; API Key
+										</span>
+									</div>
 								</div>
-							</div>
+							{:else}
+								<!-- Username/password auth for torrent clients and NZBGet -->
+								<div class="grid grid-cols-2 gap-3">
+									<div class="form-control">
+										<label class="label py-1" for="username">
+											<span class="label-text">Username</span>
+										</label>
+										<input
+											id="username"
+											type="text"
+											class="input-bordered input input-sm"
+											bind:value={username}
+											placeholder="admin"
+										/>
+									</div>
+
+									<div class="form-control">
+										<label class="label py-1" for="password">
+											<span class="label-text">
+												Password
+												{#if mode === 'edit' && hasPassword}
+													<span class="text-xs opacity-50">(blank to keep)</span>
+												{/if}
+											</span>
+										</label>
+										<input
+											id="password"
+											type="password"
+											class="input-bordered input input-sm"
+											bind:value={password}
+											placeholder={mode === 'edit' && hasPassword ? '********' : ''}
+										/>
+									</div>
+								</div>
+							{/if}
 
 							<div class="flex gap-4">
 								<label class="label cursor-pointer gap-2">

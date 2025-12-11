@@ -1,4 +1,4 @@
-import type { ReleaseResult } from '../core';
+import type { ReleaseResult } from '../types';
 
 /**
  * Weights for different ranking factors.

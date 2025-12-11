@@ -8,7 +8,7 @@
 import { db } from '$lib/server/db';
 import { indexers } from '$lib/server/db/schema';
 import { eq } from 'drizzle-orm';
-import { CINEPHAGE_STREAM_DEFINITION_ID } from '../indexers/definitions/registry';
+import { CINEPHAGE_STREAM_DEFINITION_ID } from '../indexers/types';
 
 // ============================================================================
 // Provider Types
@@ -79,19 +79,33 @@ export interface StreamingIndexerSettings {
 /**
  * Get the streaming indexer's settings from the database.
  * Returns undefined if indexer not found or has no settings.
+ *
+ * The baseUrl is read from the indexer's base_url column (not the JSON settings)
+ * since this is the user-configurable external URL for streaming access.
  */
 export async function getStreamingIndexerSettings(): Promise<StreamingIndexerSettings | undefined> {
 	const rows = await db
-		.select({ settings: indexers.settings })
+		.select({
+			settings: indexers.settings,
+			baseUrl: indexers.baseUrl
+		})
 		.from(indexers)
-		.where(eq(indexers.implementation, CINEPHAGE_STREAM_DEFINITION_ID))
+		.where(eq(indexers.definitionId, CINEPHAGE_STREAM_DEFINITION_ID))
 		.limit(1);
 
 	if (rows.length === 0) {
 		return undefined;
 	}
 
-	return (rows[0].settings as StreamingIndexerSettings) ?? {};
+	const settings = (rows[0].settings as StreamingIndexerSettings) ?? {};
+
+	// Use the indexer's base_url column as the authoritative source for baseUrl
+	// This is the external URL configured through the indexer settings UI
+	if (rows[0].baseUrl) {
+		settings.baseUrl = rows[0].baseUrl;
+	}
+
+	return settings;
 }
 
 /**

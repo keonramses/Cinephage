@@ -80,6 +80,16 @@ export class RateLimitError extends AppError {
 }
 
 /**
+ * Invalid NZB error for malformed or empty NZB files.
+ */
+export class InvalidNzbError extends AppError {
+	constructor(message: string, context?: Record<string, unknown>) {
+		super(message, 'INVALID_NZB', 400, context);
+		this.name = 'InvalidNzbError';
+	}
+}
+
+/**
  * Type guard to check if an error is an AppError.
  */
 export function isAppError(error: unknown): error is AppError {

@@ -159,6 +159,14 @@ class DownloadResolutionService {
 				return this.fetchDirectly(downloadUrl, title);
 			}
 
+			// Check if indexer supports downloadTorrent method
+			if (!indexer.downloadTorrent) {
+				logger.warn('Indexer does not support downloadTorrent, falling back to direct download', {
+					indexerId
+				});
+				return this.fetchDirectly(downloadUrl, title);
+			}
+
 			// Use the indexer's downloadTorrent method
 			const result = await indexer.downloadTorrent(downloadUrl);
 

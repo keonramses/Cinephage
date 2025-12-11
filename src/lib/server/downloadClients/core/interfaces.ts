@@ -14,6 +14,10 @@ export interface DownloadClientConfig {
 	useSsl: boolean;
 	username?: string | null;
 	password?: string | null;
+	/** Client implementation type (e.g., 'qbittorrent', 'sabnzbd') */
+	implementation?: string;
+	/** API key for clients that use key-based auth (e.g., SABnzbd) */
+	apiKey?: string | null;
 }
 
 /**
@@ -22,6 +26,8 @@ export interface DownloadClientConfig {
 export interface AddDownloadOptions {
 	magnetUri?: string;
 	torrentFile?: Buffer;
+	/** NZB file content for usenet downloads */
+	nzbFile?: Buffer;
 	downloadUrl?: string;
 	infoHash?: string;
 	category: string;
@@ -30,6 +36,8 @@ export interface AddDownloadOptions {
 	priority?: 'normal' | 'high' | 'force';
 	seedRatioLimit?: number;
 	seedTimeLimit?: number;
+	/** Title for the download (used by SABnzbd for naming) */
+	title?: string;
 }
 
 /**
