@@ -8,15 +8,31 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Added
 
-- Features currently in development
+- **SABnzbd download client** - Full usenet downloader support with queue/history monitoring
+- **Newznab protocol** - Generic usenet indexer integration with dynamic capability discovery
+- **NZB validation service** - XML structure validation and metadata extraction
+- **Unified indexer architecture** - YAML-only design with protocol handlers (torrent/usenet/streaming)
+- **Streaming infrastructure** - Circuit breaker, health monitoring, multi-level caching
+- **Stream validation** - HLS playlist and segment verification
+- **Provider registry** - Capability-based provider selection with health scoring
+- **Auth system** - Pluggable providers (API key, cookie, form, passkey, basic)
+- **Subtitle search worker** - Background subtitle discovery for library items
+- **Library subtitle preferences** - Per-library language settings
 
 ### Changed
 
-- Improvements to existing functionality
+- Migrated from native TypeScript indexers to YAML-only definitions
+- Rebuilt indexer database schema with definitions table and enhanced status tracking
+- Enhanced health tracking with consecutive failure counting and exponential backoff
+- Added protocol-specific settings columns for torrent/usenet/streaming
+- Exclude specials (season 0) from series episode counts
+- Added database indexes and TMDB response caching for performance
+- Language-aware streaming with parallel extraction optimization
 
-### Fixed
+### Removed
 
-- Bug fixes in progress
+- Native TypeScript indexer implementations (replaced by YAML definitions)
+- Old indexer registry and base classes
 
 ---
 
@@ -38,8 +54,8 @@ Initial public preview release.
 #### Indexer System
 
 - Native Cardigann-compatible YAML indexer engine
-- Built-in indexers: YTS, EZTV, 1337x, TorrentGalaxy, Nyaa, SubsPlease, Anidex, Solidtorrents, LimeTorrents, MagnetDL, BitSearch, BTDig, TheRARBG
-- Torznab protocol support for Prowlarr/Jackett integration
+- Built-in indexers: YTS, EZTV
+- Torznab/Newznab protocol support for external integrations
 - Per-host rate limiting
 - Automatic health tracking with exponential backoff
 - Cloudflare detection

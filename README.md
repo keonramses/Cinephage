@@ -28,7 +28,7 @@
 Cinephage consolidates four separate applications into one streamlined experience. Instead of juggling Radarr, Sonarr, Prowlarr, and Bazarr with their own databases and configurations, you get everything in a single interface backed by a single database.
 
 - **Modern Stack** — SvelteKit 5 with TailwindCSS 4 delivers a fast, reactive interface that's a pleasure to use
-- **Built-in Indexers** — 20+ indexer definitions run natively with no external dependencies like Jackett or Prowlarr
+- **Built-in Indexers** — YAML-based indexer engine with Torznab/Newznab support for external integrations
 - **Smart Quality Scoring** — 100+ format attributes ensure you always get the best release for your preferences
 - **Simple Setup** — Works out of the box with SQLite. No complex infrastructure required to get started
 
@@ -39,8 +39,8 @@ Cinephage consolidates four separate applications into one streamlined experienc
 | Content Discovery  | Stable           | TMDB integration, trending, search                   |
 | Library Management | Stable           | File watching, scanning, TMDB matching               |
 | Quality Scoring    | In Progress      | 4 built-in profiles work; custom profiles incomplete |
-| Download Client    | qBittorrent Only | Other clients planned                                |
-| Indexers           | Stable           | ~20 indexers + Torznab support                       |
+| Download Client    | Stable           | qBittorrent + SABnzbd                                |
+| Indexers           | In Progress      | 2 public indexers + Torznab/Newznab templates        |
 | Subtitles          | Stable           | 8 providers, 80+ languages                           |
 | Monitoring         | Experimental     | 5 tasks coded, may have bugs                         |
 | Live TV/IPTV       | Not Started      | Planned for future                                   |
@@ -58,7 +58,7 @@ Cinephage consolidates four separate applications into one streamlined experienc
 Browse TMDB for movies and TV shows, view trending content, full metadata, trailers, and watch providers.
 
 **Multi-Indexer Search**<br>
-20+ built-in indexers (public + private), Torznab support for Prowlarr/Jackett integration, parallel search with automatic deduplication.
+YAML-based indexers (EZTV, YTS), Torznab/Newznab templates for external integrations, parallel search with automatic deduplication.
 
 **Quality Scoring**<br>
 4 built-in profiles (Best, Efficient, Micro, Streaming) that score resolution, audio codecs, HDR formats, and release groups. See [Quality Profiles](docs/QUALITY-PROFILES.md) for details.
