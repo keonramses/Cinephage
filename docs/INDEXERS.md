@@ -8,15 +8,15 @@ Cinephage uses a YAML-based indexer engine with Cardigann-compatible definitions
 
 ## Status Legend
 
-| Status             | Meaning                                                |
-| ------------------ | ------------------------------------------------------ |
-| Supported          | Built-in definition, tested and working                |
-| In Progress        | Converting to new YAML format                          |
-| Planned            | On the roadmap for future support                      |
-| Torznab/Newznab    | Use via Prowlarr/Jackett integration                   |
-| Cloudflare Blocked | Requires FlareSolverr or similar                       |
-| Unstable           | Site has reliability issues or frequent downtime       |
-| Offline            | Site is permanently offline                            |
+| Status             | Meaning                                          |
+| ------------------ | ------------------------------------------------ |
+| Supported          | Built-in definition, tested and working          |
+| In Progress        | Converting to new YAML format                    |
+| Planned            | On the roadmap for future support                |
+| Torznab/Newznab    | Use via Prowlarr/Jackett integration             |
+| Cloudflare Blocked | Requires FlareSolverr or similar                 |
+| Unstable           | Site has reliability issues or frequent downtime |
+| Offline            | Site is permanently offline                      |
 
 ---
 
@@ -24,49 +24,49 @@ Cinephage uses a YAML-based indexer engine with Cardigann-compatible definitions
 
 ### General / Multi-Category
 
-| Indexer          | Content                     | Status             | Notes                                          |
-| ---------------- | --------------------------- | ------------------ | ---------------------------------------------- |
-| 1337x            | Movies, TV, Games, Software | Planned            | Cloudflare protected, use FlareSolverr         |
-| The Pirate Bay   | All content types           | Planned            | Historic, intermittent blocks                  |
-| TorrentGalaxy    | Movies, TV, Games           | In Progress        | Converting to YAML                             |
-| LimeTorrents     | Movies, TV, General         | In Progress        | Converting to YAML                             |
-| MagnetDL         | Software, General           | In Progress        | Converting to YAML                             |
-| RARBG            | General                     | Offline            | Shut down May 2023                             |
-| TheRARBG         | General                     | In Progress        | Converting to YAML                             |
-| Kickass Torrents | General                     | Offline            | Original shut down 2016                        |
-| Torrentz2        | Meta-search                 | Offline            | Shut down 2022                                 |
-| isoHunt          | General                     | Offline            | Shut down 2013                                 |
+| Indexer          | Content                     | Status      | Notes                                  |
+| ---------------- | --------------------------- | ----------- | -------------------------------------- |
+| 1337x            | Movies, TV, Games, Software | Planned     | Cloudflare protected, use FlareSolverr |
+| The Pirate Bay   | All content types           | Planned     | Historic, intermittent blocks          |
+| TorrentGalaxy    | Movies, TV, Games           | In Progress | Converting to YAML                     |
+| LimeTorrents     | Movies, TV, General         | In Progress | Converting to YAML                     |
+| MagnetDL         | Software, General           | In Progress | Converting to YAML                     |
+| RARBG            | General                     | Offline     | Shut down May 2023                     |
+| TheRARBG         | General                     | In Progress | Converting to YAML                     |
+| Kickass Torrents | General                     | Offline     | Original shut down 2016                |
+| Torrentz2        | Meta-search                 | Offline     | Shut down 2022                         |
+| isoHunt          | General                     | Offline     | Shut down 2013                         |
 
 ### Movies
 
-| Indexer      | Content                   | Status       | Notes                            |
-| ------------ | ------------------------- | ------------ | -------------------------------- |
+| Indexer      | Content                   | Status        | Notes                            |
+| ------------ | ------------------------- | ------------- | -------------------------------- |
 | YTS / YIFY   | Movies (720p/1080p/2160p) | **Supported** | Compressed encodes, huge library |
-| YifyTorrents | Movies                    | Planned      | YTS alternative                  |
-| PublicHD     | HD Movies                 | Planned      | Quality-focused                  |
+| YifyTorrents | Movies                    | Planned       | YTS alternative                  |
+| PublicHD     | HD Movies                 | Planned       | Quality-focused                  |
 
 ### TV Shows
 
-| Indexer    | Content  | Status       | Notes                           |
-| ---------- | -------- | ------------ | ------------------------------- |
+| Indexer    | Content  | Status        | Notes                           |
+| ---------- | -------- | ------------- | ------------------------------- |
 | EZTV       | TV Shows | **Supported** | Large TV library, fast releases |
-| EZTVx      | TV Shows | Planned      | EZTV mirror                     |
-| TVTorrents | TV Shows | Planned      | TV-focused                      |
-| ShowRSS    | TV Shows | Planned      | RSS-based TV tracking           |
+| EZTVx      | TV Shows | Planned       | EZTV mirror                     |
+| TVTorrents | TV Shows | Planned       | TV-focused                      |
+| ShowRSS    | TV Shows | Planned       | RSS-based TV tracking           |
 
 ### Anime
 
-| Indexer        | Content               | Status         | Notes                   |
-| -------------- | --------------------- | -------------- | ----------------------- |
-| Nyaa.si        | Anime, Manga, LNs     | In Progress    | Converting to YAML      |
-| SubsPlease     | Anime simulcasts      | In Progress    | Converting to YAML      |
-| Anidex         | Multi-language anime  | In Progress    | Converting to YAML      |
-| Tokyo Toshokan | Anime, Japanese media | Planned        | Japanese content        |
-| AnimeTosho     | Anime                 | Planned        | NZB + torrents          |
-| AniRena        | Anime                 | Planned        | Anime community         |
-| Shana Project  | Anime                 | Planned        | Anime tracker           |
-| Minglong       | Anime                 | Planned        | Chinese anime focus     |
-| U2             | Anime, Asian content  | Torznab/Newznab | Private, high quality  |
+| Indexer        | Content               | Status          | Notes                 |
+| -------------- | --------------------- | --------------- | --------------------- |
+| Nyaa.si        | Anime, Manga, LNs     | In Progress     | Converting to YAML    |
+| SubsPlease     | Anime simulcasts      | In Progress     | Converting to YAML    |
+| Anidex         | Multi-language anime  | In Progress     | Converting to YAML    |
+| Tokyo Toshokan | Anime, Japanese media | Planned         | Japanese content      |
+| AnimeTosho     | Anime                 | Planned         | NZB + torrents        |
+| AniRena        | Anime                 | Planned         | Anime community       |
+| Shana Project  | Anime                 | Planned         | Anime tracker         |
+| Minglong       | Anime                 | Planned         | Chinese anime focus   |
+| U2             | Anime, Asian content  | Torznab/Newznab | Private, high quality |
 
 ### XXX / Adult
 
@@ -106,19 +106,19 @@ Cinephage uses a YAML-based indexer engine with Cardigann-compatible definitions
 
 DHT search engines and multi-tracker aggregators.
 
-| Indexer          | Type           | Status      | Notes                        |
-| ---------------- | -------------- | ----------- | ---------------------------- |
-| BTDig            | DHT search     | In Progress | Converting to YAML           |
-| BitSearch        | Aggregator     | In Progress | Converting to YAML           |
-| Solidtorrents    | DHT aggregator | In Progress | Converting to YAML           |
-| Knaben           | Aggregator     | **Supported** | Multi-tracker aggregator    |
-| TorrentsCSV      | DHT database   | In Progress | Converting to YAML           |
-| Torrent Paradise | DHT search     | Planned     | Decentralized                |
-| BT4G             | Meta-search    | Planned     | 91M+ results                 |
-| iDope            | Aggregator     | Planned     | Clean, ad-free               |
-| Zooqle           | Aggregator     | Unstable    | Intermittent availability    |
-| TorrentDownloads | Aggregator     | Planned     | Long-running                 |
-| Snowfl           | Meta-search    | Planned     | Real-time search             |
+| Indexer          | Type           | Status        | Notes                     |
+| ---------------- | -------------- | ------------- | ------------------------- |
+| BTDig            | DHT search     | In Progress   | Converting to YAML        |
+| BitSearch        | Aggregator     | In Progress   | Converting to YAML        |
+| Solidtorrents    | DHT aggregator | In Progress   | Converting to YAML        |
+| Knaben           | Aggregator     | **Supported** | Multi-tracker aggregator  |
+| TorrentsCSV      | DHT database   | In Progress   | Converting to YAML        |
+| Torrent Paradise | DHT search     | Planned       | Decentralized             |
+| BT4G             | Meta-search    | Planned       | 91M+ results              |
+| iDope            | Aggregator     | Planned       | Clean, ad-free            |
+| Zooqle           | Aggregator     | Unstable      | Intermittent availability |
+| TorrentDownloads | Aggregator     | Planned       | Long-running              |
+| Snowfl           | Meta-search    | Planned       | Real-time search          |
 
 ---
 
@@ -128,17 +128,17 @@ Private trackers require invitation or application. Use Torznab/Newznab integrat
 
 ### General
 
-| Tracker      | Content        | Status          | Notes                           |
-| ------------ | -------------- | --------------- | ------------------------------- |
-| IPTorrents   | General        | In Progress     | Converting to YAML              |
-| TorrentLeech | General, 0DAY  | Planned         | Fast pre-times                  |
-| TorrentDay   | General        | In Progress     | Converting to YAML              |
-| FileList     | General        | Planned         | Romanian, excellent             |
-| AlphaRatio   | General        | Planned         | Scene releases                  |
-| DigitalCore  | General        | Planned         |                                 |
-| Aither       | General        | In Progress     | Unit3D-based                    |
-| SpeedCD      | General        | In Progress     | Converting to YAML              |
-| SceneTime    | Scene releases | In Progress     | Converting to YAML              |
+| Tracker      | Content        | Status      | Notes               |
+| ------------ | -------------- | ----------- | ------------------- |
+| IPTorrents   | General        | In Progress | Converting to YAML  |
+| TorrentLeech | General, 0DAY  | Planned     | Fast pre-times      |
+| TorrentDay   | General        | In Progress | Converting to YAML  |
+| FileList     | General        | Planned     | Romanian, excellent |
+| AlphaRatio   | General        | Planned     | Scene releases      |
+| DigitalCore  | General        | Planned     |                     |
+| Aither       | General        | In Progress | Unit3D-based        |
+| SpeedCD      | General        | In Progress | Converting to YAML  |
+| SceneTime    | Scene releases | In Progress | Converting to YAML  |
 
 ### Movies
 
@@ -191,17 +191,17 @@ Private trackers require invitation or application. Use Torznab/Newznab integrat
 
 ### Specialized
 
-| Tracker       | Content            | Status      | Notes             |
-| ------------- | ------------------ | ----------- | ----------------- |
+| Tracker       | Content            | Status      | Notes              |
+| ------------- | ------------------ | ----------- | ------------------ |
 | OldToonsWorld | Classic cartoons   | In Progress | Converting to YAML |
-| HD-Space      | HD content         | Planned     |                   |
-| HDTorrents    | HD content         | Planned     |                   |
-| Anthelion     | eBooks, audiobooks | Planned     |                   |
-| BitHDTV       | HD content         | Planned     |                   |
-| TorrentSeeds  | General            | Planned     |                   |
-| DanishBytes   | Danish content     | Planned     | Regional          |
-| NorBits       | Norwegian content  | Planned     | Regional          |
-| HDBits.ro     | Romanian HD        | Planned     | Regional          |
+| HD-Space      | HD content         | Planned     |                    |
+| HDTorrents    | HD content         | Planned     |                    |
+| Anthelion     | eBooks, audiobooks | Planned     |                    |
+| BitHDTV       | HD content         | Planned     |                    |
+| TorrentSeeds  | General            | Planned     |                    |
+| DanishBytes   | Danish content     | Planned     | Regional           |
+| NorBits       | Norwegian content  | Planned     | Regional           |
+| HDBits.ro     | Romanian HD        | Planned     | Regional           |
 
 ---
 
@@ -209,15 +209,15 @@ Private trackers require invitation or application. Use Torznab/Newznab integrat
 
 Cinephage now supports Newznab-compatible usenet indexers via the built-in Newznab template.
 
-| Indexer     | Type      | Status       | Notes                               |
-| ----------- | --------- | ------------ | ----------------------------------- |
-| NZBGeek     | Paid      | **Supported** | Via Newznab template               |
-| DrunkenSlug | Paid      | **Supported** | Via Newznab template               |
-| NZB Finder  | Paid      | **Supported** | Via Newznab template               |
-| DOGnzb      | Paid      | **Supported** | Via Newznab template               |
-| NZBPlanet   | Paid      | **Supported** | Via Newznab template               |
-| Binsearch   | Free      | **Supported** | Via Newznab template               |
-| NZBKing     | Free/Paid | **Supported** | Via Newznab template               |
+| Indexer     | Type      | Status        | Notes                |
+| ----------- | --------- | ------------- | -------------------- |
+| NZBGeek     | Paid      | **Supported** | Via Newznab template |
+| DrunkenSlug | Paid      | **Supported** | Via Newznab template |
+| NZB Finder  | Paid      | **Supported** | Via Newznab template |
+| DOGnzb      | Paid      | **Supported** | Via Newznab template |
+| NZBPlanet   | Paid      | **Supported** | Via Newznab template |
+| Binsearch   | Free      | **Supported** | Via Newznab template |
+| NZBKing     | Free/Paid | **Supported** | Via Newznab template |
 
 > **Note**: Any Newznab-compatible indexer works with Cinephage. Add it via Settings > Indexers > Add Indexer > Newznab.
 
@@ -322,18 +322,18 @@ search:
 
 ### Definition Structure
 
-| Section       | Purpose                               |
-| ------------- | ------------------------------------- |
-| `id`          | Unique identifier                     |
-| `name`        | Display name                          |
-| `description` | Brief description                     |
-| `language`    | Primary language code                 |
+| Section       | Purpose                                |
+| ------------- | -------------------------------------- |
+| `id`          | Unique identifier                      |
+| `name`        | Display name                           |
+| `description` | Brief description                      |
+| `language`    | Primary language code                  |
 | `type`        | `public`, `semi-private`, or `private` |
-| `protocol`    | `torrent`, `usenet`, or `streaming`   |
-| `caps`        | Supported categories and search modes |
-| `links`       | Site URLs (primary + fallbacks)       |
-| `search`      | Search request configuration          |
-| `login`       | Authentication (private trackers)     |
+| `protocol`    | `torrent`, `usenet`, or `streaming`    |
+| `caps`        | Supported categories and search modes  |
+| `links`       | Site URLs (primary + fallbacks)        |
+| `search`      | Search request configuration           |
+| `login`       | Authentication (private trackers)      |
 
 See existing definitions in `data/indexers/definitions/` for complete examples.
 
@@ -387,6 +387,7 @@ When searching across multiple indexers, Cinephage automatically deduplicates re
 When the same torrent appears on multiple indexers (common with aggregators like Knaben that index other trackers), Cinephage tracks all sources via the `sourceIndexers` field.
 
 **Example**: A YTS torrent that also appears on Knaben will show:
+
 - `indexerName: "Knaben"` (the version with more seeders was kept)
 - `sourceIndexers: ["YTS", "Knaben"]` (both indexers had it)
 

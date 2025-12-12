@@ -142,13 +142,13 @@ export const GET: RequestHandler = async ({ params, request }) => {
 
 		// Get the best quality stream URL by parsing the HLS master playlist
 		// This returns the RAW URL, not a proxy URL
-		const bestResult = await getBestQualityStreamUrl(
-			workingSource.url,
-			workingSource.referer
-		);
+		const bestResult = await getBestQualityStreamUrl(workingSource.url, workingSource.referer);
 
 		// Cache the raw URL and referer for future requests (as JSON string)
-		streamCache.set(cacheKey, JSON.stringify({ rawUrl: bestResult.rawUrl, referer: workingSource.referer }));
+		streamCache.set(
+			cacheKey,
+			JSON.stringify({ rawUrl: bestResult.rawUrl, referer: workingSource.referer })
+		);
 
 		// Fetch the playlist directly and rewrite URLs for proxy (no server-to-server loopback)
 		return await fetchAndRewritePlaylist(bestResult.rawUrl, workingSource.referer, baseUrl);

@@ -475,6 +475,8 @@ export function getStreamCache(): MultiLevelStreamCache {
 /**
  * Create a new multi-level cache with custom config
  */
-export function createStreamCache(config?: ConstructorParameters<typeof MultiLevelStreamCache>[0]): MultiLevelStreamCache {
+export function createStreamCache(
+	config?: ConstructorParameters<typeof MultiLevelStreamCache>[0]
+): MultiLevelStreamCache {
 	return new MultiLevelStreamCache(config);
 }

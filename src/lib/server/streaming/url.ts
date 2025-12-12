@@ -122,13 +122,10 @@ export async function getBaseUrlAsync(request: Request): Promise<string> {
 	const fallbackUrl = `${url.protocol}//${url.host}`;
 
 	if (isLocalhostUrl(fallbackUrl)) {
-		logger.error(
-			'No external URL configured for streaming and request came from localhost',
-			{
-				requestUrl: request.url,
-				...streamLog
-			}
-		);
+		logger.error('No external URL configured for streaming and request came from localhost', {
+			requestUrl: request.url,
+			...streamLog
+		});
 		throw new Error(
 			'Streaming requires an external URL. Please configure the External URL in Settings → Integrations → Indexers → Cinephage Stream.'
 		);

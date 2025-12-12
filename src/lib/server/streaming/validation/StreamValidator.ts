@@ -316,11 +316,7 @@ export class StreamValidator {
 
 		try {
 			// 1. Validate playlist
-			const playlistValidation = await this.validatePlaylistUrl(
-				source.url,
-				source.referer,
-				opts
-			);
+			const playlistValidation = await this.validatePlaylistUrl(source.url, source.referer, opts);
 
 			if (!playlistValidation.valid) {
 				result.error = playlistValidation.error;
@@ -398,11 +394,10 @@ export class StreamValidator {
 					const samplesToCheck = Math.min(segments.length, opts.segmentSampleSize);
 
 					for (let i = 0; i < samplesToCheck; i++) {
-						const segmentValidation = await this.validateSegment(
-							segments[i],
-							source.referer,
-							{ ...opts, timeout: opts.timeout / 3 }
-						);
+						const segmentValidation = await this.validateSegment(segments[i], source.referer, {
+							...opts,
+							timeout: opts.timeout / 3
+						});
 
 						if (!segmentValidation.accessible) {
 							result.playable = false;

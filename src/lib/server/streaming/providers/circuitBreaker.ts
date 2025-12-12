@@ -68,7 +68,8 @@ export class CircuitBreaker {
 
 		// Check if we should transition to half-open
 		if (!this.state.isHalfOpen && this.state.resetAt) {
-			const halfOpenTime = this.state.resetAt - (this.config.resetAfterMs - this.config.halfOpenAfterMs);
+			const halfOpenTime =
+				this.state.resetAt - (this.config.resetAfterMs - this.config.halfOpenAfterMs);
 			if (now >= halfOpenTime) {
 				this.transitionToHalfOpen();
 				return true; // Allow the test request

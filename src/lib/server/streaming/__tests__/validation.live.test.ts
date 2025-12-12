@@ -7,11 +7,7 @@
 
 import { describe, it, expect, beforeAll } from 'vitest';
 import { extractStreams, clearCaches } from '../providers';
-import {
-	getStreamValidator,
-	createStreamValidator,
-	quickValidateStream
-} from '../validation';
+import { getStreamValidator, createStreamValidator, quickValidateStream } from '../validation';
 import type { ExtractOptions, StreamSource } from '../types';
 import { getPrimaryTestMovie, getPrimaryTestTvShow } from './fixtures/testContent';
 
@@ -76,11 +72,9 @@ describe('Live Validation Tests', () => {
 					return;
 				}
 
-				const result = await validator.validatePlaylistUrl(
-					movieSource.url,
-					movieSource.referer,
-					{ timeout: VALIDATION_TIMEOUT_MS }
-				);
+				const result = await validator.validatePlaylistUrl(movieSource.url, movieSource.referer, {
+					timeout: VALIDATION_TIMEOUT_MS
+				});
 
 				expect(result.valid).toBe(true);
 				expect(result.type).toMatch(/^(master|media)$/);
@@ -111,11 +105,9 @@ describe('Live Validation Tests', () => {
 		});
 
 		it('should reject non-HLS content', async () => {
-			const result = await validator.validatePlaylistUrl(
-				'https://httpbin.org/html',
-				undefined,
-				{ timeout: 5000 }
-			);
+			const result = await validator.validatePlaylistUrl('https://httpbin.org/html', undefined, {
+				timeout: 5000
+			});
 
 			expect(result.valid).toBe(false);
 			expect(result.error).toContain('HLS');
@@ -223,29 +215,21 @@ describe('Live Validation Tests', () => {
 	// --------------------------------------------------------------------------
 
 	describe('Quick Validation', () => {
-		it(
-			'should quickly validate a stream URL',
-			async () => {
-				if (!movieSource) {
-					console.log('Skipping: No movie source available');
-					return;
-				}
+		it('should quickly validate a stream URL', async () => {
+			if (!movieSource) {
+				console.log('Skipping: No movie source available');
+				return;
+			}
 
-				const start = Date.now();
-				const result = await quickValidateStream(
-					movieSource.url,
-					movieSource.referer,
-					5000
-				);
-				const duration = Date.now() - start;
+			const start = Date.now();
+			const result = await quickValidateStream(movieSource.url, movieSource.referer, 5000);
+			const duration = Date.now() - start;
 
-				expect(typeof result).toBe('boolean');
-				expect(duration).toBeLessThan(6000);
+			expect(typeof result).toBe('boolean');
+			expect(duration).toBeLessThan(6000);
 
-				console.log(`Quick validation: ${result} in ${duration}ms`);
-			},
-			10000
-		);
+			console.log(`Quick validation: ${result} in ${duration}ms`);
+		}, 10000);
 
 		it('should quickly reject invalid URLs', async () => {
 			const start = Date.now();
@@ -346,7 +330,9 @@ describe('Live Validation Tests', () => {
 				// Check each result - count valid (not just playable)
 				let validCount = 0;
 				for (const [source, validation] of results) {
-					console.log(`${source.title}: valid=${validation.valid}, playable=${validation.playable}`);
+					console.log(
+						`${source.title}: valid=${validation.valid}, playable=${validation.playable}`
+					);
 					if (validation.valid) validCount++;
 				}
 

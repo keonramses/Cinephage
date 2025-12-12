@@ -430,7 +430,25 @@ export class RequestBuilder {
 
 		// Skip paths that have no meaningful search criteria after filtering
 		// (only standard params like t, apikey, limit, cat remain - no actual search params)
-		const meaningfulSearchParams = ['q', 'query', 'query_term', 'imdbid', 'imdb_id', 'tmdbid', 'tmdb_id', 'tvdbid', 'tvdb_id', 'tvmazeid', 'rid', 'season', 'ep', 'artist', 'album', 'author', 'title'];
+		const meaningfulSearchParams = [
+			'q',
+			'query',
+			'query_term',
+			'imdbid',
+			'imdb_id',
+			'tmdbid',
+			'tmdb_id',
+			'tvdbid',
+			'tvdb_id',
+			'tvmazeid',
+			'rid',
+			'season',
+			'ep',
+			'artist',
+			'album',
+			'author',
+			'title'
+		];
 		const hasSearchCriteria = Object.keys(filteredInputs).some((key) =>
 			meaningfulSearchParams.includes(key.toLowerCase())
 		);

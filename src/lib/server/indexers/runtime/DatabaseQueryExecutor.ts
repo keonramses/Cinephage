@@ -332,9 +332,7 @@ export class DatabaseQueryExecutor {
 				for (const seasonNum of seasons) {
 					const seasonEps = seasonMap.get(seasonNum) || [];
 					if (seasonEps.length > 0) {
-						releaseResults.push(
-							this.createSeasonPackRelease(show, seasonNum, seasonEps, context)
-						);
+						releaseResults.push(this.createSeasonPackRelease(show, seasonNum, seasonEps, context));
 					}
 				}
 
