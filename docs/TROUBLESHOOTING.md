@@ -10,6 +10,7 @@ This guide covers common issues and their solutions when using Cinephage.
 - [Download Client Issues](#download-client-issues)
 - [Library Issues](#library-issues)
 - [Subtitle Issues](#subtitle-issues)
+- [Streaming Issues](#streaming-issues)
 - [Performance Issues](#performance-issues)
 - [Log Files](#log-files)
 - [Debug Mode](#debug-mode)
@@ -396,6 +397,43 @@ This guide covers common issues and their solutions when using Cinephage.
 1. Try a different subtitle from search results
 2. Use external subtitle sync tools (SubSync, Subtitle Edit)
 3. Search for a different release's subtitles
+
+---
+
+## Streaming Issues
+
+### Stream won't play / Starts from end
+
+**Symptoms**: Video player shows stream as complete or seeks to end immediately
+
+**Solutions**:
+
+1. This typically indicates the stream was incorrectly marked as "live" instead of VOD
+2. Try refreshing the stream URL
+3. Check if the streaming provider is working via Settings > Streaming
+4. Try a different quality/server if available
+
+### Stream buffering or failing
+
+**Symptoms**: Playback stutters, fails to load, or shows errors
+
+**Solutions**:
+
+1. Check network connectivity
+2. Try a lower quality stream
+3. Some streaming providers have regional restrictions
+4. Check provider health in Settings > Streaming
+
+### STRM files not working
+
+**Symptoms**: External player can't play .strm files
+
+**Solutions**:
+
+1. Ensure the player supports STRM format (Kodi, Jellyfin, etc.)
+2. Verify Cinephage is accessible from the player's network
+3. Check the stream URL is valid by opening it directly
+4. Regenerate the STRM file from the media details page
 
 ---
 

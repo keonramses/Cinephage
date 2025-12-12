@@ -12,8 +12,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - **Newznab protocol** - Generic usenet indexer integration with dynamic capability discovery
 - **NZB validation service** - XML structure validation and metadata extraction
 - **Unified indexer architecture** - YAML-only design with protocol handlers (torrent/usenet/streaming)
+- **Dynamic capability discovery** - Fetches `/api?t=caps` at indexer creation to determine supported search parameters
 - **Streaming infrastructure** - Circuit breaker, health monitoring, multi-level caching
 - **Stream validation** - HLS playlist and segment verification
+- **HLS playlist utilities** - Validation, sanitization, and variant selection for master playlists
 - **Provider registry** - Capability-based provider selection with health scoring
 - **Auth system** - Pluggable providers (API key, cookie, form, passkey, basic)
 - **Subtitle search worker** - Background subtitle discovery for library items
@@ -25,6 +27,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - Rebuilt indexer database schema with definitions table and enhanced status tracking
 - Enhanced health tracking with consecutive failure counting and exponential backoff
 - Added protocol-specific settings columns for torrent/usenet/streaming
+- RequestBuilder filters unsupported search parameters based on live indexer capabilities
+- HLS proxy properly marks streams as VOD with `#EXT-X-PLAYLIST-TYPE:VOD` and `#EXT-X-ENDLIST`
+- HLS proxy handles obfuscated segment URLs (providers using fake extensions like .txt, .jpg)
+- Videasy streaming provider uses parallel extraction across 4 servers simultaneously
 - Exclude specials (season 0) from series episode counts
 - Added database indexes and TMDB response caching for performance
 - Language-aware streaming with parallel extraction optimization
@@ -33,6 +39,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 - Native TypeScript indexer implementations (replaced by YAML definitions)
 - Old indexer registry and base classes
+
+### Fixed
+
+- HLS streams starting from end instead of beginning (missing VOD markers)
+- HLS segment detection for providers using obfuscated URLs with fake extensions
 
 ---
 

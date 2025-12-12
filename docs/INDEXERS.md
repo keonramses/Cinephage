@@ -243,6 +243,8 @@ Cinephage now supports Newznab-compatible usenet indexers via the built-in Newzn
    - **API Key**: From your indexer account
 4. Test and save
 
+> **Note**: Cinephage automatically fetches the indexer's capabilities from `/api?t=caps` when you add or test the indexer. This determines which search parameters (tmdbid, imdbid, tvdbid, etc.) are supported, preventing API errors from unsupported parameters.
+
 ### Adding Torznab Indexers
 
 Connect to Prowlarr or Jackett for torrent indexers:
@@ -254,6 +256,8 @@ Connect to Prowlarr or Jackett for torrent indexers:
    - **URL**: Prowlarr/Jackett URL
    - **API Key**: From your indexer manager
 4. Test and save
+
+> **Note**: Like Newznab, Cinephage fetches capabilities from `/api?t=caps` to determine supported search parameters. This ensures searches only use parameters the indexer actually supports.
 
 **Example URLs:**
 
