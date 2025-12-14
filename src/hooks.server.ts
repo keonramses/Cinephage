@@ -186,28 +186,69 @@ setImmediate(async () => {
 	}
 });
 
-// Graceful shutdown handler for browser solver
-process.on('SIGTERM', async () => {
-	if (browserSolverInitialized) {
-		logger.info('Shutting down BrowserSolver...');
-		try {
-			await getBrowserSolver().shutdown();
-		} catch (error) {
-			logger.error('Error shutting down BrowserSolver', error);
-		}
-	}
-});
+// Graceful shutdown handler - stops all background services
+async function gracefulShutdown(signal: string) {
+	logger.info(`Received ${signal}, shutting down gracefully...`);
 
-process.on('SIGINT', async () => {
-	if (browserSolverInitialized) {
-		logger.info('Shutting down BrowserSolver...');
-		try {
-			await getBrowserSolver().shutdown();
-		} catch (error) {
-			logger.error('Error shutting down BrowserSolver', error);
-		}
+	const shutdownPromises: Promise<void>[] = [];
+
+	// Stop download monitor (clears poll timer)
+	if (downloadMonitorInitialized) {
+		shutdownPromises.push(
+			Promise.resolve(downloadMonitor.stop()).catch((e) =>
+				logger.error('Error stopping download monitor', e)
+			)
+		);
 	}
-});
+
+	// Stop monitoring scheduler (clears scheduler timer)
+	if (monitoringInitialized) {
+		shutdownPromises.push(
+			monitoringScheduler.shutdown().catch((e) =>
+				logger.error('Error stopping monitoring scheduler', e)
+			)
+		);
+	}
+
+	// Stop library scheduler (clears scan interval)
+	if (libraryInitialized) {
+		shutdownPromises.push(
+			Promise.resolve(librarySchedulerService.shutdown()).catch((e) =>
+				logger.error('Error stopping library scheduler', e)
+			)
+		);
+	}
+
+	// Stop external ID service
+	if (externalIdServiceInitialized) {
+		shutdownPromises.push(
+			getExternalIdService().stop().catch((e) =>
+				logger.error('Error stopping external ID service', e)
+			)
+		);
+	}
+
+	// Stop browser solver
+	if (browserSolverInitialized) {
+		shutdownPromises.push(
+			getBrowserSolver().shutdown().catch((e) =>
+				logger.error('Error shutting down BrowserSolver', e)
+			)
+		);
+	}
+
+	// Wait for all services to stop (with timeout)
+	await Promise.race([
+		Promise.all(shutdownPromises),
+		new Promise((resolve) => setTimeout(resolve, 5000)) // 5s timeout
+	]);
+
+	logger.info('Shutdown complete');
+	process.exit(0);
+}
+
+process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
+process.on('SIGINT', () => gracefulShutdown('SIGINT'));
 
 /**
  * Server hooks for SvelteKit.
