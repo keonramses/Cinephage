@@ -1,7 +1,7 @@
 name: Indexer Request
 description: Request support for a new indexer/tracker
-title: "[Indexer]: "
-labels: ["indexer-request"]
+title: '[Indexer]: '
+labels: ['indexer-request']
 body:
   - type: markdown
     attributes:
@@ -22,7 +22,7 @@ body:
     id: name
     attributes:
       label: Indexer Name
-      placeholder: "e.g., ExampleTracker"
+      placeholder: 'e.g., ExampleTracker'
     validations:
       required: true
 
@@ -31,7 +31,7 @@ body:
     attributes:
       label: Indexer URL
       description: Main URL of the indexer (will be kept confidential for private trackers)
-      placeholder: "https://example.com"
+      placeholder: 'https://example.com'
     validations:
       required: true
 
@@ -89,7 +89,7 @@ body:
     attributes:
       label: Existing Definition
       description: Link to Prowlarr/Jackett/Cardigann definition if one exists
-      placeholder: "https://github.com/..."
+      placeholder: 'https://github.com/...'
 
   - type: textarea
     id: api_info
@@ -106,4 +106,4 @@ body:
     attributes:
       label: Additional Notes
       description: Any other relevant information about this indexer
-      placeholder: "Special authentication, rate limits, known quirks, etc."
+      placeholder: 'Special authentication, rate limits, known quirks, etc.'

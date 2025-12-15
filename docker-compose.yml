@@ -3,7 +3,7 @@ services:
     build: .
     container_name: cinephage
     ports:
-      - "3000:3000"
+      - '3000:3000'
     volumes:
       - ./data:/app/data
       - /path/to/movies:/movies
@@ -13,7 +13,8 @@ services:
       - PGID=1000
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:3000/api/health"]
+      test:
+        ['CMD', 'wget', '--no-verbose', '--tries=1', '--spider', 'http://localhost:3000/api/health']
       interval: 30s
       timeout: 10s
       start_period: 30s

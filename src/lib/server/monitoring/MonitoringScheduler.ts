@@ -28,7 +28,8 @@ const DEFAULT_INTERVALS = {
 	cutoffUnmet: 24,
 	pendingRelease: 0.25, // Every 15 minutes
 	missingSubtitles: 6, // Every 6 hours
-	subtitleUpgrade: 24 // Daily
+	subtitleUpgrade: 24, // Daily
+	smartListRefresh: 1 // Hourly (checks which smart lists are due based on their individual intervals)
 } as const;
 
 /**
@@ -93,6 +94,7 @@ export interface MonitoringStatus {
 		pendingRelease: TaskStatus;
 		missingSubtitles: TaskStatus;
 		subtitleUpgrade: TaskStatus;
+		smartListRefresh: TaskStatus;
 	};
 }
 
@@ -168,7 +170,8 @@ export class MonitoringScheduler extends EventEmitter implements BackgroundServi
 			'cutoffUnmet',
 			'pendingRelease',
 			'missingSubtitles',
-			'subtitleUpgrade'
+			'subtitleUpgrade',
+			'smartListRefresh'
 		];
 		for (const taskType of taskTypes) {
 			const key = `last_run_${taskType}`;
@@ -408,6 +411,7 @@ export class MonitoringScheduler extends EventEmitter implements BackgroundServi
 			'subtitleUpgrade',
 			Math.max(settings.subtitleUpgradeIntervalHours, MIN_INTERVAL_HOURS)
 		);
+		this.taskIntervals.set('smartListRefresh', DEFAULT_INTERVALS.smartListRefresh);
 
 		// Log scheduled intervals
 		for (const [taskType, intervalHours] of this.taskIntervals.entries()) {
@@ -661,6 +665,10 @@ export class MonitoringScheduler extends EventEmitter implements BackgroundServi
 				const { executeSubtitleUpgradeTask } = await import('./tasks/SubtitleUpgradeTask.js');
 				return await executeSubtitleUpgradeTask(taskHistoryId);
 			}
+			case 'smartListRefresh': {
+				const { executeSmartListRefreshTask } = await import('./tasks/SmartListRefreshTask.js');
+				return await executeSmartListRefreshTask(taskHistoryId);
+			}
 			default:
 				throw new Error(`Unknown task type: ${taskType}`);
 		}
@@ -695,6 +703,10 @@ export class MonitoringScheduler extends EventEmitter implements BackgroundServi
 
 	async runSubtitleUpgradeSearch(): Promise<TaskResult> {
 		return await this.executeTaskManually('subtitleUpgrade');
+	}
+
+	async runSmartListRefresh(): Promise<TaskResult> {
+		return await this.executeTaskManually('smartListRefresh');
 	}
 
 	private async executeTaskManually(taskType: string): Promise<TaskResult> {
@@ -815,7 +827,8 @@ export class MonitoringScheduler extends EventEmitter implements BackgroundServi
 				cutoffUnmet: getTaskStatus('cutoffUnmet', settings.cutoffUnmetSearchIntervalHours),
 				pendingRelease: getTaskStatus('pendingRelease', DEFAULT_INTERVALS.pendingRelease),
 				missingSubtitles: getTaskStatus('missingSubtitles', settings.missingSubtitlesIntervalHours),
-				subtitleUpgrade: getTaskStatus('subtitleUpgrade', settings.subtitleUpgradeIntervalHours)
+				subtitleUpgrade: getTaskStatus('subtitleUpgrade', settings.subtitleUpgradeIntervalHours),
+				smartListRefresh: getTaskStatus('smartListRefresh', DEFAULT_INTERVALS.smartListRefresh)
 			}
 		};
 	}

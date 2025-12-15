@@ -46,18 +46,6 @@ Complete the integration of streaming providers with the settings system.
 
 Features confirmed for upcoming releases.
 
-### Usenet Client Support
-
-Planned | High | **Area**: Download Clients
-
-Add support for Usenet download clients: SABnzbd and NZBGet.
-
-**Context**: Currently Cinephage only supports torrent downloads via qBittorrent. Adding Usenet support opens up a major alternative download method and enables the use of Usenet indexers (NZBGeek, DrunkenSlug, etc.).
-
-**Dependencies**: Must be implemented before Usenet indexers can be used.
-
----
-
 ### Tag-Based Monitoring Profiles
 
 Planned | Medium | **Area**: Monitoring
@@ -118,6 +106,8 @@ Sync watchlists from external services:
 - Plex watchlists
 
 **Context**: Allows users to manage their "want to watch" list externally and have Cinephage automatically monitor those titles.
+
+**Partial solution**: Smart Lists provide TMDB Discover-based dynamic lists with auto-add functionality. External watchlist sync is not yet implemented.
 
 ---
 
@@ -255,16 +245,6 @@ Expand subtitle provider support beyond the current 6 providers.
 
 Current acknowledged gaps and their workarounds.
 
-### Torrent-Only Downloads
-
-Known Limitation | High
-
-Cinephage currently only supports torrent downloads. Usenet is not yet supported.
-
-**Workaround**: None currently. Usenet support is high priority on the roadmap.
-
----
-
 ### Single User Only
 
 Known Limitation | Medium
@@ -272,16 +252,6 @@ Known Limitation | Medium
 No built-in user authentication or multi-user support.
 
 **Workaround**: Place Cinephage behind an authenticating reverse proxy like Authelia, Authentik, or Nginx basic auth.
-
----
-
-### qBittorrent Only
-
-Known Limitation | Medium
-
-qBittorrent is the only supported download client.
-
-**Workaround**: None. Users must use qBittorrent or wait for additional client support.
 
 ---
 

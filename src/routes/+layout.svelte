@@ -20,7 +20,8 @@
 		Download,
 		Shield,
 		ListTodo,
-		FileSignature
+		FileSignature,
+		List
 	} from 'lucide-svelte';
 
 	let { children } = $props();
@@ -37,6 +38,7 @@
 			]
 		},
 		{ href: '/queue', label: 'Queue', icon: Download },
+		{ href: '/smartlists', label: 'Smart Lists', icon: List },
 		{
 			label: 'Settings',
 			icon: Settings,

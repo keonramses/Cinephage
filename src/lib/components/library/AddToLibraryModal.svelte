@@ -635,9 +635,12 @@
 			const errorCount = result.errors?.length ?? 0;
 
 			if (addedCount > 0) {
-				toasts.success(`Added ${addedCount} movie${addedCount > 1 ? 's' : ''} from ${collection?.name}`, {
-					description: willSearchOnAdd ? 'Searching for releases...' : undefined
-				});
+				toasts.success(
+					`Added ${addedCount} movie${addedCount > 1 ? 's' : ''} from ${collection?.name}`,
+					{
+						description: willSearchOnAdd ? 'Searching for releases...' : undefined
+					}
+				);
 			}
 
 			if (errorCount > 0) {
@@ -828,7 +831,9 @@
 						<!-- Collection Option -->
 						{#if collection && missingCollectionMovies.length > 0}
 							<div class="form-control">
-								<label class="label cursor-pointer justify-start gap-4 rounded-lg bg-base-300/50 p-4">
+								<label
+									class="label cursor-pointer justify-start gap-4 rounded-lg bg-base-300/50 p-4"
+								>
 									<input
 										type="checkbox"
 										class="checkbox checkbox-primary"
@@ -839,7 +844,10 @@
 											Add entire {collection.name}
 										</span>
 										<span class="label-text-alt block text-base-content/60">
-											Also add {missingCollectionMovies.length} other movie{missingCollectionMovies.length > 1 ? 's' : ''} from this collection
+											Also add {missingCollectionMovies.length} other movie{missingCollectionMovies.length >
+											1
+												? 's'
+												: ''} from this collection
 										</span>
 									</div>
 								</label>

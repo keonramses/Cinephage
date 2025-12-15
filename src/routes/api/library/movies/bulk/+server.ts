@@ -159,9 +159,13 @@ export const POST: RequestHandler = async ({ request }) => {
 					});
 				}
 			} catch (error) {
-				logger.error('[API] Error adding movie in bulk', error instanceof Error ? error : undefined, {
-					tmdbId
-				});
+				logger.error(
+					'[API] Error adding movie in bulk',
+					error instanceof Error ? error : undefined,
+					{
+						tmdbId
+					}
+				);
 				results.errors.push({
 					tmdbId,
 					error: error instanceof Error ? error.message : 'Failed to add movie'

@@ -1594,3 +1594,326 @@ export const subtitleBlacklistRelations = relations(subtitleBlacklist, ({ one })
 		references: [subtitleProviders.id]
 	})
 }));
+
+// ============================================================================
+// SMART LISTS FEATURE TABLES
+// ============================================================================
+
+/**
+ * Smart List Filters - Type definition for JSON column
+ * Maps to TMDB Discover API parameters
+ */
+export interface SmartListFilters {
+	// Genres
+	withGenres?: number[];
+	withoutGenres?: number[];
+	genreMode?: 'and' | 'or';
+
+	// Year/Date
+	yearMin?: number;
+	yearMax?: number;
+	releaseDateMin?: string;
+	releaseDateMax?: string;
+
+	// Rating
+	voteAverageMin?: number;
+	voteAverageMax?: number;
+	voteCountMin?: number;
+
+	// Popularity
+	popularityMin?: number;
+	popularityMax?: number;
+
+	// People
+	withCast?: number[];
+	withCrew?: number[];
+
+	// Keywords
+	withKeywords?: number[];
+	withoutKeywords?: number[];
+
+	// Watch Providers
+	withWatchProviders?: number[];
+	watchRegion?: string;
+
+	// Certification
+	certification?: string;
+	certificationCountry?: string;
+
+	// Runtime
+	runtimeMin?: number;
+	runtimeMax?: number;
+
+	// Language
+	withOriginalLanguage?: string;
+
+	// TV-specific
+	withStatus?: string;
+
+	// Movie-specific
+	withReleaseType?: number[];
+}
+
+/**
+ * Smart Lists - User-defined TMDB discover query lists
+ *
+ * Smart lists are dynamic lists that query TMDB's discover API using
+ * user-defined filter criteria. Results are cached and periodically refreshed.
+ */
+export const smartLists = sqliteTable(
+	'smart_lists',
+	{
+		id: text('id')
+			.primaryKey()
+			.$defaultFn(() => randomUUID()),
+
+		// === BASIC INFO ===
+		name: text('name').notNull(),
+		description: text('description'),
+
+		// Media type: 'movie' or 'tv' (not mixed - TMDB discover is type-specific)
+		mediaType: text('media_type', { enum: ['movie', 'tv'] }).notNull(),
+
+		enabled: integer('enabled', { mode: 'boolean' }).default(true),
+
+		// === TMDB DISCOVER FILTERS ===
+		// Stored as JSON for flexibility
+		filters: text('filters', { mode: 'json' }).$type<SmartListFilters>().notNull(),
+
+		// Sort configuration
+		sortBy: text('sort_by').default('popularity.desc'),
+
+		// Item limit (how many items to fetch and cache)
+		itemLimit: integer('item_limit').default(100).notNull(),
+
+		// === LIBRARY-AWARE FILTERS ===
+		// Whether to exclude items already in library
+		excludeInLibrary: integer('exclude_in_library', { mode: 'boolean' }).default(true),
+		// Whether to show only items that could be upgraded
+		showUpgradeableOnly: integer('show_upgradeable_only', { mode: 'boolean' }).default(false),
+		// Manually excluded TMDB IDs (JSON array)
+		excludedTmdbIds: text('excluded_tmdb_ids', { mode: 'json' }).$type<number[]>().default([]),
+
+		// === QUALITY/SCORING ===
+		// Scoring profile for quality preferences
+		scoringProfileId: text('scoring_profile_id').references(() => scoringProfiles.id, {
+			onDelete: 'set null'
+		}),
+
+		// === AUTO-ADD CONFIGURATION ===
+		// Auto-add behavior: 'disabled' | 'add_only' | 'add_and_search'
+		autoAddBehavior: text('auto_add_behavior', {
+			enum: ['disabled', 'add_only', 'add_and_search']
+		}).default('disabled'),
+		// Root folder for auto-added items
+		rootFolderId: text('root_folder_id').references(() => rootFolders.id, {
+			onDelete: 'set null'
+		}),
+		// Monitored state for auto-added items
+		autoAddMonitored: integer('auto_add_monitored', { mode: 'boolean' }).default(true),
+		// Minimum availability for auto-added movies
+		minimumAvailability: text('minimum_availability').default('released'),
+		// Whether to want subtitles for auto-added items
+		wantsSubtitles: integer('wants_subtitles', { mode: 'boolean' }).default(true),
+		// Language profile for auto-added items
+		languageProfileId: text('language_profile_id'),
+
+		// === REFRESH CONFIGURATION ===
+		// Refresh interval in hours (1-168)
+		refreshIntervalHours: integer('refresh_interval_hours').default(24).notNull(),
+
+		// === SYNC STATE ===
+		lastRefreshTime: text('last_refresh_time'),
+		lastRefreshStatus: text('last_refresh_status'), // 'success' | 'partial' | 'failed'
+		lastRefreshError: text('last_refresh_error'),
+		nextRefreshTime: text('next_refresh_time'),
+
+		// === CACHED STATS ===
+		cachedItemCount: integer('cached_item_count').default(0),
+		itemsInLibrary: integer('items_in_library').default(0),
+		itemsAutoAdded: integer('items_auto_added').default(0),
+
+		// === TIMESTAMPS ===
+		createdAt: text('created_at').$defaultFn(() => new Date().toISOString()),
+		updatedAt: text('updated_at').$defaultFn(() => new Date().toISOString())
+	},
+	(table) => [
+		index('idx_smart_lists_enabled').on(table.enabled),
+		index('idx_smart_lists_next_refresh').on(table.nextRefreshTime),
+		index('idx_smart_lists_media_type').on(table.mediaType)
+	]
+);
+
+export type SmartListRecord = typeof smartLists.$inferSelect;
+export type NewSmartListRecord = typeof smartLists.$inferInsert;
+
+/**
+ * Smart List Items - Cached results from TMDB discover queries
+ */
+export const smartListItems = sqliteTable(
+	'smart_list_items',
+	{
+		id: text('id')
+			.primaryKey()
+			.$defaultFn(() => randomUUID()),
+
+		// Parent smart list
+		smartListId: text('smart_list_id')
+			.notNull()
+			.references(() => smartLists.id, { onDelete: 'cascade' }),
+
+		// Media type (inherited from smart list)
+		mediaType: text('media_type', { enum: ['movie', 'tv'] }).notNull(),
+
+		// === TMDB DATA ===
+		tmdbId: integer('tmdb_id').notNull(),
+
+		// Cached metadata for display
+		title: text('title').notNull(),
+		originalTitle: text('original_title'),
+		overview: text('overview'),
+		posterPath: text('poster_path'),
+		backdropPath: text('backdrop_path'),
+		releaseDate: text('release_date'), // or first_air_date for TV
+		year: integer('year'),
+		voteAverage: text('vote_average'), // stored as text for precision
+		voteCount: integer('vote_count'),
+		popularity: text('popularity'),
+		genreIds: text('genre_ids', { mode: 'json' }).$type<number[]>(),
+		originalLanguage: text('original_language'),
+
+		// === LIBRARY STATUS ===
+		// Local library reference (if in library)
+		movieId: text('movie_id').references(() => movies.id, { onDelete: 'set null' }),
+		seriesId: text('series_id').references(() => series.id, { onDelete: 'set null' }),
+		// Whether this item is in the library
+		inLibrary: integer('in_library', { mode: 'boolean' }).default(false),
+		// Whether this item was auto-added by this smart list
+		wasAutoAdded: integer('was_auto_added', { mode: 'boolean' }).default(false),
+		autoAddedAt: text('auto_added_at'),
+
+		// === POSITION ===
+		// Position in the list (based on sort order from TMDB)
+		position: integer('position').notNull(),
+
+		// === EXCLUSION ===
+		// User manually excluded this item
+		isExcluded: integer('is_excluded', { mode: 'boolean' }).default(false),
+		excludedAt: text('excluded_at'),
+
+		// === TIMESTAMPS ===
+		firstSeenAt: text('first_seen_at').$defaultFn(() => new Date().toISOString()),
+		lastSeenAt: text('last_seen_at').$defaultFn(() => new Date().toISOString()),
+		updatedAt: text('updated_at').$defaultFn(() => new Date().toISOString())
+	},
+	(table) => [
+		index('idx_smart_list_items_list').on(table.smartListId),
+		index('idx_smart_list_items_tmdb').on(table.tmdbId, table.mediaType),
+		index('idx_smart_list_items_in_library').on(table.inLibrary),
+		index('idx_smart_list_items_position').on(table.smartListId, table.position)
+	]
+);
+
+export type SmartListItemRecord = typeof smartListItems.$inferSelect;
+export type NewSmartListItemRecord = typeof smartListItems.$inferInsert;
+
+/**
+ * Smart List Refresh History - Tracks refresh operations
+ */
+export const smartListRefreshHistory = sqliteTable(
+	'smart_list_refresh_history',
+	{
+		id: text('id')
+			.primaryKey()
+			.$defaultFn(() => randomUUID()),
+
+		smartListId: text('smart_list_id')
+			.notNull()
+			.references(() => smartLists.id, { onDelete: 'cascade' }),
+
+		// Refresh type
+		refreshType: text('refresh_type', { enum: ['automatic', 'manual'] }).notNull(),
+
+		// Status
+		status: text('status', { enum: ['running', 'success', 'partial', 'failed'] }).notNull(),
+
+		// Results
+		itemsFound: integer('items_found').default(0),
+		itemsNew: integer('items_new').default(0),
+		itemsRemoved: integer('items_removed').default(0),
+		itemsAutoAdded: integer('items_auto_added').default(0),
+		itemsFailed: integer('items_failed').default(0),
+
+		// Failure details
+		failureDetails: text('failure_details', { mode: 'json' }).$type<
+			Array<{ tmdbId: number; title: string; error: string }>
+		>(),
+
+		// Timing
+		startedAt: text('started_at').$defaultFn(() => new Date().toISOString()),
+		completedAt: text('completed_at'),
+		durationMs: integer('duration_ms'),
+
+		// Error
+		errorMessage: text('error_message')
+	},
+	(table) => [
+		index('idx_smart_list_refresh_history_list').on(table.smartListId),
+		index('idx_smart_list_refresh_history_status').on(table.status)
+	]
+);
+
+export type SmartListRefreshHistoryRecord = typeof smartListRefreshHistory.$inferSelect;
+export type NewSmartListRefreshHistoryRecord = typeof smartListRefreshHistory.$inferInsert;
+
+// ============================================================================
+// SMART LISTS RELATIONS
+// ============================================================================
+
+/**
+ * Smart Lists Relations
+ */
+export const smartListsRelations = relations(smartLists, ({ one, many }) => ({
+	scoringProfile: one(scoringProfiles, {
+		fields: [smartLists.scoringProfileId],
+		references: [scoringProfiles.id]
+	}),
+	rootFolder: one(rootFolders, {
+		fields: [smartLists.rootFolderId],
+		references: [rootFolders.id]
+	}),
+	languageProfile: one(languageProfiles, {
+		fields: [smartLists.languageProfileId],
+		references: [languageProfiles.id]
+	}),
+	items: many(smartListItems),
+	refreshHistory: many(smartListRefreshHistory)
+}));
+
+/**
+ * Smart List Items Relations
+ */
+export const smartListItemsRelations = relations(smartListItems, ({ one }) => ({
+	smartList: one(smartLists, {
+		fields: [smartListItems.smartListId],
+		references: [smartLists.id]
+	}),
+	movie: one(movies, {
+		fields: [smartListItems.movieId],
+		references: [movies.id]
+	}),
+	series: one(series, {
+		fields: [smartListItems.seriesId],
+		references: [series.id]
+	})
+}));
+
+/**
+ * Smart List Refresh History Relations
+ */
+export const smartListRefreshHistoryRelations = relations(smartListRefreshHistory, ({ one }) => ({
+	smartList: one(smartLists, {
+		fields: [smartListRefreshHistory.smartListId],
+		references: [smartLists.id]
+	})
+}));

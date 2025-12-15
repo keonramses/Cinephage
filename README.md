@@ -44,6 +44,7 @@ Search for movies and TV shows, grab them from your indexers, organize your libr
 | Indexers           | In Progress  | 4 public + 2 private indexers + Torznab/Newznab      |
 | Subtitles          | Stable       | 6 providers, 80+ languages                           |
 | Monitoring         | Experimental | 5 tasks coded, may have bugs                         |
+| Smart Lists        | Stable       | Dynamic TMDB queries with auto-add to library        |
 | Live TV/IPTV       | Not Started  | Planned for future                                   |
 
 ---

@@ -289,6 +289,109 @@ export const tmdb = {
 			where: eq(settings.key, 'tmdb_api_key')
 		});
 		return !!apiKeySetting?.value;
+	},
+
+	// =========================================================================
+	// DISCOVER API (for Smart Lists)
+	// =========================================================================
+
+	/**
+	 * Discover movies with filters
+	 * Supports all TMDB discover parameters
+	 */
+	async discoverMovies(
+		params: DiscoverParams = {},
+		skipFilters = false
+	): Promise<DiscoverResponse> {
+		const queryParams = new URLSearchParams();
+		for (const [key, value] of Object.entries(params)) {
+			if (value !== undefined && value !== null && value !== '') {
+				queryParams.set(key, String(value));
+			}
+		}
+		const endpoint = `/discover/movie?${queryParams.toString()}`;
+		return this.fetch(endpoint, {}, skipFilters) as Promise<DiscoverResponse>;
+	},
+
+	/**
+	 * Discover TV shows with filters
+	 */
+	async discoverTv(params: DiscoverParams = {}, skipFilters = false): Promise<DiscoverResponse> {
+		const queryParams = new URLSearchParams();
+		for (const [key, value] of Object.entries(params)) {
+			if (value !== undefined && value !== null && value !== '') {
+				queryParams.set(key, String(value));
+			}
+		}
+		const endpoint = `/discover/tv?${queryParams.toString()}`;
+		return this.fetch(endpoint, {}, skipFilters) as Promise<DiscoverResponse>;
+	},
+
+	/**
+	 * Get movie genres list
+	 */
+	async getMovieGenres(): Promise<{ genres: TmdbGenre[] }> {
+		return this.fetch('/genre/movie/list') as Promise<{ genres: TmdbGenre[] }>;
+	},
+
+	/**
+	 * Get TV genres list
+	 */
+	async getTvGenres(): Promise<{ genres: TmdbGenre[] }> {
+		return this.fetch('/genre/tv/list') as Promise<{ genres: TmdbGenre[] }>;
+	},
+
+	/**
+	 * Get watch providers for a region
+	 */
+	async getWatchProviders(
+		mediaType: 'movie' | 'tv',
+		region = 'US'
+	): Promise<{ results: TmdbWatchProvider[] }> {
+		return this.fetch(
+			`/watch/providers/${mediaType}?watch_region=${region}`
+		) as Promise<{ results: TmdbWatchProvider[] }>;
+	},
+
+	/**
+	 * Get certifications (age ratings)
+	 */
+	async getCertifications(mediaType: 'movie' | 'tv'): Promise<TmdbCertificationsResponse> {
+		return this.fetch(`/certification/${mediaType}/list`) as Promise<TmdbCertificationsResponse>;
+	},
+
+	/**
+	 * Search keywords
+	 */
+	async searchKeywords(query: string): Promise<{ results: TmdbKeyword[] }> {
+		return this.fetch(
+			`/search/keyword?query=${encodeURIComponent(query)}`
+		) as Promise<{ results: TmdbKeyword[] }>;
+	},
+
+	/**
+	 * Search people (actors, directors, etc.)
+	 */
+	async searchPeople(query: string): Promise<{ results: TmdbPersonSearchResult[] }> {
+		return this.fetch(
+			`/search/person?query=${encodeURIComponent(query)}`
+		) as Promise<{ results: TmdbPersonSearchResult[] }>;
+	},
+
+	/**
+	 * Search companies
+	 */
+	async searchCompanies(query: string): Promise<{ results: TmdbCompanySearchResult[] }> {
+		return this.fetch(
+			`/search/company?query=${encodeURIComponent(query)}`
+		) as Promise<{ results: TmdbCompanySearchResult[] }>;
+	},
+
+	/**
+	 * Get available languages
+	 */
+	async getLanguages(): Promise<TmdbLanguage[]> {
+		return this.fetch('/configuration/languages') as Promise<TmdbLanguage[]>;
 	}
 };
 
@@ -352,4 +455,189 @@ export interface SearchResult {
 		vote_average: number;
 		media_type?: 'movie' | 'tv';
 	}>;
+}
+
+// =========================================================================
+// DISCOVER API TYPES
+// =========================================================================
+
+/**
+ * Parameters for TMDB Discover API
+ * Maps to query string parameters
+ */
+export interface DiscoverParams {
+	// Pagination
+	page?: number;
+
+	// Sorting
+	sort_by?: string;
+
+	// Genres
+	with_genres?: string; // Comma-separated IDs
+	without_genres?: string;
+
+	// Year/Date
+	'primary_release_date.gte'?: string;
+	'primary_release_date.lte'?: string;
+	'first_air_date.gte'?: string;
+	'first_air_date.lte'?: string;
+	primary_release_year?: number;
+	first_air_date_year?: number;
+	year?: number;
+
+	// Rating
+	'vote_average.gte'?: number;
+	'vote_average.lte'?: number;
+	'vote_count.gte'?: number;
+
+	// Popularity
+	'popularity.gte'?: number;
+	'popularity.lte'?: number;
+
+	// People
+	with_cast?: string; // Comma-separated person IDs
+	with_crew?: string;
+	with_people?: string;
+
+	// Keywords
+	with_keywords?: string;
+	without_keywords?: string;
+
+	// Watch Providers
+	with_watch_providers?: string;
+	watch_region?: string;
+	with_watch_monetization_types?: string;
+
+	// Certification
+	certification?: string;
+	certification_country?: string;
+	'certification.gte'?: string;
+	'certification.lte'?: string;
+
+	// Runtime
+	'with_runtime.gte'?: number;
+	'with_runtime.lte'?: number;
+
+	// Language
+	with_original_language?: string;
+
+	// TV-specific
+	with_status?: string;
+	with_type?: string;
+	'air_date.gte'?: string;
+	'air_date.lte'?: string;
+
+	// Movie-specific
+	with_release_type?: string;
+	include_adult?: boolean;
+	include_video?: boolean;
+
+	// Companies
+	with_companies?: string;
+
+	// Region/Language
+	region?: string;
+	language?: string;
+}
+
+/**
+ * Discover API response
+ */
+export interface DiscoverResponse {
+	page: number;
+	results: DiscoverItem[];
+	total_pages: number;
+	total_results: number;
+}
+
+/**
+ * Single item from discover results
+ */
+export interface DiscoverItem {
+	id: number;
+	title?: string; // Movies
+	name?: string; // TV
+	original_title?: string;
+	original_name?: string;
+	overview: string;
+	poster_path: string | null;
+	backdrop_path: string | null;
+	release_date?: string; // Movies
+	first_air_date?: string; // TV
+	vote_average: number;
+	vote_count: number;
+	popularity: number;
+	genre_ids: number[];
+	original_language: string;
+	adult?: boolean;
+}
+
+/**
+ * TMDB Genre
+ */
+export interface TmdbGenre {
+	id: number;
+	name: string;
+}
+
+/**
+ * TMDB Watch Provider
+ */
+export interface TmdbWatchProvider {
+	provider_id: number;
+	provider_name: string;
+	logo_path: string;
+	display_priority: number;
+}
+
+/**
+ * TMDB Certifications response
+ */
+export interface TmdbCertificationsResponse {
+	certifications: Record<
+		string,
+		Array<{
+			certification: string;
+			meaning: string;
+			order: number;
+		}>
+	>;
+}
+
+/**
+ * TMDB Keyword
+ */
+export interface TmdbKeyword {
+	id: number;
+	name: string;
+}
+
+/**
+ * TMDB Person search result
+ */
+export interface TmdbPersonSearchResult {
+	id: number;
+	name: string;
+	profile_path: string | null;
+	known_for_department: string;
+	popularity: number;
+}
+
+/**
+ * TMDB Company search result
+ */
+export interface TmdbCompanySearchResult {
+	id: number;
+	name: string;
+	logo_path: string | null;
+	origin_country: string;
+}
+
+/**
+ * TMDB Language
+ */
+export interface TmdbLanguage {
+	iso_639_1: string;
+	english_name: string;
+	name: string;
 }

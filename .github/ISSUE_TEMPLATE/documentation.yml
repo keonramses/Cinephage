@@ -1,7 +1,7 @@
 name: Documentation Issue
 description: Report an error in the documentation or suggest an improvement
-title: "[Docs]: "
-labels: ["documentation"]
+title: '[Docs]: '
+labels: ['documentation']
 body:
   - type: markdown
     attributes:
@@ -26,7 +26,7 @@ body:
     attributes:
       label: Affected Page/Section
       description: Which documentation page has the issue?
-      placeholder: "e.g., docs/getting-started/installation.md or README.md"
+      placeholder: 'e.g., docs/getting-started/installation.md or README.md'
     validations:
       required: true
 
@@ -35,21 +35,21 @@ body:
     attributes:
       label: URL (if hosted)
       description: Direct link to the documentation page if available
-      placeholder: "https://..."
+      placeholder: 'https://...'
 
   - type: textarea
     id: current
     attributes:
       label: Current Content
       description: Quote the current text that has the issue (if applicable)
-      placeholder: "The documentation currently says..."
+      placeholder: 'The documentation currently says...'
 
   - type: textarea
     id: problem
     attributes:
       label: What's Wrong / What's Missing
       description: Describe the issue with the current documentation
-      placeholder: "This is incorrect because... / This should also mention..."
+      placeholder: 'This is incorrect because... / This should also mention...'
     validations:
       required: true
 
@@ -58,7 +58,7 @@ body:
     attributes:
       label: Suggested Change
       description: How would you improve this? What should it say instead?
-      placeholder: "It should say... / It should include information about..."
+      placeholder: 'It should say... / It should include information about...'
 
   - type: textarea
     id: additional

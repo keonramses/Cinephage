@@ -1,7 +1,7 @@
 name: Feature Request
 description: Suggest a new feature or improvement for Cinephage
-title: "[Feature]: "
-labels: ["enhancement", "needs-triage"]
+title: '[Feature]: '
+labels: ['enhancement', 'needs-triage']
 body:
   - type: markdown
     attributes:
@@ -69,7 +69,7 @@ body:
     attributes:
       label: Proposed Solution
       description: Describe the solution you'd like
-      placeholder: "I would like to be able to..."
+      placeholder: 'I would like to be able to...'
     validations:
       required: true
 
@@ -85,14 +85,14 @@ body:
     attributes:
       label: Use Case
       description: Describe how this feature would be used and who would benefit
-      placeholder: "This would help users who..."
+      placeholder: 'This would help users who...'
 
   - type: textarea
     id: examples
     attributes:
       label: Examples from Other Software
       description: Does any similar software implement this feature? How do they do it?
-      placeholder: "Radarr/Sonarr/Plex does this by..."
+      placeholder: 'Radarr/Sonarr/Plex does this by...'
 
   - type: textarea
     id: mockups

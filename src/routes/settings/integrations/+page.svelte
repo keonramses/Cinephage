@@ -111,8 +111,11 @@
 		<p class="text-base-content/70">Manage external service connections and data sources.</p>
 	</div>
 
-	<!-- TMDB API Status -->
-	<div class="mb-6">
+	<!-- API Integrations -->
+	<div class="mb-6 space-y-4">
+		<h2 class="text-lg font-semibold">API Integrations</h2>
+
+		<!-- TMDB -->
 		<div class="card bg-base-100 shadow-xl">
 			<div class="card-body">
 				<div class="flex items-center gap-4">
@@ -121,7 +124,7 @@
 					</div>
 					<div class="flex-1">
 						<h2 class="text-lg font-semibold">TMDB Integration</h2>
-						<p class="text-sm text-base-content/70">The Movie Database API for metadata</p>
+						<p class="text-sm text-base-content/70">The Movie Database API for metadata and Smart Lists</p>
 					</div>
 					<div class="flex items-center gap-2">
 						{#if data.tmdb.hasApiKey}

@@ -8,6 +8,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Added
 
+- **Smart Lists** - Dynamic TMDB Discover-based lists with 50+ filter options, auto-add to library, scheduled refresh, and quality/language profile assignment
+- **Movie collection bulk-add** - Add entire TMDB collections to library at once
 - **Task execution history** - All monitoring tasks now record per-item activity to the history database
 - **30-day history cleanup** - Automatic cleanup of old task history entries on startup
 - **Unified task registry** - Centralized task definitions with consistent configuration
