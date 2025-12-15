@@ -5,12 +5,16 @@
 	interface Props {
 		settingsDefinitions: DefinitionSetting[];
 		settings: Record<string, string>;
+		onchange?: (settings: Record<string, string>) => void;
 	}
 
-	let { settingsDefinitions, settings = $bindable() }: Props = $props();
+	let { settingsDefinitions, settings = $bindable(), onchange }: Props = $props();
 
 	function updateSetting(name: string, value: string) {
 		settings[name] = value;
+		if (onchange) {
+			onchange({ ...settings });
+		}
 	}
 
 	// Check if a setting type is an info-only type (not editable)

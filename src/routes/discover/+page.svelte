@@ -415,7 +415,7 @@
 				</div>
 
 				<div
-					class="grid grid-cols-3 gap-4 sm:grid-cols-4 sm:gap-6 md:grid-cols-5 lg:grid-cols-6 xl:grid-cols-8 2xl:grid-cols-10"
+					class="grid grid-cols-2 gap-3 sm:grid-cols-3 sm:gap-4 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-7 2xl:grid-cols-9"
 				>
 					{#each searchResults as item (item.id + (item.media_type || ''))}
 						<MediaCard
@@ -491,7 +491,7 @@
 				</div>
 
 				<div
-					class="grid grid-cols-3 gap-4 sm:grid-cols-4 sm:gap-6 md:grid-cols-5 lg:grid-cols-6 xl:grid-cols-8 2xl:grid-cols-10"
+					class="grid grid-cols-2 gap-3 sm:grid-cols-3 sm:gap-4 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-7 2xl:grid-cols-9"
 				>
 					{#each allResults as item (item.id + (item.media_type || ''))}
 						<MediaCard {item} onAddToLibrary={handleAddToLibrary} />

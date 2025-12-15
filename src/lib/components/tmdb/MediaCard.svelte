@@ -27,8 +27,8 @@
 
 	function getBadgeClass(item: TmdbMediaItem): string {
 		const label = getMediaTypeLabel(item);
-		if (label === 'Movie') return 'bg-sky-600/80 text-white';
-		if (label === 'TV') return 'bg-fuchsia-600/80 text-white';
+		if (label === 'Movie') return 'bg-primary/80 text-primary-content';
+		if (label === 'TV') return 'bg-secondary/80 text-secondary-content';
 		return 'badge-neutral/80';
 	}
 

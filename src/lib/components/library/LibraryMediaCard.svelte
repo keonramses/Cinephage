@@ -64,8 +64,8 @@
 		<!-- Media type badge -->
 		<div
 			class="badge border-none badge-sm font-semibold shadow-sm backdrop-blur-sm {isMovie
-				? 'bg-sky-600/80 text-white'
-				: 'bg-fuchsia-600/80 text-white'}"
+				? 'bg-primary/80 text-primary-content'
+				: 'bg-secondary/80 text-secondary-content'}"
 		>
 			{isMovie ? 'Movie' : 'TV'}
 		</div>
