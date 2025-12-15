@@ -2,6 +2,8 @@ import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
 import { getRootFolderService } from '$lib/server/downloadClients';
 import { rootFolderUpdateSchema } from '$lib/validation/schemas';
+import { assertFound, parseBody } from '$lib/server/api/validate';
+import { NotFoundError } from '$lib/errors';
 
 /**
  * GET /api/root-folders/[id]
@@ -11,11 +13,7 @@ export const GET: RequestHandler = async ({ params }) => {
 	const service = getRootFolderService();
 	const folder = await service.getFolder(params.id);
 
-	if (!folder) {
-		return json({ error: 'Root folder not found' }, { status: 404 });
-	}
-
-	return json(folder);
+	return json(assertFound(folder, 'Root folder', params.id));
 };
 
 /**
@@ -23,37 +21,17 @@ export const GET: RequestHandler = async ({ params }) => {
  * Update a root folder.
  */
 export const PUT: RequestHandler = async ({ params, request }) => {
-	let data: unknown;
-	try {
-		data = await request.json();
-	} catch {
-		return json({ error: 'Invalid JSON body' }, { status: 400 });
-	}
-
-	const result = rootFolderUpdateSchema.safeParse(data);
-
-	if (!result.success) {
-		return json(
-			{
-				error: 'Validation failed',
-				details: result.error.flatten()
-			},
-			{ status: 400 }
-		);
-	}
-
-	const validated = result.data;
+	const data = await parseBody(request, rootFolderUpdateSchema);
 	const service = getRootFolderService();
 
 	try {
-		const updated = await service.updateFolder(params.id, validated);
+		const updated = await service.updateFolder(params.id, data);
 		return json({ success: true, folder: updated });
 	} catch (error) {
-		const message = error instanceof Error ? error.message : 'Unknown error';
-		if (message.includes('not found')) {
-			return json({ error: message }, { status: 404 });
+		if (error instanceof Error && error.message.includes('not found')) {
+			throw new NotFoundError('Root folder', params.id);
 		}
-		return json({ error: message }, { status: 500 });
+		throw error;
 	}
 };
 
@@ -68,7 +46,9 @@ export const DELETE: RequestHandler = async ({ params }) => {
 		await service.deleteFolder(params.id);
 		return json({ success: true });
 	} catch (error) {
-		const message = error instanceof Error ? error.message : 'Unknown error';
-		return json({ error: message }, { status: 500 });
+		if (error instanceof Error && error.message.includes('not found')) {
+			throw new NotFoundError('Root folder', params.id);
+		}
+		throw error;
 	}
 };

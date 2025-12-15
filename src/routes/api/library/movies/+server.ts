@@ -1,16 +1,20 @@
 import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types.js';
 import { db } from '$lib/server/db/index.js';
-import { movies, movieFiles, rootFolders, languageProfiles } from '$lib/server/db/schema.js';
+import { movies, movieFiles, rootFolders } from '$lib/server/db/schema.js';
 import { eq } from 'drizzle-orm';
-import { tmdb } from '$lib/server/tmdb.js';
 import { z } from 'zod';
 import { namingService, type MediaNamingInfo } from '$lib/server/library/naming/NamingService.js';
-import { searchOnAdd } from '$lib/server/library/searchOnAdd.js';
-import { qualityFilter } from '$lib/server/quality/index.js';
-import { ValidationError, NotFoundError, ExternalServiceError } from '$lib/errors';
+import {
+	validateRootFolder,
+	getEffectiveScoringProfileId,
+	getLanguageProfileId,
+	fetchMovieDetails,
+	fetchMovieExternalIds,
+	triggerMovieSearch
+} from '$lib/server/library/LibraryAddService.js';
+import { ValidationError } from '$lib/errors';
 import { logger } from '$lib/logging';
-import { SearchWorker, workerManager } from '$lib/server/workers/index.js';
 
 /**
  * Schema for adding a movie to the library
@@ -158,34 +162,11 @@ export const POST: RequestHandler = async ({ request }) => {
 			);
 		}
 
-		// Verify root folder exists and is for movies
-		const rootFolder = await db
-			.select()
-			.from(rootFolders)
-			.where(eq(rootFolders.id, rootFolderId))
-			.limit(1);
+		// Verify root folder exists and is for movies (shared logic)
+		await validateRootFolder(rootFolderId, 'movie');
 
-		if (rootFolder.length === 0) {
-			throw new NotFoundError('Root folder', rootFolderId);
-		}
-
-		if (rootFolder[0].mediaType !== 'movie') {
-			throw new ValidationError('Root folder is not configured for movies', {
-				mediaType: rootFolder[0].mediaType,
-				expected: 'movie'
-			});
-		}
-
-		// Fetch movie details from TMDB
-		let movieDetails;
-		try {
-			movieDetails = await tmdb.getMovie(tmdbId);
-		} catch (error) {
-			throw new ExternalServiceError(
-				'TMDB',
-				error instanceof Error ? error.message : 'Failed to fetch movie details'
-			);
-		}
+		// Fetch movie details from TMDB (shared logic with error handling)
+		const movieDetails = await fetchMovieDetails(tmdbId);
 
 		// Generate folder path
 		const year = movieDetails.release_date
@@ -193,37 +174,14 @@ export const POST: RequestHandler = async ({ request }) => {
 			: undefined;
 		const folderName = generateMovieFolderName(movieDetails.title, year, tmdbId);
 
-		// Extract external IDs
-		let imdbId: string | null = null;
-		try {
-			const externalIds = await tmdb.getMovieExternalIds(tmdbId);
-			imdbId = externalIds.imdb_id;
-		} catch {
-			logger.warn('[API] Failed to fetch external IDs for movie', { tmdbId });
-		}
+		// Extract external IDs (shared logic)
+		const { imdbId } = await fetchMovieExternalIds(tmdbId);
 
-		// Get the default scoring profile if none specified
-		let effectiveProfileId = scoringProfileId;
-		if (!effectiveProfileId) {
-			const defaultProfile = await qualityFilter.getDefaultScoringProfile();
-			effectiveProfileId = defaultProfile.id;
-		}
+		// Get the effective scoring profile (shared logic)
+		const effectiveProfileId = await getEffectiveScoringProfileId(scoringProfileId);
 
-		// Get the default language profile if wantsSubtitles is true
-		let languageProfileId: string | null = null;
-		if (wantsSubtitles) {
-			// Use db.select() pattern instead of db.query.findFirst() for reliable boolean comparison
-			const [defaultLanguageProfile] = await db
-				.select()
-				.from(languageProfiles)
-				.where(eq(languageProfiles.isDefault, true))
-				.limit(1);
-			languageProfileId = defaultLanguageProfile?.id ?? null;
-
-			if (!languageProfileId) {
-				logger.warn('[API] No default language profile found for subtitle preferences', { tmdbId });
-			}
-		}
+		// Get the language profile if subtitles wanted (shared logic)
+		const languageProfileId = await getLanguageProfileId(wantsSubtitles, tmdbId);
 
 		// Insert movie into database
 		const [newMovie] = await db
@@ -250,58 +208,18 @@ export const POST: RequestHandler = async ({ request }) => {
 			})
 			.returning();
 
-		// Trigger search if requested and movie is monitored
+		// Trigger search if requested and movie is monitored (shared logic)
 		let searchTriggered = false;
 		if (shouldSearch && monitored) {
-			// Create a search worker to run in the background with tracking
-			const worker = new SearchWorker({
-				mediaType: 'movie',
-				mediaId: newMovie.id,
-				title: movieDetails.title,
+			const searchResult = await triggerMovieSearch({
+				movieId: newMovie.id,
 				tmdbId,
-				searchFn: async () => {
-					const result = await searchOnAdd.searchForMovie({
-						movieId: newMovie.id,
-						tmdbId,
-						imdbId,
-						title: movieDetails.title,
-						year,
-						scoringProfileId: scoringProfileId || undefined
-					});
-					return {
-						searched: 1,
-						found: result.success ? 1 : 0,
-						grabbed: result.success ? 1 : 0
-					};
-				}
+				imdbId,
+				title: movieDetails.title,
+				year,
+				scoringProfileId
 			});
-
-			try {
-				workerManager.spawnInBackground(worker);
-				searchTriggered = true;
-			} catch (error) {
-				// Concurrency limit reached - fall back to fire and forget
-				logger.warn('[API] Could not create search worker, running directly', {
-					movieId: newMovie.id,
-					error: error instanceof Error ? error.message : 'Unknown error'
-				});
-				searchOnAdd
-					.searchForMovie({
-						movieId: newMovie.id,
-						tmdbId,
-						imdbId,
-						title: movieDetails.title,
-						year,
-						scoringProfileId: scoringProfileId || undefined
-					})
-					.catch((err) => {
-						logger.warn('[API] Background search failed for movie', {
-							movieId: newMovie.id,
-							error: err instanceof Error ? err.message : 'Unknown error'
-						});
-					});
-				searchTriggered = true;
-			}
+			searchTriggered = searchResult.triggered;
 		}
 
 		return json({

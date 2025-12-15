@@ -4,6 +4,8 @@ import { getIndexerManager } from '$lib/server/indexers/IndexerManager';
 import { CINEPHAGE_STREAM_DEFINITION_ID } from '$lib/server/indexers/types';
 import { indexerUpdateSchema } from '$lib/validation/schemas';
 import { createChildLogger } from '$lib/logging';
+import { assertFound, parseBody } from '$lib/server/api/validate';
+import { NotFoundError } from '$lib/errors';
 
 const logger = createChildLogger({ module: 'IndexerAPI' });
 
@@ -11,11 +13,7 @@ export const GET: RequestHandler = async ({ params }) => {
 	const manager = await getIndexerManager();
 	const indexer = await manager.getIndexer(params.id);
 
-	if (!indexer) {
-		return json({ error: 'Indexer not found' }, { status: 404 });
-	}
-
-	return json(indexer);
+	return json(assertFound(indexer, 'Indexer', params.id));
 };
 
 export const DELETE: RequestHandler = async ({ params }) => {
@@ -25,39 +23,23 @@ export const DELETE: RequestHandler = async ({ params }) => {
 		await manager.deleteIndexer(params.id);
 		return json({ success: true });
 	} catch (error) {
-		const message = error instanceof Error ? error.message : 'Unknown error';
-		return json({ error: message }, { status: 500 });
+		if (error instanceof Error && error.message.includes('not found')) {
+			throw new NotFoundError('Indexer', params.id);
+		}
+		throw error;
 	}
 };
 
 export const PUT: RequestHandler = async ({ params, request }) => {
-	let data: unknown;
-	try {
-		data = await request.json();
-	} catch {
-		return json({ error: 'Invalid JSON body' }, { status: 400 });
-	}
-
-	const result = indexerUpdateSchema.safeParse(data);
-
-	if (!result.success) {
-		return json(
-			{
-				error: 'Validation failed',
-				details: result.error.flatten()
-			},
-			{ status: 400 }
-		);
-	}
-
-	const validated = result.data;
+	const validated = await parseBody(request, indexerUpdateSchema);
 	const manager = await getIndexerManager();
 
 	// Get existing indexer to compare settings (for detecting baseUrl changes)
-	const existingIndexer = await manager.getIndexer(params.id);
-	if (!existingIndexer) {
-		return json({ error: 'Indexer not found' }, { status: 404 });
-	}
+	const existingIndexer = assertFound(
+		await manager.getIndexer(params.id),
+		'Indexer',
+		params.id
+	);
 
 	// Check if this is the streaming indexer and capture old baseUrl
 	const isStreamingIndexer = existingIndexer.definitionId === CINEPHAGE_STREAM_DEFINITION_ID;
@@ -116,10 +98,9 @@ export const PUT: RequestHandler = async ({ params, request }) => {
 
 		return json({ success: true, indexer: updated });
 	} catch (error) {
-		const message = error instanceof Error ? error.message : 'Unknown error';
-		if (message.includes('not found')) {
-			return json({ error: message }, { status: 404 });
+		if (error instanceof Error && error.message.includes('not found')) {
+			throw new NotFoundError('Indexer', params.id);
 		}
-		return json({ error: message }, { status: 500 });
+		throw error;
 	}
 };

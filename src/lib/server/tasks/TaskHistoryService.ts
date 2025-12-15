@@ -17,7 +17,7 @@ const logger = createChildLogger({ module: 'TaskHistoryService' });
  * Service for managing task execution history
  */
 class TaskHistoryService {
-	private static instance: TaskHistoryService;
+	private static instance: TaskHistoryService | null = null;
 
 	/** In-memory set of currently running task IDs */
 	private runningTasks: Set<string> = new Set();
@@ -29,6 +29,11 @@ class TaskHistoryService {
 			TaskHistoryService.instance = new TaskHistoryService();
 		}
 		return TaskHistoryService.instance;
+	}
+
+	/** Reset the singleton instance (for testing) */
+	static resetInstance(): void {
+		TaskHistoryService.instance = null;
 	}
 
 	/**
@@ -316,4 +321,15 @@ class TaskHistoryService {
 	}
 }
 
+// Singleton getter - preferred way to access the service
+export function getTaskHistoryService(): TaskHistoryService {
+	return TaskHistoryService.getInstance();
+}
+
+// Reset singleton (for testing)
+export function resetTaskHistoryService(): void {
+	TaskHistoryService.resetInstance();
+}
+
+// Backward-compatible export (prefer getTaskHistoryService())
 export const taskHistoryService = TaskHistoryService.getInstance();

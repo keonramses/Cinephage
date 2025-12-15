@@ -82,7 +82,7 @@ export interface ImportJobResult {
  * automatically imports them to the library.
  */
 export class ImportService extends EventEmitter {
-	private static instance: ImportService;
+	private static instance: ImportService | null = null;
 	private parser: ReleaseParser;
 	private isProcessing = false;
 	private processingQueue: string[] = [];
@@ -97,6 +97,11 @@ export class ImportService extends EventEmitter {
 			ImportService.instance = new ImportService();
 		}
 		return ImportService.instance;
+	}
+
+	/** Reset the singleton instance (for testing) */
+	static resetInstance(): void {
+		ImportService.instance = null;
 	}
 
 	/**
@@ -1296,5 +1301,15 @@ export class ImportService extends EventEmitter {
 	}
 }
 
-// Singleton export
+// Singleton getter - preferred way to access the service
+export function getImportService(): ImportService {
+	return ImportService.getInstance();
+}
+
+// Reset singleton (for testing)
+export function resetImportService(): void {
+	ImportService.resetInstance();
+}
+
+// Backward-compatible export (prefer getImportService())
 export const importService = ImportService.getInstance();

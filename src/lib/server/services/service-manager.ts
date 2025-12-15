@@ -109,4 +109,24 @@ class ServiceManager {
 	}
 }
 
-export const serviceManager = new ServiceManager();
+// Singleton management
+let serviceManagerInstance: ServiceManager | null = null;
+
+// Singleton getter - preferred way to access the service
+export function getServiceManager(): ServiceManager {
+	if (!serviceManagerInstance) {
+		serviceManagerInstance = new ServiceManager();
+	}
+	return serviceManagerInstance;
+}
+
+// Reset singleton (for testing)
+export async function resetServiceManager(): Promise<void> {
+	if (serviceManagerInstance) {
+		await serviceManagerInstance.stopAll();
+		serviceManagerInstance = null;
+	}
+}
+
+// Backward-compatible export (prefer getServiceManager())
+export const serviceManager = getServiceManager();

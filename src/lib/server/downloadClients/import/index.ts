@@ -2,7 +2,12 @@
  * Import module exports
  */
 
-export { ImportService, importService } from './ImportService';
+export {
+	ImportService,
+	importService,
+	getImportService,
+	resetImportService
+} from './ImportService';
 export type { ImportResult, ImportJobResult } from './ImportService';
 
 export {

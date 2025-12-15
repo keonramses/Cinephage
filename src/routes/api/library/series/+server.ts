@@ -1,15 +1,21 @@
 import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types.js';
 import { db } from '$lib/server/db/index.js';
-import { series, seasons, episodes, rootFolders, languageProfiles } from '$lib/server/db/schema.js';
+import { series, seasons, episodes, rootFolders } from '$lib/server/db/schema.js';
 import { eq } from 'drizzle-orm';
 import { tmdb } from '$lib/server/tmdb.js';
 import { z } from 'zod';
 import { namingService, type MediaNamingInfo } from '$lib/server/library/naming/NamingService.js';
-import { searchOnAdd } from '$lib/server/library/searchOnAdd.js';
-import { qualityFilter } from '$lib/server/quality/index.js';
+import {
+	validateRootFolder,
+	getEffectiveScoringProfileId,
+	getLanguageProfileId,
+	fetchSeriesDetails,
+	fetchSeriesExternalIds,
+	triggerSeriesSearch
+} from '$lib/server/library/LibraryAddService.js';
+import { ValidationError } from '$lib/errors';
 import { logger } from '$lib/logging';
-import { SearchWorker, workerManager } from '$lib/server/workers/index.js';
 
 /**
  * Schema for adding a series to the library
@@ -123,14 +129,9 @@ export const POST: RequestHandler = async ({ request }) => {
 		const result = addSeriesSchema.safeParse(body);
 
 		if (!result.success) {
-			return json(
-				{
-					success: false,
-					error: 'Validation failed',
-					details: result.error.flatten()
-				},
-				{ status: 400 }
-			);
+			throw new ValidationError('Validation failed', {
+				details: result.error.flatten()
+			});
 		}
 
 		const {
@@ -166,37 +167,14 @@ export const POST: RequestHandler = async ({ request }) => {
 			);
 		}
 
-		// Verify root folder exists and is for TV
-		const rootFolder = await db
-			.select()
-			.from(rootFolders)
-			.where(eq(rootFolders.id, rootFolderId))
-			.limit(1);
+		// Verify root folder exists and is for TV (shared logic)
+		await validateRootFolder(rootFolderId, 'tv');
 
-		if (rootFolder.length === 0) {
-			return json({ success: false, error: 'Root folder not found' }, { status: 404 });
-		}
+		// Fetch series details from TMDB (shared logic with error handling)
+		const tvDetails = await fetchSeriesDetails(tmdbId);
 
-		if (rootFolder[0].mediaType !== 'tv') {
-			return json(
-				{ success: false, error: 'Root folder is not configured for TV shows' },
-				{ status: 400 }
-			);
-		}
-
-		// Fetch series details from TMDB
-		const tvDetails = await tmdb.getTVShow(tmdbId);
-
-		// Extract external IDs first (needed for folder name)
-		let imdbId: string | null = null;
-		let tvdbId: number | null = null;
-		try {
-			const externalIds = await tmdb.getTvExternalIds(tmdbId);
-			imdbId = externalIds.imdb_id;
-			tvdbId = externalIds.tvdb_id;
-		} catch {
-			logger.warn('[API] Failed to fetch external IDs for series', { tmdbId });
-		}
+		// Extract external IDs (shared logic)
+		const { imdbId, tvdbId } = await fetchSeriesExternalIds(tmdbId);
 
 		// Generate folder path
 		const year = tvDetails.first_air_date
@@ -210,28 +188,11 @@ export const POST: RequestHandler = async ({ request }) => {
 				?.filter((s) => s.season_number !== 0)
 				.reduce((sum, s) => sum + (s.episode_count ?? 0), 0) ?? 0;
 
-		// Get the default scoring profile if none specified
-		let effectiveProfileId = scoringProfileId;
-		if (!effectiveProfileId) {
-			const defaultProfile = await qualityFilter.getDefaultScoringProfile();
-			effectiveProfileId = defaultProfile.id;
-		}
+		// Get the effective scoring profile (shared logic)
+		const effectiveProfileId = await getEffectiveScoringProfileId(scoringProfileId);
 
-		// Get the default language profile if wantsSubtitles is true
-		let languageProfileId: string | null = null;
-		if (wantsSubtitles) {
-			// Use db.select() pattern instead of db.query.findFirst() for reliable boolean comparison
-			const [defaultLanguageProfile] = await db
-				.select()
-				.from(languageProfiles)
-				.where(eq(languageProfiles.isDefault, true))
-				.limit(1);
-			languageProfileId = defaultLanguageProfile?.id ?? null;
-
-			if (!languageProfileId) {
-				logger.warn('[API] No default language profile found for subtitle preferences', { tmdbId });
-			}
-		}
+		// Get the language profile if subtitles wanted (shared logic)
+		const languageProfileId = await getLanguageProfileId(wantsSubtitles, tmdbId);
 
 		// Insert series into database
 		const [newSeries] = await db
@@ -396,42 +357,15 @@ export const POST: RequestHandler = async ({ request }) => {
 			}
 		}
 
-		// Trigger search if requested and series is monitored
+		// Trigger search if requested and series is monitored (shared logic)
 		let searchTriggered = false;
 		if (shouldSearch && monitored && monitorType !== 'none') {
-			// Create a search worker to run in the background with tracking
-			const worker = new SearchWorker({
-				mediaType: 'series',
-				mediaId: newSeries.id,
-				title: tvDetails.name,
+			const searchResult = await triggerSeriesSearch({
+				seriesId: newSeries.id,
 				tmdbId,
-				searchFn: async () => {
-					const result = await searchOnAdd.searchForMissingEpisodes(newSeries.id);
-					return {
-						searched: result.summary.searched,
-						found: result.summary.found,
-						grabbed: result.summary.grabbed
-					};
-				}
+				title: tvDetails.name
 			});
-
-			try {
-				workerManager.spawnInBackground(worker);
-				searchTriggered = true;
-			} catch (error) {
-				// Concurrency limit reached - fall back to fire and forget
-				logger.warn('[API] Could not create search worker, running directly', {
-					seriesId: newSeries.id,
-					error: error instanceof Error ? error.message : 'Unknown error'
-				});
-				searchOnAdd.searchForMissingEpisodes(newSeries.id).catch((err) => {
-					logger.warn('[API] Background search failed for series', {
-						seriesId: newSeries.id,
-						error: err instanceof Error ? err.message : 'Unknown error'
-					});
-				});
-				searchTriggered = true;
-			}
+			searchTriggered = searchResult.triggered;
 		}
 
 		return json({

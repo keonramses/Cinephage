@@ -3,17 +3,18 @@ import { json } from '@sveltejs/kit';
 import { randomUUID } from 'node:crypto';
 
 import { logger } from '$lib/logging';
-import { librarySchedulerService } from '$lib/server/library/index.js';
+import { getLibraryScheduler, librarySchedulerService } from '$lib/server/library/index.js';
 import { isFFprobeAvailable, getFFprobeVersion } from '$lib/server/library/ffprobe.js';
-import { downloadMonitor } from '$lib/server/downloadClients/monitoring';
+import { getDownloadMonitor, downloadMonitor } from '$lib/server/downloadClients/monitoring';
 import { importService } from '$lib/server/downloadClients/import';
-import { monitoringScheduler } from '$lib/server/monitoring/MonitoringScheduler.js';
+import { getMonitoringScheduler, monitoringScheduler } from '$lib/server/monitoring/MonitoringScheduler.js';
 import { taskHistoryService } from '$lib/server/tasks/TaskHistoryService.js';
 import { getExternalIdService } from '$lib/server/services/ExternalIdService.js';
 import { qualityFilter } from '$lib/server/quality';
 import { isAppError } from '$lib/errors';
 import { initializeDatabase } from '$lib/server/db';
 import { getBrowserSolver } from '$lib/server/indexers/http/browser';
+import { getServiceManager } from '$lib/server/services/service-manager.js';
 
 /**
  * Content Security Policy header.
@@ -162,73 +163,54 @@ setImmediate(async () => {
 		// This is the only truly blocking operation (other services depend on DB schema)
 		await initializeDatabase();
 
-		// 2. Essential services run in parallel (fire-and-forget with error handling)
+		// 2. Register all services with ServiceManager for centralized lifecycle management
+		const serviceManager = getServiceManager();
+		serviceManager.register(getLibraryScheduler());
+		serviceManager.register(getDownloadMonitor());
+		serviceManager.register(getMonitoringScheduler());
+		serviceManager.register(getExternalIdService());
+
+		// 3. Essential services run in parallel (fire-and-forget with error handling)
 		// These don't block each other or HTTP responses
 		Promise.all([
 			initializeLibrary().catch((e) => logger.error('Library init failed', e)),
 			initializeDownloadMonitor().catch((e) => logger.error('Download monitor init failed', e))
 		]);
 
-		// 3. Background services start after a short delay
+		// 4. Background services start after a short delay
 		// The monitoring scheduler also has an internal 5-minute grace period before tasks run
 		setTimeout(() => {
 			initializeMonitoring().catch((e) => logger.error('Monitoring init failed', e));
 			initializeExternalIdService().catch((e) => logger.error('External ID init failed', e));
 		}, 5000);
 
-		// 4. Browser solver starts after other services (resource-intensive, lower priority)
+		// 5. Browser solver starts after other services (resource-intensive, lower priority)
 		// This is delayed to allow core services to stabilize first
 		setTimeout(() => {
 			initializeBrowserSolver().catch((e) => logger.error('BrowserSolver init failed', e));
 		}, 10000);
+
+		logger.info('All services registered with ServiceManager');
 	} catch (error) {
 		logger.error('Critical: Database initialization failed - application may not function', error);
 	}
 });
 
-// Graceful shutdown handler - stops all background services
+// Graceful shutdown handler - uses ServiceManager for coordinated shutdown
 async function gracefulShutdown(signal: string) {
 	logger.info(`Received ${signal}, shutting down gracefully...`);
 
 	const shutdownPromises: Promise<void>[] = [];
 
-	// Stop download monitor (clears poll timer)
-	if (downloadMonitorInitialized) {
-		shutdownPromises.push(
-			Promise.resolve(downloadMonitor.stop()).catch((e) =>
-				logger.error('Error stopping download monitor', e)
-			)
-		);
-	}
+	// Stop all registered services via ServiceManager
+	const serviceManager = getServiceManager();
+	shutdownPromises.push(
+		serviceManager
+			.stopAll()
+			.catch((e) => logger.error('Error stopping services via ServiceManager', e))
+	);
 
-	// Stop monitoring scheduler (clears scheduler timer)
-	if (monitoringInitialized) {
-		shutdownPromises.push(
-			monitoringScheduler
-				.shutdown()
-				.catch((e) => logger.error('Error stopping monitoring scheduler', e))
-		);
-	}
-
-	// Stop library scheduler (clears scan interval)
-	if (libraryInitialized) {
-		shutdownPromises.push(
-			Promise.resolve(librarySchedulerService.shutdown()).catch((e) =>
-				logger.error('Error stopping library scheduler', e)
-			)
-		);
-	}
-
-	// Stop external ID service
-	if (externalIdServiceInitialized) {
-		shutdownPromises.push(
-			getExternalIdService()
-				.stop()
-				.catch((e) => logger.error('Error stopping external ID service', e))
-		);
-	}
-
-	// Stop browser solver
+	// Stop browser solver (not a BackgroundService, handled separately)
 	if (browserSolverInitialized) {
 		shutdownPromises.push(
 			getBrowserSolver()

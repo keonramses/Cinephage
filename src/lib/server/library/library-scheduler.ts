@@ -13,6 +13,7 @@ import { mediaMatcherService } from './media-matcher.js';
 import { libraryWatcherService } from './library-watcher.js';
 import { EventEmitter } from 'events';
 import { logger } from '$lib/logging';
+import type { BackgroundService, ServiceStatus } from '$lib/server/services/background-service.js';
 
 /**
  * Default scan interval in hours
@@ -26,9 +27,16 @@ const MIN_SCAN_INTERVAL_HOURS = 1;
 
 /**
  * LibrarySchedulerService - Coordinate library scanning operations
+ *
+ * Implements BackgroundService for lifecycle management via ServiceManager.
  */
-export class LibrarySchedulerService extends EventEmitter {
-	private static instance: LibrarySchedulerService;
+export class LibrarySchedulerService extends EventEmitter implements BackgroundService {
+	private static instance: LibrarySchedulerService | null = null;
+
+	readonly name = 'LibraryScheduler';
+	private _status: ServiceStatus = 'pending';
+	private _error?: Error;
+
 	private scanInterval: NodeJS.Timeout | null = null;
 	private isInitialized = false;
 	private lastScanTime: Date | null = null;
@@ -37,11 +45,27 @@ export class LibrarySchedulerService extends EventEmitter {
 		super();
 	}
 
+	get status(): ServiceStatus {
+		return this._status;
+	}
+
+	get error(): Error | undefined {
+		return this._error;
+	}
+
 	static getInstance(): LibrarySchedulerService {
 		if (!LibrarySchedulerService.instance) {
 			LibrarySchedulerService.instance = new LibrarySchedulerService();
 		}
 		return LibrarySchedulerService.instance;
+	}
+
+	/** Reset the singleton instance (for testing) */
+	static async resetInstance(): Promise<void> {
+		if (LibrarySchedulerService.instance) {
+			await LibrarySchedulerService.instance.stop();
+			LibrarySchedulerService.instance = null;
+		}
 	}
 
 	/**
@@ -80,6 +104,33 @@ export class LibrarySchedulerService extends EventEmitter {
 
 		// Default to true
 		return true;
+	}
+
+	/**
+	 * Start the scheduler (non-blocking)
+	 * Implements BackgroundService.start()
+	 */
+	start(): void {
+		if (this.isInitialized || this._status === 'starting') {
+			logger.debug('[LibraryScheduler] Already initialized or starting');
+			return;
+		}
+
+		this._status = 'starting';
+		logger.info('[LibraryScheduler] Starting...');
+
+		// Run initialization in background
+		setImmediate(() => {
+			this.initialize()
+				.then(() => {
+					this._status = 'ready';
+				})
+				.catch((err) => {
+					this._error = err instanceof Error ? err : new Error(String(err));
+					this._status = 'error';
+					logger.error('[LibraryScheduler] Failed to initialize', this._error);
+				});
+		});
 	}
 
 	/**
@@ -138,10 +189,11 @@ export class LibrarySchedulerService extends EventEmitter {
 	}
 
 	/**
-	 * Shutdown the scheduler
+	 * Stop the scheduler
+	 * Implements BackgroundService.stop()
 	 */
-	async shutdown(): Promise<void> {
-		logger.info('[LibraryScheduler] Shutting down...');
+	async stop(): Promise<void> {
+		logger.info('[LibraryScheduler] Stopping...');
 
 		// Stop periodic scans
 		if (this.scanInterval) {
@@ -153,7 +205,15 @@ export class LibrarySchedulerService extends EventEmitter {
 		await libraryWatcherService.shutdown();
 
 		this.isInitialized = false;
-		logger.info('[LibraryScheduler] Shutdown complete');
+		this._status = 'pending';
+		logger.info('[LibraryScheduler] Stopped');
+	}
+
+	/**
+	 * Shutdown the scheduler (alias for stop, backward compatibility)
+	 */
+	async shutdown(): Promise<void> {
+		return this.stop();
 	}
 
 	/**
@@ -353,4 +413,15 @@ export class LibrarySchedulerService extends EventEmitter {
 	}
 }
 
+// Singleton getter - preferred way to access the service
+export function getLibraryScheduler(): LibrarySchedulerService {
+	return LibrarySchedulerService.getInstance();
+}
+
+// Reset singleton (for testing)
+export async function resetLibraryScheduler(): Promise<void> {
+	await LibrarySchedulerService.resetInstance();
+}
+
+// Backward-compatible export (prefer getLibraryScheduler())
 export const librarySchedulerService = LibrarySchedulerService.getInstance();

@@ -16,6 +16,7 @@ import { monitoringSettings } from '$lib/server/db/schema.js';
 import { EventEmitter } from 'events';
 import { logger } from '$lib/logging';
 import { taskHistoryService } from '$lib/server/tasks/TaskHistoryService.js';
+import type { BackgroundService, ServiceStatus } from '$lib/server/services/background-service.js';
 
 /**
  * Default intervals in hours for each task type
@@ -109,9 +110,16 @@ interface TaskStatus {
  * - Single 30-second interval checks which tasks are due
  * - Persists last-run times to database
  * - Grace period after startup before running any automated tasks
+ *
+ * Implements BackgroundService for lifecycle management via ServiceManager.
  */
-export class MonitoringScheduler extends EventEmitter {
-	private static instance: MonitoringScheduler;
+export class MonitoringScheduler extends EventEmitter implements BackgroundService {
+	private static instance: MonitoringScheduler | null = null;
+
+	readonly name = 'MonitoringScheduler';
+	private _status: ServiceStatus = 'pending';
+	private _error?: Error;
+
 	private schedulerTimer: NodeJS.Timeout | null = null;
 	private lastRunTimes: Map<string, Date> = new Map();
 	private taskIntervals: Map<string, number> = new Map(); // interval in hours
@@ -123,11 +131,27 @@ export class MonitoringScheduler extends EventEmitter {
 		super();
 	}
 
+	get status(): ServiceStatus {
+		return this._status;
+	}
+
+	get error(): Error | undefined {
+		return this._error;
+	}
+
 	static getInstance(): MonitoringScheduler {
 		if (!MonitoringScheduler.instance) {
 			MonitoringScheduler.instance = new MonitoringScheduler();
 		}
 		return MonitoringScheduler.instance;
+	}
+
+	/** Reset the singleton instance (for testing) */
+	static async resetInstance(): Promise<void> {
+		if (MonitoringScheduler.instance) {
+			await MonitoringScheduler.instance.stop();
+			MonitoringScheduler.instance = null;
+		}
 	}
 
 	/**
@@ -309,6 +333,33 @@ export class MonitoringScheduler extends EventEmitter {
 	}
 
 	/**
+	 * Start the scheduler (non-blocking)
+	 * Implements BackgroundService.start()
+	 */
+	start(): void {
+		if (this.isInitialized || this._status === 'starting') {
+			logger.debug('[MonitoringScheduler] Already initialized or starting');
+			return;
+		}
+
+		this._status = 'starting';
+		logger.info('[MonitoringScheduler] Starting...');
+
+		// Run initialization in background
+		setImmediate(() => {
+			this.initialize()
+				.then(() => {
+					this._status = 'ready';
+				})
+				.catch((err) => {
+					this._error = err instanceof Error ? err : new Error(String(err));
+					this._status = 'error';
+					logger.error('[MonitoringScheduler] Failed to initialize', this._error);
+				});
+		});
+	}
+
+	/**
 	 * Initialize the scheduler and start background tasks
 	 *
 	 * Uses a polling-based approach like Sonarr:
@@ -447,10 +498,11 @@ export class MonitoringScheduler extends EventEmitter {
 	}
 
 	/**
-	 * Shutdown the scheduler
+	 * Stop the scheduler
+	 * Implements BackgroundService.stop()
 	 */
-	async shutdown(): Promise<void> {
-		logger.info('[MonitoringScheduler] Shutting down...');
+	async stop(): Promise<void> {
+		logger.info('[MonitoringScheduler] Stopping...');
 
 		// Clear the polling timer
 		if (this.schedulerTimer) {
@@ -463,7 +515,15 @@ export class MonitoringScheduler extends EventEmitter {
 
 		this.isInitialized = false;
 		this.startupTime = null;
-		logger.info('[MonitoringScheduler] Shutdown complete');
+		this._status = 'pending';
+		logger.info('[MonitoringScheduler] Stopped');
+	}
+
+	/**
+	 * Shutdown the scheduler (alias for stop, backward compatibility)
+	 */
+	async shutdown(): Promise<void> {
+		return this.stop();
 	}
 
 	/**
@@ -761,5 +821,15 @@ export class MonitoringScheduler extends EventEmitter {
 	}
 }
 
-// Export singleton instance
+// Singleton getter - preferred way to access the service
+export function getMonitoringScheduler(): MonitoringScheduler {
+	return MonitoringScheduler.getInstance();
+}
+
+// Reset singleton (for testing)
+export async function resetMonitoringScheduler(): Promise<void> {
+	await MonitoringScheduler.resetInstance();
+}
+
+// Backward-compatible export (prefer getMonitoringScheduler())
 export const monitoringScheduler = MonitoringScheduler.getInstance();

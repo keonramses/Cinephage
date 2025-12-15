@@ -2,7 +2,12 @@
  * Download monitoring module exports
  */
 
-export { DownloadMonitorService, downloadMonitor } from './DownloadMonitorService';
+export {
+	DownloadMonitorService,
+	downloadMonitor,
+	getDownloadMonitor,
+	resetDownloadMonitor
+} from './DownloadMonitorService';
 export {
 	mapClientPathToLocal,
 	getContentPath,

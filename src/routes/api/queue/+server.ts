@@ -57,95 +57,91 @@ export const GET: RequestHandler = async ({ url }) => {
 					.from(downloadQueue)
 					.where(not(inArray(downloadQueue.status, TERMINAL_STATUSES)));
 
-		// Enrich with media info
-		const items: QueueItemWithMedia[] = [];
+		// Collect unique IDs for batch queries
+		const movieIds = [...new Set(rows.filter((r) => r.movieId).map((r) => r.movieId!))];
+		const seriesIds = [...new Set(rows.filter((r) => r.seriesId).map((r) => r.seriesId!))];
+		const clientIds = [...new Set(rows.map((r) => r.downloadClientId))];
 
-		for (const row of rows) {
-			const item: QueueItemWithMedia = {
-				id: row.id,
-				downloadClientId: row.downloadClientId,
-				downloadId: row.downloadId,
-				title: row.title,
-				indexerId: row.indexerId,
-				indexerName: row.indexerName,
-				downloadUrl: row.downloadUrl,
-				magnetUrl: row.magnetUrl,
-				protocol: row.protocol,
-				movieId: row.movieId,
-				seriesId: row.seriesId,
-				episodeIds: row.episodeIds as string[] | null,
-				seasonNumber: row.seasonNumber,
-				status: row.status as QueueStatus,
-				progress: parseFloat(row.progress || '0'),
-				size: row.size,
-				downloadSpeed: row.downloadSpeed || 0,
-				uploadSpeed: row.uploadSpeed || 0,
-				eta: row.eta,
-				ratio: parseFloat(row.ratio || '0'),
-				clientDownloadPath: row.clientDownloadPath,
-				outputPath: row.outputPath,
-				importedPath: row.importedPath,
-				quality: row.quality as QueueItem['quality'],
-				addedAt: row.addedAt || new Date().toISOString(),
-				startedAt: row.startedAt,
-				completedAt: row.completedAt,
-				importedAt: row.importedAt,
-				errorMessage: row.errorMessage,
-				importAttempts: row.importAttempts || 0,
-				lastAttemptAt: row.lastAttemptAt,
-				isAutomatic: !!row.isAutomatic,
-				isUpgrade: !!row.isUpgrade,
-				movie: null,
-				series: null,
-				downloadClient: null
-			};
-
-			// Get movie info
-			if (row.movieId) {
-				const [movie] = await db
-					.select({
-						id: movies.id,
-						tmdbId: movies.tmdbId,
-						title: movies.title,
-						year: movies.year,
-						posterPath: movies.posterPath
-					})
-					.from(movies)
-					.where(eq(movies.id, row.movieId))
-					.limit(1);
-				item.movie = movie || null;
-			}
-
-			// Get series info
-			if (row.seriesId) {
-				const [seriesData] = await db
-					.select({
-						id: series.id,
-						tmdbId: series.tmdbId,
-						title: series.title,
-						year: series.year,
-						posterPath: series.posterPath
-					})
-					.from(series)
-					.where(eq(series.id, row.seriesId))
-					.limit(1);
-				item.series = seriesData || null;
-			}
-
-			// Get client info
-			const [client] = await db
+		// Batch fetch all related data in parallel
+		const [moviesData, seriesData, clientsData] = await Promise.all([
+			movieIds.length
+				? db
+						.select({
+							id: movies.id,
+							tmdbId: movies.tmdbId,
+							title: movies.title,
+							year: movies.year,
+							posterPath: movies.posterPath
+						})
+						.from(movies)
+						.where(inArray(movies.id, movieIds))
+				: [],
+			seriesIds.length
+				? db
+						.select({
+							id: series.id,
+							tmdbId: series.tmdbId,
+							title: series.title,
+							year: series.year,
+							posterPath: series.posterPath
+						})
+						.from(series)
+						.where(inArray(series.id, seriesIds))
+				: [],
+			db
 				.select({
 					id: downloadClients.id,
 					name: downloadClients.name,
 					implementation: downloadClients.implementation
 				})
 				.from(downloadClients)
-				.where(eq(downloadClients.id, row.downloadClientId))
-				.limit(1);
-			item.downloadClient = client || null;
+				.where(inArray(downloadClients.id, clientIds))
+		]);
 
-			items.push(item);
-		}
+		// Build lookup maps for O(1) access
+		const movieMap = new Map(moviesData.map((m) => [m.id, m]));
+		const seriesMap = new Map(seriesData.map((s) => [s.id, s]));
+		const clientMap = new Map(clientsData.map((c) => [c.id, c]));
+
+		// Enrich queue items with media info using maps
+		const items: QueueItemWithMedia[] = rows.map((row) => ({
+			id: row.id,
+			downloadClientId: row.downloadClientId,
+			downloadId: row.downloadId,
+			title: row.title,
+			indexerId: row.indexerId,
+			indexerName: row.indexerName,
+			downloadUrl: row.downloadUrl,
+			magnetUrl: row.magnetUrl,
+			protocol: row.protocol,
+			movieId: row.movieId,
+			seriesId: row.seriesId,
+			episodeIds: row.episodeIds as string[] | null,
+			seasonNumber: row.seasonNumber,
+			status: row.status as QueueStatus,
+			progress: parseFloat(row.progress || '0'),
+			size: row.size,
+			downloadSpeed: row.downloadSpeed || 0,
+			uploadSpeed: row.uploadSpeed || 0,
+			eta: row.eta,
+			ratio: parseFloat(row.ratio || '0'),
+			clientDownloadPath: row.clientDownloadPath,
+			outputPath: row.outputPath,
+			importedPath: row.importedPath,
+			quality: row.quality as QueueItem['quality'],
+			addedAt: row.addedAt || new Date().toISOString(),
+			startedAt: row.startedAt,
+			completedAt: row.completedAt,
+			importedAt: row.importedAt,
+			errorMessage: row.errorMessage,
+			importAttempts: row.importAttempts || 0,
+			lastAttemptAt: row.lastAttemptAt,
+			isAutomatic: !!row.isAutomatic,
+			isUpgrade: !!row.isUpgrade,
+			movie: row.movieId ? movieMap.get(row.movieId) || null : null,
+			series: row.seriesId ? seriesMap.get(row.seriesId) || null : null,
+			downloadClient: clientMap.get(row.downloadClientId) || null
+		}))
 
 		// Get stats
 		const stats = await downloadMonitor.getStats();

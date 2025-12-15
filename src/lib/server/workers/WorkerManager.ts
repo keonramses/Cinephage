@@ -351,5 +351,24 @@ class WorkerManagerImpl extends EventEmitter {
 	}
 }
 
-// Singleton instance
-export const workerManager = new WorkerManagerImpl();
+// Singleton management
+let workerManagerInstance: WorkerManagerImpl | null = null;
+
+// Singleton getter - preferred way to access the service
+export function getWorkerManager(): WorkerManagerImpl {
+	if (!workerManagerInstance) {
+		workerManagerInstance = new WorkerManagerImpl();
+	}
+	return workerManagerInstance;
+}
+
+// Reset singleton (for testing)
+export function resetWorkerManager(): void {
+	if (workerManagerInstance) {
+		workerManagerInstance.shutdown();
+		workerManagerInstance = null;
+	}
+}
+
+// Backward-compatible export (prefer getWorkerManager())
+export const workerManager = getWorkerManager();

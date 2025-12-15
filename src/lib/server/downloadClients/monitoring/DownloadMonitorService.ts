@@ -15,6 +15,7 @@ import { getDownloadClientManager } from '../DownloadClientManager';
 import { mapClientPathToLocal } from './PathMapping';
 import { extractInfoHash } from '../utils/hashUtils';
 import { logger } from '$lib/logging';
+import type { BackgroundService, ServiceStatus } from '$lib/server/services/background-service.js';
 import type { IDownloadClient, DownloadInfo } from '../core/interfaces';
 import type { DownloadClient } from '$lib/types/downloadClient';
 import type { QueueStatus, QueueItem, QueueStats, QueueEvent } from '$lib/types/queue';
@@ -131,10 +132,15 @@ export interface DownloadMonitorEvents {
  * Download Monitor Service
  *
  * Singleton service that continuously monitors download clients and updates
- * the download queue in the database.
+ * the download queue in the database. Implements BackgroundService for
+ * lifecycle management via ServiceManager.
  */
-export class DownloadMonitorService extends EventEmitter {
-	private static instance: DownloadMonitorService;
+export class DownloadMonitorService extends EventEmitter implements BackgroundService {
+	private static instance: DownloadMonitorService | null = null;
+
+	readonly name = 'DownloadMonitor';
+	private _status: ServiceStatus = 'pending';
+	private _error?: Error;
 
 	private isRunning = false;
 	private pollTimer: ReturnType<typeof setTimeout> | null = null;
@@ -148,6 +154,14 @@ export class DownloadMonitorService extends EventEmitter {
 		super();
 	}
 
+	get status(): ServiceStatus {
+		return this._status;
+	}
+
+	get error(): Error | undefined {
+		return this._error;
+	}
+
 	static getInstance(): DownloadMonitorService {
 		if (!DownloadMonitorService.instance) {
 			DownloadMonitorService.instance = new DownloadMonitorService();
@@ -155,22 +169,41 @@ export class DownloadMonitorService extends EventEmitter {
 		return DownloadMonitorService.instance;
 	}
 
+	/** Reset the singleton instance (for testing) */
+	static async resetInstance(): Promise<void> {
+		if (DownloadMonitorService.instance) {
+			await DownloadMonitorService.instance.stop();
+			DownloadMonitorService.instance = null;
+		}
+	}
+
 	/**
-	 * Start the monitoring service
+	 * Start the monitoring service (non-blocking)
+	 * Implements BackgroundService.start()
 	 */
-	async start(): Promise<void> {
-		if (this.isRunning) {
+	start(): void {
+		if (this.isRunning || this._status === 'starting') {
 			logger.debug('Download monitor already running');
 			return;
 		}
 
+		this._status = 'starting';
 		this.isRunning = true;
 		logger.info('Starting download monitor service');
 
-		// Perform startup sync to reconcile orphaned downloads
-		await this.performStartupSync();
-
-		this.schedulePoll(0); // Poll immediately on start
+		// Perform async startup in background
+		setImmediate(() => {
+			this.performStartupSync()
+				.then(() => {
+					this._status = 'ready';
+					this.schedulePoll(0); // Poll immediately on start
+				})
+				.catch((err) => {
+					this._error = err instanceof Error ? err : new Error(String(err));
+					this._status = 'error';
+					logger.error('Download monitor startup failed', this._error);
+				});
+		});
 	}
 
 	/**
@@ -466,8 +499,9 @@ export class DownloadMonitorService extends EventEmitter {
 
 	/**
 	 * Stop the monitoring service
+	 * Implements BackgroundService.stop()
 	 */
-	stop(): void {
+	async stop(): Promise<void> {
 		if (!this.isRunning) return;
 
 		this.isRunning = false;
@@ -475,6 +509,7 @@ export class DownloadMonitorService extends EventEmitter {
 			clearTimeout(this.pollTimer);
 			this.pollTimer = null;
 		}
+		this._status = 'pending';
 		logger.info('Stopped download monitor service');
 	}
 
@@ -1361,5 +1396,15 @@ export class DownloadMonitorService extends EventEmitter {
 	}
 }
 
-// Singleton export
+// Singleton getter - preferred way to access the service
+export function getDownloadMonitor(): DownloadMonitorService {
+	return DownloadMonitorService.getInstance();
+}
+
+// Reset singleton (for testing)
+export async function resetDownloadMonitor(): Promise<void> {
+	await DownloadMonitorService.resetInstance();
+}
+
+// Backward-compatible export (prefer getDownloadMonitor())
 export const downloadMonitor = DownloadMonitorService.getInstance();
