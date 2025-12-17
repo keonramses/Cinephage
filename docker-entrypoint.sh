@@ -32,9 +32,5 @@ if [ -d "$BUNDLED_DIR" ]; then
   fi
 fi
 
-# Run database migrations and start app as node user
-echo "Running database migrations..."
-su-exec node npm run db:push
-
 echo "Starting application..."
 exec su-exec node "$@"
