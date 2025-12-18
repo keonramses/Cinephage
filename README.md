@@ -58,13 +58,21 @@ git clone https://github.com/MoldyTaint/cinephage.git
 cd cinephage
 ```
 
-Edit `docker-compose.yaml` to set your media paths:
+Create a `.env` file from the example (or use environment variables directly):
 
-```yaml
-volumes:
-  - ./data:/app/data
-  - ./logs:/app/logs
-  - /your/media:/media
+```bash
+cp .env.docker.example .env
+```
+
+Edit `.env` to configure your settings (or edit `docker-compose.yaml` directly):
+
+```bash
+# Example .env file
+CINEPHAGE_PORT=3000
+CINEPHAGE_MEDIA_PATH=/path/to/your/media
+CINEPHAGE_PUID=1000
+CINEPHAGE_PGID=1000
+CINEPHAGE_ORIGIN=http://localhost:3000
 ```
 
 Then start it:

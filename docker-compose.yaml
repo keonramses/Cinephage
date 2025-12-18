@@ -2,34 +2,34 @@ services:
   cinephage:
     build: .
     image: cinephage:latest
-    container_name: cinephage
-    restart: unless-stopped
+    container_name: ${CINEPHAGE_CONTAINER_NAME:-cinephage}
+    restart: ${CINEPHAGE_RESTART_POLICY:-unless-stopped}
     init: true
     stop_grace_period: 30s
     ports:
-      - '3000:3000'
+      - "${CINEPHAGE_PORT:-3000}:3000"
     volumes:
       # Persist the SQLite database and settings
-      - ./data:/app/data
+      - ${CINEPHAGE_DATA_PATH:-./data}:/app/data
       # Persist logs
-      - ./logs:/app/logs
+      - ${CINEPHAGE_LOGS_PATH:-./logs}:/app/logs
       # Mount your media library (adjust the host path on the left)
-      - /path/to/your/media:/media
+      - ${CINEPHAGE_MEDIA_PATH:-/path/to/your/media}:/media
     environment:
       # User/Group ID - set these to match your host user (run 'id' to find yours)
-      - PUID=1000
-      - PGID=1000
+      - PUID=${CINEPHAGE_PUID:-1000}
+      - PGID=${CINEPHAGE_PGID:-1000}
       # REQUIRED: Set this to your server's access URL for CSRF protection
       # Examples: http://localhost:3000, https://cinephage.yourdomain.com
-      - ORIGIN=http://localhost:3000
-      - LOG_TO_FILE=true
-      - TZ=UTC
+      - ORIGIN=${CINEPHAGE_ORIGIN:-http://localhost:3000}
+      - LOG_TO_FILE=${CINEPHAGE_LOG_TO_FILE:-true}
+      - TZ=${CINEPHAGE_TZ:-UTC}
       # Browser solver (Cloudflare bypass) - requires Chromium, not included in image
-      # - BROWSER_SOLVER_ENABLED=true
+      - BROWSER_SOLVER_ENABLED=${CINEPHAGE_BROWSER_SOLVER_ENABLED:-false}
       # Worker limits (optional):
-      # - WORKER_MAX_STREAMS=10
-      # - WORKER_MAX_IMPORTS=5
-      # - WORKER_MAX_SCANS=2
+      - WORKER_MAX_STREAMS=${CINEPHAGE_WORKER_MAX_STREAMS:-10}
+      - WORKER_MAX_IMPORTS=${CINEPHAGE_WORKER_MAX_IMPORTS:-5}
+      - WORKER_MAX_SCANS=${CINEPHAGE_WORKER_MAX_SCANS:-2}
     # Uncomment to set resource limits:
     # deploy:
     #   resources:
