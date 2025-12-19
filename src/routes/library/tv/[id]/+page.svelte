@@ -22,6 +22,7 @@
 	let isRenameModalOpen = $state(false);
 	let isSaving = $state(false);
 	let isRefreshing = $state(false);
+	let refreshProgress = $state<{ current: number; total: number; message: string } | null>(null);
 	let _isDeleting = $state(false);
 
 	// Selection state
@@ -157,21 +158,75 @@
 
 	async function handleRefresh() {
 		isRefreshing = true;
+		refreshProgress = null;
+
 		try {
 			const response = await fetch(`/api/library/series/${data.series.id}/refresh`, {
 				method: 'POST'
 			});
 
-			if (response.ok) {
+			if (!response.ok) {
+				console.error('Failed to refresh series');
+				return;
+			}
+
+			// Read the streaming response
+			const reader = response.body?.getReader();
+			if (!reader) {
+				console.error('No response body');
+				return;
+			}
+
+			const decoder = new TextDecoder();
+			let buffer = '';
+			let completed = false;
+
+			while (true) {
+				const { done, value } = await reader.read();
+				if (done) break;
+
+				buffer += decoder.decode(value, { stream: true });
+
+				// Parse SSE events from buffer
+				const lines = buffer.split('\n');
+				buffer = lines.pop() || ''; // Keep incomplete line in buffer
+
+				let eventType = '';
+				for (const line of lines) {
+					if (line.startsWith('event: ')) {
+						eventType = line.slice(7).trim();
+					} else if (line.startsWith('data: ')) {
+						const jsonStr = line.slice(6);
+						try {
+							const eventData = JSON.parse(jsonStr);
+
+							if (eventType === 'progress' || eventData.type === 'progress') {
+								refreshProgress = {
+									current: eventData.seasonNumber,
+									total: eventData.totalSeasons,
+									message: eventData.message
+								};
+							} else if (eventType === 'complete' || eventData.type === 'complete') {
+								completed = true;
+							} else if (eventType === 'error' || eventData.type === 'error') {
+								console.error('Refresh error:', eventData.message);
+							}
+						} catch {
+							// Ignore parse errors (e.g., heartbeat comments)
+						}
+					}
+				}
+			}
+
+			if (completed) {
 				// Reload the page to get updated data
 				window.location.reload();
-			} else {
-				console.error('Failed to refresh series');
 			}
 		} catch (error) {
 			console.error('Failed to refresh series:', error);
 		} finally {
 			isRefreshing = false;
+			refreshProgress = null;
 		}
 	}
 
@@ -706,6 +761,7 @@
 		series={data.series}
 		{qualityProfileName}
 		refreshing={isRefreshing}
+		{refreshProgress}
 		{missingEpisodeCount}
 		{downloadingCount}
 		{searchingMissing}

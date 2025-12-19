@@ -41,10 +41,17 @@
 		grabbed: number;
 	}
 
+	interface RefreshProgress {
+		current: number;
+		total: number;
+		message: string;
+	}
+
 	interface Props {
 		series: SeriesData;
 		qualityProfileName?: string | null;
 		refreshing?: boolean;
+		refreshProgress?: RefreshProgress | null;
 		missingEpisodeCount?: number;
 		downloadingCount?: number;
 		searchingMissing?: boolean;
@@ -62,6 +69,7 @@
 		series,
 		qualityProfileName = null,
 		refreshing = false,
+		refreshProgress = null,
 		missingEpisodeCount = 0,
 		downloadingCount = 0,
 		searchingMissing = false,
@@ -214,12 +222,23 @@
 						<span class="hidden sm:inline">Season Packs</span>
 					</button>
 					<button
-						class="btn btn-ghost btn-sm"
+						class="btn gap-2 btn-ghost btn-sm"
 						onclick={onRefresh}
 						disabled={refreshing}
 						title="Refresh from TMDB"
 					>
-						<RefreshCw size={16} class={refreshing ? 'animate-spin' : ''} />
+						{#if refreshing}
+							<Loader2 size={16} class="animate-spin" />
+							{#if refreshProgress}
+								<span class="hidden sm:inline"
+									>Season {refreshProgress.current}/{refreshProgress.total}</span
+								>
+							{:else}
+								<span class="hidden sm:inline">Refreshing...</span>
+							{/if}
+						{:else}
+							<RefreshCw size={16} />
+						{/if}
 					</button>
 					<button class="btn btn-ghost btn-sm" onclick={onEdit} title="Edit">
 						<Settings size={16} />
