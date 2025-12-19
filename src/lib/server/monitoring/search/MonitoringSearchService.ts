@@ -22,6 +22,7 @@ import {
 import { eq, and, lte, gte, inArray } from 'drizzle-orm';
 import { getIndexerManager } from '$lib/server/indexers/IndexerManager.js';
 import { getDownloadClientManager } from '$lib/server/downloadClients/DownloadClientManager.js';
+import { getReleaseGrabService } from '$lib/server/downloads/ReleaseGrabService.js';
 import { downloadMonitor } from '$lib/server/downloadClients/monitoring/index.js';
 import { ReleaseParser } from '$lib/server/indexers/parser/ReleaseParser.js';
 import { extractInfoHash } from '$lib/server/downloadClients/utils/hashUtils.js';
@@ -2020,7 +2021,8 @@ export class MonitoringSearchService {
 	}
 
 	/**
-	 * Grab a release and add to download queue
+	 * Grab a release and add to download queue.
+	 * Delegates to ReleaseGrabService for proper protocol-specific handling.
 	 */
 	private async grabRelease(
 		release: EnhancedReleaseResult,
@@ -2034,114 +2036,21 @@ export class MonitoringSearchService {
 			isUpgrade?: boolean;
 		}
 	): Promise<{ success: boolean; releaseName?: string; error?: string; queueItemId?: string }> {
-		const { mediaType, movieId, seriesId, episodeIds, seasonNumber, isAutomatic, isUpgrade } =
-			options;
-
-		try {
-			// Handle streaming protocol specially - create .strm file directly
-			if (release.protocol === 'streaming') {
-				return await this.handleStreamingGrab(release, options);
-			}
-
-			const clientManager = getDownloadClientManager();
-
-			// Determine protocol from release (default to torrent for backwards compatibility)
-			const protocol = release.protocol === 'usenet' ? 'usenet' : 'torrent';
-			const clientResult = await clientManager.getClientForProtocol(protocol);
-
-			if (!clientResult) {
-				return { success: false, error: `No enabled ${protocol} download client configured` };
-			}
-
-			const { client: clientConfig, instance: clientInstance } = clientResult;
-
-			// Determine category
-			const category = mediaType === 'movie' ? clientConfig.movieCategory : clientConfig.tvCategory;
-			const paused = clientConfig.initialState === 'pause';
-
-			// Parse quality
-			const parsed = parser.parse(release.title);
-			const quality = {
-				resolution: parsed.resolution ?? undefined,
-				source: parsed.source ?? undefined,
-				codec: parsed.codec ?? undefined,
-				hdr: parsed.hdr ?? undefined
-			};
-
-			// Get indexer seed settings
-			let seedRatioLimit: number | undefined;
-			let seedTimeLimit: number | undefined;
-
-			if (release.indexerId) {
-				const indexerManager = await getIndexerManager();
-				const indexer = await indexerManager.getIndexer(release.indexerId);
-				if (indexer) {
-					seedRatioLimit = indexer.seedRatio ? parseFloat(indexer.seedRatio) : undefined;
-					seedTimeLimit = indexer.seedTime ?? undefined;
-				}
-			}
-
-			// Fallback to client defaults
-			seedRatioLimit =
-				seedRatioLimit ??
-				(clientConfig.seedRatioLimit ? parseFloat(clientConfig.seedRatioLimit) : undefined);
-			seedTimeLimit = seedTimeLimit ?? clientConfig.seedTimeLimit ?? undefined;
-
-			// Send to download client
-			const hash = await clientInstance.addDownload({
-				magnetUri: release.magnetUrl,
-				downloadUrl: release.downloadUrl,
-				category,
-				paused,
-				priority: clientConfig.recentPriority,
-				seedRatioLimit,
-				seedTimeLimit
-			});
-
-			const infoHash = release.infoHash || hash || extractInfoHash(release.magnetUrl);
-
-			// Create queue record
-			const queueItem = await downloadMonitor.addToQueue({
-				downloadClientId: clientConfig.id,
-				downloadId: hash || infoHash || release.magnetUrl || release.downloadUrl || '',
-				infoHash: infoHash || undefined,
-				title: release.title,
-				indexerId: release.indexerId,
-				indexerName: release.indexerName,
-				downloadUrl: release.downloadUrl,
-				magnetUrl: release.magnetUrl,
-				protocol: release.protocol,
-				movieId,
-				seriesId,
-				episodeIds,
-				seasonNumber,
-				quality,
-				isAutomatic: isAutomatic ?? false,
-				isUpgrade: isUpgrade ?? false
-			});
-
-			logger.info('[MonitoringSearch] Release grabbed', {
-				title: release.title,
-				movieId,
-				seriesId,
-				queueItemId: queueItem.id
-			});
-
-			return {
-				success: true,
-				releaseName: release.title,
-				queueItemId: queueItem.id
-			};
-		} catch (error) {
-			const message = error instanceof Error ? error.message : 'Unknown error';
-			logger.error('[MonitoringSearch] Failed to grab release', { error: message });
-			return { success: false, error: message };
-		}
+		const releaseGrabService = getReleaseGrabService();
+		return releaseGrabService.grabRelease(release, {
+			...options,
+			isAutomatic: options.isAutomatic ?? true
+		});
 	}
+
+	// TODO: Remove handleStreamingGrab and handleStreamingSeasonPack methods
+	// These are now dead code since grabRelease() delegates to ReleaseGrabService
+	// which has its own streaming handling. Can be safely deleted in a future cleanup.
 
 	/**
 	 * Handle streaming releases - create .strm file directly instead of using download client
 	 * Supports both single episodes and season packs
+	 * @deprecated No longer called - ReleaseGrabService handles streaming now
 	 */
 	private async handleStreamingGrab(
 		release: EnhancedReleaseResult,
