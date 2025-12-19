@@ -2044,13 +2044,16 @@ export class MonitoringSearchService {
 			}
 
 			const clientManager = getDownloadClientManager();
-			const enabledClients = await clientManager.getEnabledClients();
 
-			if (enabledClients.length === 0) {
-				return { success: false, error: 'No enabled download clients' };
+			// Determine protocol from release (default to torrent for backwards compatibility)
+			const protocol = release.protocol === 'usenet' ? 'usenet' : 'torrent';
+			const clientResult = await clientManager.getClientForProtocol(protocol);
+
+			if (!clientResult) {
+				return { success: false, error: `No enabled ${protocol} download client configured` };
 			}
 
-			const { client: clientConfig, instance: clientInstance } = enabledClients[0];
+			const { client: clientConfig, instance: clientInstance } = clientResult;
 
 			// Determine category
 			const category = mediaType === 'movie' ? clientConfig.movieCategory : clientConfig.tvCategory;

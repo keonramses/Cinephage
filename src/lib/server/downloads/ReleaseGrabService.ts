@@ -132,14 +132,17 @@ class ReleaseGrabService {
 			options;
 
 		const clientManager = getDownloadClientManager();
-		const enabledClients = await clientManager.getEnabledClients();
 
-		if (enabledClients.length === 0) {
-			logger.warn('[ReleaseGrab] No enabled download clients');
-			return { success: false, error: 'No enabled download clients configured' };
+		// Determine protocol from release (default to torrent for backwards compatibility)
+		const protocol = release.protocol === 'usenet' ? 'usenet' : 'torrent';
+		const clientResult = await clientManager.getClientForProtocol(protocol);
+
+		if (!clientResult) {
+			logger.warn('[ReleaseGrab] No enabled download client for protocol', { protocol });
+			return { success: false, error: `No enabled ${protocol} download client configured` };
 		}
 
-		const { client: clientConfig, instance: clientInstance } = enabledClients[0];
+		const { client: clientConfig, instance: clientInstance } = clientResult;
 
 		// Determine category based on media type
 		const category = mediaType === 'movie' ? clientConfig.movieCategory : clientConfig.tvCategory;
