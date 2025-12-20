@@ -61,7 +61,8 @@ export class HexaProvider extends BaseProvider {
 			url = `https://themoviedb.hexa.su/api/tmdb/movie/${params.tmdbId}/images`;
 		} else {
 			if (params.season === undefined || params.episode === undefined) {
-				throw new Error('Season and episode required for TV shows');
+				logger.debug('Hexa requires season and episode for TV shows', streamLog);
+				return [];
 			}
 			url = `https://themoviedb.hexa.su/api/tmdb/tv/${params.tmdbId}/season/${params.season}/episode/${params.episode}/images`;
 		}
@@ -110,7 +111,8 @@ export class HexaProvider extends BaseProvider {
 			this.createStreamResult(streamUrl, {
 				quality: 'Auto',
 				title: 'Hexa Stream',
-				subtitles
+				subtitles,
+				referer: '' // Hexa CDN rejects requests with referer headers
 			})
 		];
 	}

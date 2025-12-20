@@ -46,7 +46,7 @@ export class XPrimeProvider extends BaseProvider {
 		id: 'xprime',
 		name: 'XPrime',
 		priority: 30,
-		enabledByDefault: true,
+		enabledByDefault: false, // Disabled: 0% success rate, always returns 403/404
 		supportsMovies: true,
 		supportsTv: true,
 		supportsAnime: false,

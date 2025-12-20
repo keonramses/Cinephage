@@ -4,8 +4,7 @@
  * Resolves Megaup embed URLs to actual HLS streams.
  *
  * Supported domains:
- * - megaup.site
- * - megaup.live
+ * - megaup.site, megaup.live, megaup*.online (and numbered variants)
  * - 4spromax.site
  *
  * Pattern:
@@ -37,11 +36,33 @@ export class MegaupHoster extends BaseHoster {
 	readonly config: HosterConfig = {
 		id: 'megaup',
 		name: 'Megaup',
+		// Core domains - also matches megaup*.online variants via canHandle override
 		domains: ['megaup.site', 'megaup.live', '4spromax.site'],
 		embedPathPattern: '/e/',
 		mediaPathPattern: '/media/',
 		timeout: 15000
 	};
+
+	/**
+	 * Check if this hoster can handle the given URL
+	 * Extends base to support megaup numbered domains (megaup22.online, etc.)
+	 */
+	canHandle(url: string): boolean {
+		// First check exact domain match
+		if (super.canHandle(url)) {
+			return true;
+		}
+
+		// Then check for megaup pattern domains (e.g., megaup22.online)
+		try {
+			const parsed = new URL(url);
+			const domain = parsed.hostname.replace(/^www\./, '');
+			// Match megaup followed by optional numbers, then .online or .live
+			return /^megaup\d*\.(online|live|site)$/.test(domain);
+		} catch {
+			return false;
+		}
+	}
 
 	protected async doResolve(embedUrl: string): Promise<HosterStreamSource[]> {
 		logger.debug('Megaup resolving embed', { embedUrl, ...streamLog });

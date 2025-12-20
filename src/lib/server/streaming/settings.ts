@@ -35,8 +35,6 @@ export type StreamingProvider =
 const DEFAULT_ENABLED_PROVIDERS: StreamingProvider[] = [
 	'videasy',
 	'vidlink',
-	'xprime',
-	'smashy',
 	'hexa'
 ];
 
@@ -144,8 +142,8 @@ const PROVIDER_TOGGLES: Array<{
 }> = [
 	{ id: 'videasy', settingsKey: 'enableVideasy', enabledByDefault: true },
 	{ id: 'vidlink', settingsKey: 'enableVidlink', enabledByDefault: true },
-	{ id: 'xprime', settingsKey: 'enableXprime', enabledByDefault: true },
-	{ id: 'smashy', settingsKey: 'enableSmashy', enabledByDefault: true },
+	{ id: 'xprime', settingsKey: 'enableXprime', enabledByDefault: false },
+	{ id: 'smashy', settingsKey: 'enableSmashy', enabledByDefault: false },
 	{ id: 'hexa', settingsKey: 'enableHexa', enabledByDefault: true },
 	{ id: 'yflix', settingsKey: 'enableYflix', enabledByDefault: false },
 	{ id: 'mapple', settingsKey: 'enableMapple', enabledByDefault: false },

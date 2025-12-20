@@ -36,11 +36,11 @@ export class OneTouchTVProvider extends BaseProvider {
 		id: 'onetouchtv',
 		name: 'OneTouchTV',
 		priority: 80,
-		enabledByDefault: true, // Content ID lookup works reliably
-		supportsMovies: false, // TV only
-		supportsTv: true,
+		enabledByDefault: false, // Disabled: no TMDB lookup database available (site is JS-rendered)
+		supportsMovies: false,
+		supportsTv: false,
 		supportsAnime: false,
-		supportsAsianDrama: false,
+		supportsAsianDrama: true, // Asian dramas only
 		requiresProxy: true,
 		referer: 'https://onetouchtv.me/',
 		timeout: 15000

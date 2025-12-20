@@ -172,11 +172,15 @@ export class YFlixProvider extends BaseProvider {
 			return this.resolveEmbedUrl(streamUrl);
 		}
 
+
 		return [
-			this.createStreamResult(streamUrl, {
+			{
+				url: streamUrl,
 				quality: 'Auto',
-				title: 'YFlix Stream'
-			})
+				title: 'YFlix Stream',
+				streamType: 'hls',
+				referer: this.config.referer
+			}
 		];
 	}
 

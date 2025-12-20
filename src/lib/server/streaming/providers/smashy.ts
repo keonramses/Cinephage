@@ -1,11 +1,17 @@
 /**
  * Smashystream Provider (Vidstack)
  *
- * Has two types of decryption:
- * - Type 1: smashystream (videosmashyi)
+ * Based on reference implementation from Inspiration/EncDecEndpoints/tests/src/providers/vidstack.ts
+ *
+ * Servers:
+ * - Type 1: smashystream, videosmashyi
  * - Type 2: videofsh, short2embed, videoophim
  *
- * Pattern: Get token → Fetch player data → Fetch stream → Decrypt
+ * URL Patterns:
+ * - Type 1 Movie: /{server}/{imdbId}?token=...
+ * - Type 1 TV: /{server}/{imdbId}/{tmdbId}/{season}/{episode}?token=...
+ * - Type 2 Movie: /{server}/{tmdbId}?token=...
+ * - Type 2 TV: /{server}/{tmdbId}/{season}/{episode}?token=...
  */
 
 import { logger } from '$lib/logging';
@@ -15,32 +21,19 @@ import type { ProviderConfig, SearchParams, StreamResult } from './types';
 const streamLog = { logCategory: 'streams' as const };
 
 // ============================================================================
-// Configuration
+// Configuration - matches reference config.ts
 // ============================================================================
 
-interface SmashyServer {
-	id: string;
-	name: string;
-	type: '1' | '2';
-	movieOnly?: boolean;
-}
+const SMASHY_API = 'https://api.smashystream.top/api/v1';
 
-const SMASHY_SERVERS: SmashyServer[] = [
-	{ id: 'videosmashyi', name: 'Player SY', type: '1' },
-	// Type 2 servers only work for movies - they return 404 for TV content
-	{ id: 'videofsh', name: 'Player FS', type: '2', movieOnly: true },
-	{ id: 'short2embed', name: 'Player SM', type: '2', movieOnly: true },
-	{ id: 'videoophim', name: 'Player O', type: '2', movieOnly: true }
-];
+const SERVERS = {
+	type1: ['smashystream', 'videosmashyi'],
+	type2: ['videofsh', 'short2embed', 'videoophim']
+};
 
 // ============================================================================
 // Response Types
 // ============================================================================
-
-interface SmashyPlayerResponse {
-	data: string | SmashyType2Data;
-	status?: boolean;
-}
 
 interface SmashyType1DecryptedData {
 	source?: string;
@@ -49,12 +42,12 @@ interface SmashyType1DecryptedData {
 	swarmId?: string;
 }
 
-interface SmashyType2Data {
-	sources: Array<{
-		file: string;
-		type?: string;
-	}>;
-	tracks?: string;
+interface SmashyType2Response {
+	data: {
+		sources: Array<{ file: string; type?: string }>;
+		tracks?: string;
+	};
+	success?: boolean;
 }
 
 // ============================================================================
@@ -66,7 +59,7 @@ export class SmashyProvider extends BaseProvider {
 		id: 'smashy',
 		name: 'Smashystream',
 		priority: 40,
-		enabledByDefault: true,
+		enabledByDefault: false, // Disabled: 13s+ average latency causes timeouts
 		supportsMovies: true,
 		supportsTv: true,
 		supportsAnime: false,
@@ -77,179 +70,205 @@ export class SmashyProvider extends BaseProvider {
 	};
 
 	protected async doExtract(params: SearchParams): Promise<StreamResult[]> {
-		// Get token
+		// Get token - matches reference getSession('vidstack')
 		const tokenData = await this.encDec.getVidstackToken();
+		const { token, user_id } = tokenData;
 
 		const results: StreamResult[] = [];
 
-		// Filter servers based on content type (Type 2 servers only work for movies)
-		const availableServers = SMASHY_SERVERS.filter((server) => {
-			if (server.movieOnly && params.type === 'tv') return false;
-			return true;
-		});
+		// Try Type 1 first, then Type 2 - matches reference logic
+		const type1Result = await this.tryType1Servers(params, token, user_id);
+		if (type1Result) {
+			results.push(type1Result);
+		}
 
-		// Try each server
-		for (const server of availableServers) {
-			try {
-				const stream = await this.extractFromServer(server, params, tokenData);
-				if (stream) {
-					results.push(stream);
-					if (results.length >= 2) break;
-				}
-			} catch (error) {
-				logger.debug('Smashy server failed', {
-					server: server.id,
-					error: error instanceof Error ? error.message : String(error),
-					...streamLog
-				});
-			}
+		const type2Result = await this.tryType2Servers(params, token, user_id);
+		if (type2Result) {
+			results.push(type2Result);
 		}
 
 		return results;
 	}
 
-	private async extractFromServer(
-		server: SmashyServer,
+	/**
+	 * Try Type 1 servers (smashystream, videosmashyi)
+	 * Matches reference getStreamType1()
+	 */
+	private async tryType1Servers(
 		params: SearchParams,
-		tokenData: { token: string; user_id: string }
+		token: string,
+		user_id: string
 	): Promise<StreamResult | null> {
-		// Build player URL
-		let playerUrl = `https://api.smashystream.top/api/v1/${server.id}/`;
-
-		if (params.type === 'movie') {
-			// Type 1 servers (videosmashyi) use IMDB ID
-			// Type 2 servers (videofsh, short2embed, videoophim) use TMDB ID
-			const id = server.type === '1' ? (params.imdbId ?? params.tmdbId) : params.tmdbId;
-			playerUrl += `${id}?token=${tokenData.token}&user_id=${tokenData.user_id}`;
-		} else {
-			// TV format: /{imdb_id}/{tmdb_id}/{season}/{episode}
-			// Use IMDB if available, otherwise TMDB for first slot (fallback)
-			const imdbSlot = params.imdbId ?? params.tmdbId;
-			playerUrl += `${imdbSlot}/${params.tmdbId}/${params.season}/${params.episode}?token=${tokenData.token}&user_id=${tokenData.user_id}`;
-		}
-
-		// Fetch player data
-		const playerResponse = await this.fetchGet<SmashyPlayerResponse>(playerUrl);
-
-		if (!playerResponse.data) {
-			return null;
-		}
-
-		// Handle based on type with runtime validation
-		if (server.type === '1') {
-			// Type 1 expects data to be a string in "host/#id" format
-			if (typeof playerResponse.data !== 'string') {
-				logger.debug('Unexpected data type for type 1 server - expected string', {
-					server: server.id,
-					actualType: typeof playerResponse.data,
-					...streamLog
-				});
-				return null;
-			}
-			return this.handleType1(server, playerResponse.data);
-		} else {
-			// Type 2 expects data to be an object with sources array
-			if (
-				typeof playerResponse.data !== 'object' ||
-				playerResponse.data === null ||
-				!('sources' in playerResponse.data)
-			) {
-				logger.debug('Unexpected data type for type 2 server - expected object with sources', {
-					server: server.id,
-					actualType: typeof playerResponse.data,
-					...streamLog
-				});
-				return null;
-			}
-			return this.handleType2(server, playerResponse.data as SmashyType2Data);
-		}
-	}
-
-	private async handleType1(server: SmashyServer, data: string): Promise<StreamResult | null> {
-		// Type 1: data is "host/#id" format
-		if (!data.includes('/#')) {
-			return null;
-		}
-
-		const [host, id] = data.split('/#');
-
-		// Fetch encrypted stream data
-		const streamUrl = `${host}/api/v1/video?id=${id}`;
-		const encrypted = await this.fetchGet<string>(streamUrl, { responseType: 'text' });
-
-		if (!encrypted || encrypted.length < 10) {
-			return null;
-		}
-
-		// Decrypt - Type 1 returns an object with source/cf URLs
-		const decrypted = await this.encDec.decryptVidstack<SmashyType1DecryptedData>({
-			text: encrypted,
-			type: '1'
-		});
-
-		// Extract stream URL from decrypted object
-		const extractedUrl = decrypted.source || decrypted.cf;
-		if (!this.isValidStreamUrl(extractedUrl)) {
-			return null;
-		}
-
-		return this.createStreamResult(extractedUrl, {
-			quality: 'Auto',
-			title: `Smashystream - ${server.name}`,
-			server: server.name
-		});
-	}
-
-	private async handleType2(
-		server: SmashyServer,
-		data: SmashyType2Data
-	): Promise<StreamResult | null> {
-		// Type 2: data has sources array with encrypted file
-		const file = data.sources?.[0]?.file;
-		if (!file) {
-			return null;
-		}
-
-		// Decrypt file URL
-		const decrypted = await this.encDec.decryptVidstack<string>({
-			text: file,
-			type: '2'
-		});
-
-		// Parse the list format "[quality]url, [quality]url"
-		const streamUrl = this.parseListFormat(decrypted);
-
-		if (!this.isValidStreamUrl(streamUrl)) {
-			return null;
-		}
-
-		// Parse subtitles if available
-		const subtitles = data.tracks ? this.parseSubtitlesList(data.tracks) : undefined;
-
-		return this.createStreamResult(streamUrl, {
-			quality: 'Auto',
-			title: `Smashystream - ${server.name}`,
-			server: server.name,
-			subtitles
-		});
-	}
-
-	private parseListFormat(text: string): string | null {
-		// Format: "[quality]url, [quality]url" or just "url"
-		const items = text.split(',').map((s) => s.trim());
-
-		for (const item of items) {
-			if (item.startsWith('[') && item.includes(']')) {
-				const url = item.split(']')[1]?.trim();
-				if (url && url.startsWith('http')) {
-					return url;
+		for (const server of SERVERS.type1) {
+			try {
+				// Build player URL - matches reference exactly
+				let url: string;
+				if (params.type === 'movie') {
+					// Type 1 Movie: /{server}/{imdbId}?token=...
+					const id = params.imdbId ?? params.tmdbId;
+					url = `${SMASHY_API}/${server}/${id}?token=${token}&user_id=${user_id}`;
+				} else {
+					// Type 1 TV: /{server}/{imdbId}/{tmdbId}/{season}/{episode}?token=...
+					const imdbId = params.imdbId ?? params.tmdbId;
+					url = `${SMASHY_API}/${server}/${imdbId}/${params.tmdbId}/${params.season}/${params.episode}?token=${token}&user_id=${user_id}`;
 				}
-			} else if (item.startsWith('http')) {
-				return item;
+
+				const response = await this.fetchGet<{ data: string }>(url);
+				if (!response.data) continue;
+
+				// Parse host and id - matches reference: response.data.split('/#')
+				const [host, id] = response.data.split('/#');
+				if (!host || !id) continue;
+
+				// Get encrypted stream - matches reference
+				const streamUrl = `${host}/api/v1/video?id=${id}`;
+				const encrypted = await this.fetchGet<string>(streamUrl, { responseType: 'text' });
+				if (!encrypted) continue;
+
+				// Decrypt - matches reference: decrypt('vidstack', { text: encrypted, type: '1' })
+				const decrypted = await this.encDec.decryptVidstack<SmashyType1DecryptedData>({
+					text: encrypted,
+					type: '1'
+				});
+
+				// Extract stream URL - matches reference extractStreamUrl()
+				const extractedUrl = this.extractStreamUrl(decrypted);
+				if (!extractedUrl) continue;
+
+				// Type 1 streams need the player host as referer
+				const playerReferer = host.endsWith('/') ? host : `${host}/`;
+
+				return {
+					url: extractedUrl,
+					quality: 'Auto',
+					title: `Smashystream - ${server}`,
+					streamType: 'hls',
+					referer: playerReferer,
+					server
+				};
+			} catch (error) {
+				logger.debug('Smashy Type 1 server failed', {
+					server,
+					error: error instanceof Error ? error.message : String(error),
+					...streamLog
+				});
+				continue;
 			}
 		}
 
-		return items.find((i) => i.startsWith('http')) ?? null;
+		return null;
+	}
+
+	/**
+	 * Try Type 2 servers (videofsh, short2embed, videoophim)
+	 * Matches reference getStreamType2()
+	 */
+	private async tryType2Servers(
+		params: SearchParams,
+		token: string,
+		user_id: string
+	): Promise<StreamResult | null> {
+		for (const server of SERVERS.type2) {
+			try {
+				// Build player URL - matches reference exactly
+				let url: string;
+				if (params.type === 'movie') {
+					// Type 2 Movie: /{server}/{tmdbId}?token=...
+					url = `${SMASHY_API}/${server}/${params.tmdbId}?token=${token}&user_id=${user_id}`;
+				} else {
+					// Type 2 TV: /{server}/{tmdbId}/{season}/{episode}?token=...
+					url = `${SMASHY_API}/${server}/${params.tmdbId}/${params.season}/${params.episode}?token=${token}&user_id=${user_id}`;
+				}
+
+				const response = await this.fetchGet<SmashyType2Response>(url);
+				if (!response.data?.sources?.[0]?.file) continue;
+
+				const file = response.data.sources[0].file;
+
+				// Decrypt - matches reference: decrypt('vidstack', { text: file, type: '2' })
+				const decrypted = await this.encDec.decryptVidstack<string>({
+					text: file,
+					type: '2'
+				});
+
+				// Extract stream URL from decrypted string
+				const streamUrl = this.extractStreamUrl(decrypted);
+				if (!streamUrl) continue;
+
+				// Parse subtitles if available
+				const subtitles = response.data.tracks
+					? this.parseSubtitlesList(response.data.tracks)
+					: undefined;
+
+				return this.createStreamResult(streamUrl, {
+					quality: 'Auto',
+					title: `Smashystream - ${server}`,
+					server,
+					subtitles
+				});
+			} catch (error) {
+				logger.debug('Smashy Type 2 server failed', {
+					server,
+					error: error instanceof Error ? error.message : String(error),
+					...streamLog
+				});
+				continue;
+			}
+		}
+
+		return null;
+	}
+
+	/**
+	 * Extract stream URL from various response formats
+	 * Matches reference extractStreamUrl() from utils.ts
+	 */
+	private extractStreamUrl(data: unknown): string | null {
+		if (!data) return null;
+
+		// Direct URL string
+		if (typeof data === 'string' && data.includes('http')) {
+			// Try to extract URL from string
+			const urlMatch = data.match(/https?:\/\/[^\s"'<>]+\.m3u8[^\s"'<>]*/);
+			if (urlMatch) return urlMatch[0];
+			const mp4Match = data.match(/https?:\/\/[^\s"'<>]+\.mp4[^\s"'<>]*/);
+			if (mp4Match) return mp4Match[0];
+			// Return first URL-like string
+			const anyUrl = data.match(/https?:\/\/[^\s"'<>]+/);
+			if (anyUrl) return anyUrl[0];
+		}
+
+		// Object with sources array
+		if (typeof data === 'object' && data !== null) {
+			const obj = data as Record<string, unknown>;
+
+			if (Array.isArray(obj.sources)) {
+				const source = obj.sources[0] as Record<string, unknown> | string;
+				if (typeof source === 'string') return source;
+				if (source?.file) return source.file as string;
+				if (source?.url) return source.url as string;
+			}
+
+			// Object with file/url directly
+			if (obj.file) return obj.file as string;
+			if (obj.url) return obj.url as string;
+			if (obj.stream) return obj.stream as string;
+			if (obj.source) {
+				if (typeof obj.source === 'string') return obj.source;
+				const src = obj.source as Record<string, unknown>;
+				return (src.file || src.url) as string | null;
+			}
+
+			// Try to find any URL in stringified data
+			const str = JSON.stringify(data);
+			const m3u8Match = str.match(/https?:\/\/[^"']+\.m3u8[^"']*/);
+			if (m3u8Match) return m3u8Match[0].replace(/\\u0026/g, '&').replace(/\\/g, '');
+
+			const mp4Match = str.match(/https?:\/\/[^"']+\.mp4[^"']*/);
+			if (mp4Match) return mp4Match[0].replace(/\\u0026/g, '&').replace(/\\/g, '');
+		}
+
+		return null;
 	}
 
 	private parseSubtitlesList(tracks: string): StreamResult['subtitles'] {

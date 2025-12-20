@@ -145,8 +145,12 @@ export class VideasyProvider extends BaseProvider {
 				if (stream) {
 					return [stream];
 				}
-			} catch {
-				// Continue to next server
+			} catch (error) {
+				logger.debug('Videasy fallback server failed', {
+					server: server.id,
+					error: error instanceof Error ? error.message : String(error),
+					...streamLog
+				});
 			}
 		}
 

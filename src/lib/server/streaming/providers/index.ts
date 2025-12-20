@@ -542,6 +542,7 @@ async function doParallelExtraction(
 	const promises = parallelProviders.map(async (providerId) => {
 		const controller = new AbortController();
 		controllers.set(providerId, controller);
+		const startTime = Date.now();
 
 		try {
 			const { result, durationMs } = await extractFromProvider(providerId, options);
@@ -554,6 +555,8 @@ async function doParallelExtraction(
 			recordFailure(providerId, durationMs);
 			return { providerId, result, durationMs, success: false as const };
 		} catch (error) {
+			const durationMs = Date.now() - startTime;
+			recordFailure(providerId, durationMs);
 			return {
 				providerId,
 				result: {
@@ -562,63 +565,77 @@ async function doParallelExtraction(
 					provider: providerId,
 					error: error instanceof Error ? error.message : String(error)
 				},
-				durationMs: 0,
+				durationMs,
 				success: false as const
 			};
 		}
 	});
 
-	// Use Promise.any to get first successful result
-	try {
-		const successPromises = promises.map(async (p) => {
-			const result = await p;
-			if (result.success) {
-				return result;
+	// Wait for all providers to complete and collect ALL successful streams
+	const results = await Promise.all(promises);
+	const successfulResults = results.filter((r) => r.success);
+	const failedResults = results.filter((r) => !r.success);
+
+	if (successfulResults.length > 0) {
+		// Merge all successful streams from all providers
+		const allStreams: StreamResult[] = [];
+		const providers: string[] = [];
+
+		for (const result of successfulResults) {
+			providers.push(result.providerId);
+			for (const stream of result.result.streams) {
+				allStreams.push({
+					...stream,
+					provider: result.providerId
+				});
 			}
-			throw new Error('Provider failed');
-		});
-
-		const winner = await Promise.any(successPromises);
-
-		logger.debug('Parallel extraction succeeded', {
-			winner: winner.providerId,
-			durationMs: winner.durationMs,
-			...streamLog
-		});
-
-		return toExtractionResult(winner.result, options.preferredLanguages);
-	} catch {
-		// All providers failed - collect errors
-		const results = await Promise.all(promises);
-		const errors = results
-			.filter((r) => !r.success && r.result.error)
-			.map((r) => `${r.providerId}: ${r.result.error}`);
-
-		logger.debug('All parallel providers failed', {
-			providers: parallelProviders,
-			...streamLog
-		});
-
-		// Fall back to remaining providers sequentially
-		const remainingProviders = compatible.slice(PARALLEL_PROVIDER_COUNT);
-		if (remainingProviders.length > 0) {
-			logger.debug('Falling back to sequential extraction', {
-				providers: remainingProviders,
-				...streamLog
-			});
-			return doSequentialExtraction(options, remainingProviders);
 		}
 
-		const skippedNote = skipped.length > 0 ? ` (circuit-broken: ${skipped.join(', ')})` : '';
-		const unsupportedNote =
-			unsupported.length > 0 ? ` (unsupported: ${unsupported.join(', ')})` : '';
+		logger.debug('Parallel extraction succeeded', {
+			providers,
+			streamCount: allStreams.length,
+			...streamLog
+		});
 
-		return {
-			success: false,
-			sources: [],
-			error: `All providers failed: ${errors.join('; ')}${skippedNote}${unsupportedNote}`
+		// Create merged result
+		const mergedResult: ProviderResult = {
+			success: true,
+			streams: allStreams,
+			provider: providers[0] // Primary provider for logging
 		};
+
+		return toExtractionResult(mergedResult, options.preferredLanguages);
 	}
+
+	// All parallel providers failed - collect errors
+	const errors = failedResults
+		.filter((r) => r.result.error)
+		.map((r) => `${r.providerId}: ${r.result.error}`);
+
+	logger.debug('All parallel providers failed', {
+		providers: parallelProviders,
+		...streamLog
+	});
+
+	// Fall back to remaining providers sequentially
+	const remainingProviders = compatible.slice(PARALLEL_PROVIDER_COUNT);
+	if (remainingProviders.length > 0) {
+		logger.debug('Falling back to sequential extraction', {
+			providers: remainingProviders,
+			...streamLog
+		});
+		return doSequentialExtraction(options, remainingProviders);
+	}
+
+	const skippedNote = skipped.length > 0 ? ` (circuit-broken: ${skipped.join(', ')})` : '';
+	const unsupportedNote =
+		unsupported.length > 0 ? ` (unsupported: ${unsupported.join(', ')})` : '';
+
+	return {
+		success: false,
+		sources: [],
+		error: `All providers failed: ${errors.join('; ')}${skippedNote}${unsupportedNote}`
+	};
 }
 
 /**

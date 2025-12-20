@@ -223,12 +223,36 @@ export class AnimeKaiProvider extends BaseProvider {
 		}
 
 		const language = isDub ? 'Dub' : 'Sub';
+		const audioLang = isDub ? 'en' : 'ja';
 
+		// Check if this is an embed URL that needs resolution (e.g., megaup, rapidshare)
+		if (this.isEmbedUrl(streamUrl)) {
+			logger.debug('AnimeKai resolving embed URL', { streamUrl, ...streamLog });
+
+			const resolved = await this.resolveEmbedUrl(streamUrl);
+
+			if (resolved.length > 0) {
+				// Add language info to resolved streams
+				return resolved.map((stream) => ({
+					...stream,
+					title: `AnimeKai Stream (${language})`,
+					language: audioLang
+				}));
+			}
+
+			// If embed resolution failed, fall through to return embed URL directly
+			logger.debug('AnimeKai embed resolution failed, returning embed URL', {
+				streamUrl,
+				...streamLog
+			});
+		}
+
+		// Return as direct stream (or unresolved embed for debugging)
 		return [
 			this.createStreamResult(streamUrl, {
 				quality: 'Auto',
 				title: `AnimeKai Stream (${language})`,
-				language: isDub ? 'en' : 'ja'
+				language: audioLang
 			})
 		];
 	}

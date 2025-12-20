@@ -57,7 +57,8 @@ export class VidlinkProvider extends BaseProvider {
 			url = `https://vidlink.pro/api/b/movie/${encryptedId}`;
 		} else {
 			if (params.season === undefined || params.episode === undefined) {
-				throw new Error('Season and episode required for TV shows');
+				logger.debug('Vidlink requires season and episode for TV shows', streamLog);
+				return [];
 			}
 			url = `https://vidlink.pro/api/b/tv/${encryptedId}/${params.season}/${params.episode}`;
 		}
