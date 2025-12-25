@@ -2,6 +2,7 @@
 # BitSearch (formerly SolidTorrents)
 # DHT torrent search engine - solidtorrents.net domain is now parked
 # BitSearch.to is the active site with the same underlying search engine
+# Note: solidtorrents.to and solidtorrents.eu are now dead (Dec 2024)
 id: bitsearch
 name: BitSearch
 description: DHT torrent search engine (formerly SolidTorrents) with 45M+ indexed torrents
@@ -13,9 +14,6 @@ requestdelay: 2
 
 links:
   - https://bitsearch.to
-legacylinks:
-  - https://solidtorrents.to
-  - https://solidtorrents.eu
 
 caps:
   modes:

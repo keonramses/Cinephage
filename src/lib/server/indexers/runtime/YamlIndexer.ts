@@ -173,11 +173,12 @@ export class YamlIndexer implements IIndexer {
 		this.log = createChildLogger({ indexer: this.name, indexerId: this.id });
 
 		// Create unified HTTP client (handles retry, rate limiting, Cloudflare)
+		// Use config alternateUrls (from database), fall back to definition links
 		this.http = createIndexerHttp({
 			indexerId: this.id,
 			indexerName: this.name,
 			baseUrl: this.baseUrl,
-			alternateUrls: definition.links.slice(1),
+			alternateUrls: config.alternateUrls?.length ? config.alternateUrls : definition.links.slice(1),
 			userAgent: 'Cinephage/1.0',
 			rateLimit: rateLimit ?? { requests: 30, periodMs: 60_000 }
 		});
@@ -345,17 +346,13 @@ export class YamlIndexer implements IIndexer {
 				}
 			}
 
-			// Record success
 			const duration = Date.now() - startTime;
-			this.recordSuccess(duration);
-
 			this.log.debug('Search completed', { resultCount: allResults.length, durationMs: duration });
 
 			return allResults;
 		} catch (error) {
 			const message = error instanceof Error ? error.message : String(error);
 			this.log.error('Search failed', { error: message, criteria });
-			this.recordFailure(message);
 			throw error;
 		}
 	}
@@ -717,8 +714,6 @@ export class YamlIndexer implements IIndexer {
 				infoHash: parseResult.infoHash
 			});
 
-			this.recordSuccess(Date.now() - startTime);
-
 			return {
 				success: true,
 				data,
@@ -728,7 +723,6 @@ export class YamlIndexer implements IIndexer {
 		} catch (error) {
 			const message = error instanceof Error ? error.message : String(error);
 			this.log.error('Torrent download failed', { error: message });
-			this.recordFailure(message);
 			return {
 				success: false,
 				error: message,
@@ -771,22 +765,6 @@ export class YamlIndexer implements IIndexer {
 		}
 
 		limiter.recordRequest();
-	}
-
-	/**
-	 * Record a successful operation.
-	 */
-	private recordSuccess(responseTimeMs?: number): void {
-		const statusTracker = getPersistentStatusTracker();
-		statusTracker.recordSuccess(this.id, responseTimeMs);
-	}
-
-	/**
-	 * Record a failed operation.
-	 */
-	private recordFailure(message: string): void {
-		const statusTracker = getPersistentStatusTracker();
-		statusTracker.recordFailure(this.id, message);
 	}
 
 	/**

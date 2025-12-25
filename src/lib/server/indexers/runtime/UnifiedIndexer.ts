@@ -182,11 +182,12 @@ export class UnifiedIndexer implements IIndexer {
 		this.log = createChildLogger({ indexer: this.name, indexerId: this.id });
 
 		// Create unified HTTP client
+		// Use config alternateUrls (from database), fall back to definition links
 		this.http = createIndexerHttp({
 			indexerId: this.id,
 			indexerName: this.name,
 			baseUrl: this.baseUrl,
-			alternateUrls: definition.links.slice(1),
+			alternateUrls: record.alternateUrls?.length ? record.alternateUrls : definition.links.slice(1),
 			userAgent: 'Cinephage/1.0',
 			rateLimit: rateLimit ?? { requests: 30, periodMs: 60_000 }
 		});
@@ -354,7 +355,6 @@ export class UnifiedIndexer implements IIndexer {
 		} catch (error) {
 			const message = error instanceof Error ? error.message : String(error);
 			this.log.error('Search failed', { error: message, criteria });
-			this.recordFailure(message);
 			throw error;
 		}
 	}
@@ -381,8 +381,6 @@ export class UnifiedIndexer implements IIndexer {
 		});
 
 		const duration = Date.now() - startTime;
-		this.recordSuccess(duration);
-
 		this.log.debug('Database search completed', {
 			resultCount: results.length,
 			durationMs: duration
@@ -428,8 +426,6 @@ export class UnifiedIndexer implements IIndexer {
 		}
 
 		const duration = Date.now() - startTime;
-		this.recordSuccess(duration);
-
 		this.log.debug('HTTP search completed', {
 			resultCount: allResults.length,
 			durationMs: duration
@@ -740,7 +736,6 @@ export class UnifiedIndexer implements IIndexer {
 
 			// For usenet, just return the NZB data
 			if (this.protocol === 'usenet') {
-				this.recordSuccess(Date.now() - startTime);
 				return {
 					success: true,
 					data,
@@ -769,8 +764,6 @@ export class UnifiedIndexer implements IIndexer {
 				};
 			}
 
-			this.recordSuccess(Date.now() - startTime);
-
 			return {
 				success: true,
 				data,
@@ -780,7 +773,6 @@ export class UnifiedIndexer implements IIndexer {
 		} catch (error) {
 			const message = error instanceof Error ? error.message : String(error);
 			this.log.error('Download failed', { error: message });
-			this.recordFailure(message);
 			return {
 				success: false,
 				error: message,
@@ -803,16 +795,6 @@ export class UnifiedIndexer implements IIndexer {
 		}
 
 		limiter.recordRequest();
-	}
-
-	private recordSuccess(responseTimeMs?: number): void {
-		const statusTracker = getPersistentStatusTracker();
-		statusTracker.recordSuccess(this.id, responseTimeMs);
-	}
-
-	private recordFailure(message: string): void {
-		const statusTracker = getPersistentStatusTracker();
-		statusTracker.recordFailure(this.id, message);
 	}
 
 	private delay(ms: number): Promise<void> {

@@ -256,7 +256,7 @@ export class IndexerManager {
 		if (updates.enabled !== undefined) updateData.enabled = updates.enabled ? 1 : 0;
 		if (updates.baseUrl !== undefined) updateData.baseUrl = updates.baseUrl;
 		if (updates.alternateUrls !== undefined)
-			updateData.alternateUrls = JSON.stringify(updates.alternateUrls);
+			updateData.alternateUrls = updates.alternateUrls;
 		if (updates.priority !== undefined) updateData.priority = updates.priority;
 		if (updates.settings !== undefined) updateData.settings = updates.settings;
 
@@ -356,10 +356,7 @@ export class IndexerManager {
 			}
 			return instance;
 		} catch (error) {
-			logger.error('Failed to create indexer instance', {
-				indexerId: id,
-				error: error instanceof Error ? error.message : String(error)
-			});
+			logger.error('Failed to create indexer instance', error, { indexerId: id });
 			return undefined;
 		}
 	}
@@ -392,10 +389,7 @@ export class IndexerManager {
 					created.push(instance);
 				}
 			} catch (error) {
-				logger.error('Failed to create indexer instance', {
-					indexerId: config.id,
-					error: error instanceof Error ? error.message : String(error)
-				});
+				logger.error('Failed to create indexer instance', error, { indexerId: config.id });
 			}
 		}
 

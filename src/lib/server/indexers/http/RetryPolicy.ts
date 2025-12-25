@@ -72,16 +72,30 @@ const DEFAULT_RETRYABLE_STATUS_CODES = new Set([
 	500, // Internal Server Error
 	502, // Bad Gateway
 	503, // Service Unavailable
-	504, // Gateway Timeout
-	520, // Cloudflare: Unknown Error
+	504 // Gateway Timeout
+]);
+
+/**
+ * Cloudflare origin errors - these indicate the origin server is down.
+ * Retrying these wastes time since the origin won't recover in seconds.
+ * Better to fail fast and trigger failover to alternate URLs.
+ */
+const CLOUDFLARE_ORIGIN_ERRORS = new Set([
 	521, // Cloudflare: Web Server Is Down
 	522, // Cloudflare: Connection Timed Out
 	523, // Cloudflare: Origin Is Unreachable
 	524, // Cloudflare: A Timeout Occurred
+	530 // Cloudflare: Origin DNS Error
+]);
+
+/**
+ * Cloudflare errors that may be worth a single retry (SSL/transient issues)
+ */
+const CLOUDFLARE_TRANSIENT_ERRORS = new Set([
+	520, // Cloudflare: Unknown Error
 	525, // Cloudflare: SSL Handshake Failed
 	526, // Cloudflare: Invalid SSL Certificate
-	527, // Cloudflare: Railgun Error
-	530 // Cloudflare: Origin DNS Error
+	527 // Cloudflare: Railgun Error
 ]);
 
 /** Network error codes that indicate transient issues */
@@ -102,9 +116,33 @@ const RETRYABLE_ERROR_CODES = new Set([
 ]);
 
 /**
+ * Check if a status code is a Cloudflare origin error (origin server is down).
+ * These should NOT be retried - fail fast and trigger failover instead.
+ */
+export function isCloudflareOriginError(status: number): boolean {
+	return CLOUDFLARE_ORIGIN_ERRORS.has(status);
+}
+
+/**
+ * Check if a status code is a Cloudflare transient error (worth one retry).
+ */
+export function isCloudflareTransientError(status: number): boolean {
+	return CLOUDFLARE_TRANSIENT_ERRORS.has(status);
+}
+
+/**
  * Check if an HTTP status code is retryable.
+ * Cloudflare origin errors are NOT retryable to allow faster failover.
  */
 export function isRetryableStatusCode(status: number, additionalCodes?: number[]): boolean {
+	// Cloudflare origin errors should NOT be retried - fail fast for failover
+	if (CLOUDFLARE_ORIGIN_ERRORS.has(status)) {
+		return false;
+	}
+	// Cloudflare transient errors get one retry attempt
+	if (CLOUDFLARE_TRANSIENT_ERRORS.has(status)) {
+		return true;
+	}
 	if (DEFAULT_RETRYABLE_STATUS_CODES.has(status)) {
 		return true;
 	}
