@@ -180,10 +180,8 @@ export const searchOptionsSchema = z.object({
  * Schema for enrichment options (quality filtering and TMDB matching).
  */
 export const enrichmentOptionsSchema = z.object({
-	/** Scoring profile ID to filter/score against */
+	/** Scoring profile ID for quality scoring */
 	scoringProfileId: z.string().optional(),
-	/** @deprecated Use scoringProfileId instead */
-	qualityPresetId: z.string().optional(),
 	/** Whether to match releases to TMDB entries */
 	matchToTmdb: z.boolean().default(false),
 	/** Whether to filter out rejected releases */
@@ -221,8 +219,6 @@ export const searchQuerySchema = z.object({
 		.optional()
 		.transform((v) => v === 'true' || v === '1'),
 	scoringProfileId: z.string().optional(),
-	/** @deprecated Use scoringProfileId instead */
-	qualityPresetId: z.string().optional(),
 	matchToTmdb: z
 		.string()
 		.optional()

@@ -126,8 +126,6 @@ export function isLibrarySeries(item: LibraryItem): item is LibrarySeries {
 }
 
 // Sort options
-export type MovieSortField = 'title' | 'added' | 'year';
-export type SeriesSortField = 'title' | 'added' | 'year' | 'progress';
 export type SortDirection = 'asc' | 'desc';
 
 export interface SortOption<T extends string = string> {

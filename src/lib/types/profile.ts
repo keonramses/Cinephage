@@ -92,29 +92,6 @@ export type FormatCategory =
 	| 'codec'
 	| 'other';
 
-/**
- * Custom format for display in the profile editor
- *
- * Note: Formats no longer have defaultScore. Scores are defined per-profile.
- */
-export interface CustomFormatUI {
-	id: string;
-	name: string;
-	description?: string;
-	category: FormatCategory;
-	tags: string[];
-	score?: number; // Current score in the selected profile
-}
-
-/**
- * Grouped formats by category for the UI
- */
-export interface GroupedFormats {
-	category: FormatCategory;
-	label: string;
-	formats: CustomFormatUI[];
-}
-
 // =============================================================================
 // API Response Types
 // =============================================================================

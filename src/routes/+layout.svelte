@@ -21,7 +21,11 @@
 		Shield,
 		ListTodo,
 		FileSignature,
-		List
+		List,
+		Radio,
+		LayoutGrid,
+		Calendar,
+		Users
 	} from 'lucide-svelte';
 
 	let { children } = $props();
@@ -35,6 +39,16 @@
 			children: [
 				{ href: '/movies', label: 'Movies', icon: Clapperboard },
 				{ href: '/tv', label: 'TV Shows', icon: Tv }
+			]
+		},
+		{
+			label: 'Live TV',
+			icon: Radio,
+			children: [
+				{ href: '/livetv/channels', label: 'Channels', icon: Radio },
+				{ href: '/livetv/categories', label: 'Categories', icon: LayoutGrid },
+				{ href: '/livetv/guide', label: 'Guide', icon: Calendar },
+				{ href: '/livetv/accounts', label: 'Accounts', icon: Users }
 			]
 		},
 		{ href: '/queue', label: 'Queue', icon: Download },
