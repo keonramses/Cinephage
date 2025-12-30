@@ -11,7 +11,7 @@
 import type { BackgroundService, ServiceStatus } from './background-service.js';
 import { db } from '$lib/server/db/index.js';
 import { settings, series, seasons, episodes, episodeFiles } from '$lib/server/db/schema.js';
-import { eq, and, like } from 'drizzle-orm';
+import { eq, like } from 'drizzle-orm';
 import { tmdb } from '$lib/server/tmdb.js';
 import { logger } from '$lib/logging/index.js';
 
