@@ -39,13 +39,14 @@ Search for movies and TV shows, grab them from your indexers, organize your libr
 | ------------------ | ------------ | ---------------------------------------------------- |
 | Content Discovery  | Stable       | TMDB integration, trending, search                   |
 | Library Management | Stable       | File watching, scanning, TMDB matching               |
-| Quality Scoring    | In Progress  | 4 built-in profiles work; custom profiles incomplete |
-| Download Client    | Stable       | qBittorrent + SABnzbd                                |
-| Indexers           | In Progress  | 4 public + 2 private indexers + Torznab/Newznab      |
-| Subtitles          | Stable       | 6 providers, 80+ languages                           |
-| Monitoring         | Experimental | 5 tasks coded, may have bugs                         |
+| Quality Scoring    | Stable       | 4 built-in profiles + custom profile creation        |
+| Download Clients   | Stable       | qBittorrent, SABnzbd, NZBGet                         |
+| Indexers           | Stable       | 9 built-in definitions + Torznab/Newznab support     |
+| Subtitles          | Stable       | 8 providers, 80+ languages                           |
+| Streaming          | Stable       | 10 providers with circuit breaker failover           |
+| Monitoring         | Experimental | Automated searches, upgrades, new episode detection  |
 | Smart Lists        | Stable       | Dynamic TMDB queries with auto-add to library        |
-| Live TV/IPTV       | Not Started  | Planned for future                                   |
+| Live TV/IPTV       | In Progress  | Stalker portal, EPG, channel lineup management       |
 
 ---
 
@@ -118,7 +119,7 @@ npm start
 Open http://localhost:3000 and configure:
 
 1. Add your TMDB API key (free at [themoviedb.org](https://www.themoviedb.org/settings/api))
-2. Configure qBittorrent connection
+2. Configure your download client (qBittorrent, SABnzbd, or NZBGet)
 3. Set up root folders for movies and TV
 4. Enable indexers
 
@@ -128,7 +129,7 @@ See [Configuration Guide](docs/getting-started/configuration.md) for detailed se
 
 ## Requirements
 
-- **qBittorrent** with WebUI enabled (or SABnzbd)
+- **Download Client** — qBittorrent, SABnzbd, or NZBGet
 - **TMDB API key** (free)
 - **Node.js 20+** (manual install only)
 - **ffprobe** (optional, for media info extraction)
@@ -138,12 +139,14 @@ See [Configuration Guide](docs/getting-started/configuration.md) for detailed se
 ## Features
 
 - **Content Discovery** — Browse TMDB for movies and TV shows, view trending, trailers, and watch providers
-- **Indexer Search** — 4 public + 2 private trackers built-in, plus Torznab/Newznab support for external indexers
-- **Quality Scoring** — 4 built-in profiles (Quality, Balanced, Compact, Streamer) scoring 100+ release attributes
+- **Indexer Search** — 9 indexers built-in, plus Torznab/Newznab support for external indexers
+- **Quality Scoring** — 4 built-in profiles + custom profile creation, scoring 100+ release attributes
 - **Library Management** — Real-time file watching, scheduled scans, auto-match to TMDB metadata
-- **Download Automation** — qBittorrent/SABnzbd integration with categories, priority handling, auto-import
-- **Subtitles** — 6 providers, 80+ languages, auto-search on import
+- **Download Automation** — qBittorrent, SABnzbd, and NZBGet integration with categories and auto-import
+- **Streaming** — Direct browser streaming with 10 providers and circuit breaker failover
+- **Subtitles** — 8 providers, 80+ languages, auto-search on import
 - **Monitoring** — Automatic searches for missing content, quality upgrades, and new episodes
+- **Live TV** — IPTV/Stalker portal integration with EPG and channel management (in progress)
 
 See [Documentation](docs/INDEX.md) for full details.
 
