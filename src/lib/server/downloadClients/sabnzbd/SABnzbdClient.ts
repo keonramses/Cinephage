@@ -420,7 +420,7 @@ export class SABnzbdClient implements IDownloadClient {
 	/**
 	 * Map SABnzbd status to DownloadInfo status.
 	 */
-	private mapStatus(sabStatus: SabnzbdDownloadStatus, percentage: number): DownloadInfo['status'] {
+	private mapStatus(sabStatus: SabnzbdDownloadStatus, _percentage: number): DownloadInfo['status'] {
 		switch (sabStatus) {
 			case 'Downloading':
 			case 'Grabbing':
@@ -441,7 +441,8 @@ export class SABnzbdClient implements IDownloadClient {
 			case 'Deleted':
 				return 'error';
 
-			// Post-processing stages - treat as downloading if not 100%
+			// Post-processing stages - always treat as downloading until truly complete
+			// SABnzbd moves items to history with 'Completed' status only after post-processing finishes
 			case 'Checking':
 			case 'QuickCheck':
 			case 'Verifying':
@@ -449,7 +450,7 @@ export class SABnzbdClient implements IDownloadClient {
 			case 'Extracting':
 			case 'Moving':
 			case 'Running':
-				return percentage >= 100 ? 'completed' : 'downloading';
+				return 'downloading';
 
 			default:
 				return 'queued';
