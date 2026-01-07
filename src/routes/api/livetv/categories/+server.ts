@@ -1,22 +1,23 @@
 /**
- * GET /api/livetv/categories - Get all categories from all enabled accounts
+ * Categories API Endpoint
+ *
+ * GET /api/livetv/categories - List cached categories for filtering
  */
 
 import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
-import { getStalkerPortalManager } from '$lib/server/livetv/stalker';
+import { getStalkerChannelService } from '$lib/server/livetv/stalker';
 
-/**
- * GET /api/livetv/categories
- * Get all channel categories from all enabled Stalker Portal accounts.
- * Each category includes account information.
- */
-export const GET: RequestHandler = async () => {
-	const manager = getStalkerPortalManager();
+export const GET: RequestHandler = async ({ url }) => {
+	const channelService = getStalkerChannelService();
+
+	// Parse query parameters
+	const accountIdsParam = url.searchParams.get('accountIds');
+	const accountIds = accountIdsParam ? accountIdsParam.split(',').filter(Boolean) : undefined;
 
 	try {
-		const categories = await manager.getAllCategories();
-		return json(categories);
+		const categories = await channelService.getCategories(accountIds);
+		return json({ categories });
 	} catch (error) {
 		const message = error instanceof Error ? error.message : 'Unknown error';
 		return json({ error: message }, { status: 500 });

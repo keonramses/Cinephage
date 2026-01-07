@@ -11,7 +11,6 @@ import {
 	getMonitoringScheduler,
 	monitoringScheduler
 } from '$lib/server/monitoring/MonitoringScheduler.js';
-import { getLiveTvScheduler } from '$lib/server/livetv/scheduler/LiveTvScheduler.js';
 import { taskHistoryService } from '$lib/server/tasks/TaskHistoryService.js';
 import { getExternalIdService } from '$lib/server/services/ExternalIdService.js';
 import { getDataRepairService } from '$lib/server/services/DataRepairService.js';
@@ -23,6 +22,8 @@ import { getServiceManager } from '$lib/server/services/service-manager.js';
 import { initPersistentStreamCache } from '$lib/server/streaming/cache';
 import { getNntpClientManager } from '$lib/server/streaming/nzb';
 import { getExtractionCacheManager } from '$lib/server/streaming/nzb/extraction/ExtractionCacheManager';
+import { getMediaBrowserNotifier } from '$lib/server/notifications/mediabrowser';
+import { getEpgScheduler } from '$lib/server/livetv/epg';
 
 /**
  * Content Security Policy header.
@@ -34,7 +35,7 @@ const CSP_HEADER = [
 	"default-src 'self'",
 	"script-src 'self' 'unsafe-inline'",
 	"style-src 'self' 'unsafe-inline'",
-	"img-src 'self' data: https://image.tmdb.org",
+	"img-src 'self' data: https://image.tmdb.org https://api.cdn-live.tv",
 	"connect-src 'self'",
 	"font-src 'self'"
 ].join('; ');
@@ -59,7 +60,8 @@ let externalIdServiceInitialized = false;
 let browserSolverInitialized = false;
 let nntpClientManagerInitialized = false;
 let dataRepairServiceInitialized = false;
-let liveTvSchedulerInitialized = false;
+let mediaBrowserNotifierInitialized = false;
+let epgSchedulerInitialized = false;
 
 async function checkFFprobe() {
 	const available = await isFFprobeAvailable();
@@ -214,20 +216,42 @@ async function initializeDataRepairService() {
 	}
 }
 
-async function initializeLiveTvScheduler() {
-	if (liveTvSchedulerInitialized) return;
+async function initializeMediaBrowserNotifier() {
+	if (mediaBrowserNotifierInitialized) return;
 
 	try {
-		// Start the Live TV scheduler (channel sync, EPG updates)
-		// Has a 2-minute grace period before running any tasks
-		const liveTvScheduler = getLiveTvScheduler();
-		await liveTvScheduler.initialize();
+		// Start the MediaBrowser notifier (Jellyfin/Emby library updates)
+		const notifier = getMediaBrowserNotifier();
+		notifier.start();
 
-		liveTvSchedulerInitialized = true;
-		logger.info('Live TV scheduler initialized');
+		// Wire into download monitor events
+		downloadMonitor.on('queue:imported', (item) => {
+			if (item.importedPath) {
+				notifier.queueUpdate(item.importedPath, 'Created');
+			}
+		});
+
+		mediaBrowserNotifierInitialized = true;
+		logger.info('MediaBrowser notifier initialized for Jellyfin/Emby integration');
 	} catch (error) {
-		// Non-fatal - Live TV features will still work, just no auto-updates
-		logger.error('Failed to initialize Live TV scheduler', error);
+		// Non-fatal - library updates will not be sent to media servers
+		logger.error('Failed to initialize MediaBrowser notifier', error);
+	}
+}
+
+async function initializeEpgScheduler() {
+	if (epgSchedulerInitialized) return;
+
+	try {
+		// Start the EPG scheduler (automatic EPG sync and cleanup for Live TV)
+		const epgScheduler = getEpgScheduler();
+		epgScheduler.start();
+
+		epgSchedulerInitialized = true;
+		logger.info('EPG scheduler started for Live TV');
+	} catch (error) {
+		// Non-fatal - EPG will not auto-update but manual sync still works
+		logger.error('Failed to start EPG scheduler', error);
 	}
 }
 
@@ -256,14 +280,21 @@ setImmediate(async () => {
 		serviceManager.register(getExternalIdService());
 		serviceManager.register(getNntpClientManager());
 		serviceManager.register(getExtractionCacheManager());
-		serviceManager.register(getLiveTvScheduler());
+		serviceManager.register(getMediaBrowserNotifier());
+		serviceManager.register(getEpgScheduler());
 
 		// 3. Essential services run in parallel (fire-and-forget with error handling)
 		// These don't block each other or HTTP responses
 		Promise.all([
 			initializeLibrary().catch((e) => logger.error('Library init failed', e)),
 			initializeDownloadMonitor().catch((e) => logger.error('Download monitor init failed', e))
-		]);
+		]).then(() => {
+			// Initialize MediaBrowser notifier after download monitor is ready
+			// so event listeners can be attached
+			initializeMediaBrowserNotifier().catch((e) =>
+				logger.error('MediaBrowser notifier init failed', e)
+			);
+		});
 
 		// 4. Background services start after a short delay
 		// The monitoring scheduler also has an internal 5-minute grace period before tasks run
@@ -274,13 +305,8 @@ setImmediate(async () => {
 			initializeExtractionCacheManager().catch((e) =>
 				logger.error('Extraction cache init failed', e)
 			);
+			initializeEpgScheduler().catch((e) => logger.error('EPG scheduler init failed', e));
 		}, 5000);
-
-		// 4b. Live TV scheduler starts 15s after other background services
-		// Has its own 2-minute grace period before running auto-sync/EPG tasks
-		setTimeout(() => {
-			initializeLiveTvScheduler().catch((e) => logger.error('Live TV scheduler init failed', e));
-		}, 15000);
 
 		// 5. Browser solver starts after other services (resource-intensive, lower priority)
 		// This is delayed to allow core services to stabilize first

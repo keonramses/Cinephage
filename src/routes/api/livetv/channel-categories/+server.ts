@@ -1,51 +1,57 @@
 /**
- * Channel Categories API - CRUD for user-created categories
+ * Channel Categories API
+ *
+ * GET /api/livetv/channel-categories - Get all user categories
+ * POST /api/livetv/channel-categories - Create a new category
  */
 
 import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
-import { getChannelCategoryService } from '$lib/server/livetv/categories';
-import { channelCategoryCreateSchema } from '$lib/validation/schemas';
+import { channelCategoryService } from '$lib/server/livetv/categories';
 import { ValidationError } from '$lib/errors';
+import type { ChannelCategoryFormData } from '$lib/types/livetv';
 
-/**
- * GET /api/livetv/channel-categories
- * Get all user-created categories with channel counts
- */
 export const GET: RequestHandler = async () => {
-	const service = getChannelCategoryService();
-
 	try {
-		const categories = await service.getCategoriesWithCounts();
-		return json(categories);
+		const categories = await channelCategoryService.getCategories();
+		const channelCounts = await channelCategoryService.getCategoryChannelCounts();
+
+		// Enrich categories with channel counts
+		const enriched = categories.map((cat) => ({
+			...cat,
+			channelCount: channelCounts.get(cat.id) || 0
+		}));
+
+		return json({
+			categories: enriched,
+			total: categories.length
+		});
 	} catch (error) {
-		const message = error instanceof Error ? error.message : 'Unknown error';
-		return json({ error: message }, { status: 500 });
+		console.error('[API] Failed to get channel categories:', error);
+		return json({ error: 'Failed to get channel categories' }, { status: 500 });
 	}
 };
 
-/**
- * POST /api/livetv/channel-categories
- * Create a new category
- */
 export const POST: RequestHandler = async ({ request }) => {
-	const service = getChannelCategoryService();
-
 	try {
-		const body = await request.json();
-		const validated = channelCategoryCreateSchema.safeParse(body);
+		const body = (await request.json()) as ChannelCategoryFormData;
 
-		if (!validated.success) {
-			throw new ValidationError(validated.error.issues[0]?.message || 'Invalid input');
+		if (!body.name || typeof body.name !== 'string') {
+			throw new ValidationError('name is required');
 		}
 
-		const category = await service.createCategory(validated.data);
+		const category = await channelCategoryService.createCategory({
+			name: body.name.trim(),
+			color: body.color,
+			icon: body.icon
+		});
+
 		return json(category, { status: 201 });
 	} catch (error) {
 		if (error instanceof ValidationError) {
 			return json({ error: error.message }, { status: 400 });
 		}
-		const message = error instanceof Error ? error.message : 'Unknown error';
-		return json({ error: message }, { status: 500 });
+		console.error('[API] Failed to create channel category:', error);
+		return json({ error: 'Failed to create channel category' }, { status: 500 });
 	}
 };

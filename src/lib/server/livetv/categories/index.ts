@@ -1,1 +1,1 @@
-export { getChannelCategoryService, type ChannelCategoryService } from './ChannelCategoryService';
+export { channelCategoryService } from './ChannelCategoryService';

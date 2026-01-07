@@ -1,44 +1,51 @@
 /**
- * POST /api/livetv/accounts/test - Test account configuration before saving
+ * Test Stalker Account Configuration API
+ *
+ * POST /api/livetv/accounts/test - Test a new account configuration (without saving)
  */
 
 import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
-import { getStalkerPortalManager } from '$lib/server/livetv/stalker';
+import { getStalkerAccountManager } from '$lib/server/livetv/stalker';
 import { stalkerAccountTestSchema } from '$lib/validation/schemas';
+import { logger } from '$lib/logging';
 
 /**
- * POST /api/livetv/accounts/test
- * Test Stalker Portal connection with provided credentials.
- * Use this to validate credentials before creating/updating an account.
+ * Test a Stalker account configuration without saving
+ * Useful for validating credentials before creating an account
  */
 export const POST: RequestHandler = async ({ request }) => {
-	let data: unknown;
 	try {
-		data = await request.json();
-	} catch {
-		return json({ error: 'Invalid JSON body' }, { status: 400 });
-	}
+		const body = await request.json();
 
-	const result = stalkerAccountTestSchema.safeParse(data);
+		// Validate input
+		const parsed = stalkerAccountTestSchema.safeParse(body);
+		if (!parsed.success) {
+			return json(
+				{
+					success: false,
+					error: 'Validation failed',
+					details: parsed.error.flatten().fieldErrors
+				},
+				{ status: 400 }
+			);
+		}
 
-	if (!result.success) {
+		const manager = getStalkerAccountManager();
+		const result = await manager.testAccount(parsed.data);
+
+		return json(result);
+	} catch (error) {
+		logger.error('[API] Failed to test Stalker account configuration', {
+			error: error instanceof Error ? error.message : String(error)
+		});
+
 		return json(
 			{
-				error: 'Validation failed',
-				details: result.error.flatten()
+				success: false,
+				error: 'Failed to test account configuration'
 			},
-			{ status: 400 }
+			{ status: 500 }
 		);
-	}
-
-	const manager = getStalkerPortalManager();
-
-	try {
-		const testResult = await manager.testAccountConfig(result.data);
-		return json(testResult);
-	} catch (error) {
-		const message = error instanceof Error ? error.message : 'Unknown error';
-		return json({ success: false, error: message });
 	}
 };

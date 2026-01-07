@@ -1,235 +1,282 @@
 <script lang="ts">
-	import { invalidateAll } from '$app/navigation';
-	import { Plus } from 'lucide-svelte';
-	import type { PageData } from './$types';
+	import { Plus, RefreshCw, Loader2 } from 'lucide-svelte';
+	import { StalkerAccountTable, StalkerAccountModal } from '$lib/components/livetv';
 	import type { StalkerAccount, StalkerAccountTestResult } from '$lib/types/livetv';
-	import { StalkerAccountModal, StalkerAccountTable } from '$lib/components/livetv';
-	import { ConfirmationModal } from '$lib/components/ui/modal';
+	import { onMount } from 'svelte';
 
-	let { data }: { data: PageData } = $props();
+	// State
+	let accounts = $state<StalkerAccount[]>([]);
+	let loading = $state(true);
+	let refreshing = $state(false);
+	let saving = $state(false);
+	let error = $state<string | null>(null);
 
 	// Modal state
 	let modalOpen = $state(false);
 	let modalMode = $state<'add' | 'edit'>('add');
 	let editingAccount = $state<StalkerAccount | null>(null);
-	let saving = $state(false);
-	let saveError = $state<string | null>(null);
+	let modalError = $state<string | null>(null);
 
-	// Delete confirmation state
-	let confirmDeleteOpen = $state(false);
-	let deleteTarget = $state<StalkerAccount | null>(null);
-
-	// Testing and syncing state
+	// Testing state
 	let testingId = $state<string | null>(null);
+
+	// Syncing state
 	let syncingId = $state<string | null>(null);
 
-	// Modal functions
+	// Load accounts on mount
+	onMount(() => {
+		loadAccounts();
+	});
+
+	async function loadAccounts() {
+		loading = true;
+		error = null;
+
+		try {
+			const response = await fetch('/api/livetv/accounts');
+			if (!response.ok) {
+				throw new Error('Failed to load accounts');
+			}
+			accounts = await response.json();
+		} catch (e) {
+			error = e instanceof Error ? e.message : 'Failed to load accounts';
+		} finally {
+			loading = false;
+		}
+	}
+
+	async function refreshAccounts() {
+		refreshing = true;
+		await loadAccounts();
+		refreshing = false;
+	}
+
 	function openAddModal() {
 		modalMode = 'add';
 		editingAccount = null;
-		saveError = null;
+		modalError = null;
 		modalOpen = true;
 	}
 
 	function openEditModal(account: StalkerAccount) {
 		modalMode = 'edit';
 		editingAccount = account;
-		saveError = null;
+		modalError = null;
 		modalOpen = true;
 	}
 
 	function closeModal() {
 		modalOpen = false;
 		editingAccount = null;
-		saveError = null;
+		modalError = null;
 	}
 
-	// Test connection
-	async function handleTest(config: {
-		portalUrl: string;
-		macAddress: string;
-	}): Promise<StalkerAccountTestResult> {
-		try {
-			const response = await fetch('/api/livetv/accounts/test', {
-				method: 'POST',
-				headers: { 'Content-Type': 'application/json' },
-				body: JSON.stringify(config)
-			});
-			return await response.json();
-		} catch (e) {
-			return { success: false, error: e instanceof Error ? e.message : 'Unknown error' };
-		}
-	}
-
-	// Test saved account from table
-	async function handleTestAccount(account: StalkerAccount) {
-		testingId = account.id;
-		try {
-			await fetch(`/api/livetv/accounts/${account.id}/test`, {
-				method: 'POST'
-			});
-			await invalidateAll();
-		} finally {
-			testingId = null;
-		}
-	}
-
-	// Sync account channels
-	async function handleSyncAccount(account: StalkerAccount) {
-		const confirmed = confirm(
-			`Sync will refresh channel metadata from "${account.name}".\n\n` +
-				`This updates existing lineup channels only - it will not add or remove channels.\n\n` +
-				`Continue?`
-		);
-		if (!confirmed) return;
-
-		syncingId = account.id;
-		try {
-			await fetch(`/api/livetv/accounts/${account.id}/sync`, {
-				method: 'POST'
-			});
-			await invalidateAll();
-		} finally {
-			syncingId = null;
-		}
-	}
-
-	// Save account
-	async function handleSave(formData: {
+	async function handleSave(data: {
 		name: string;
 		portalUrl: string;
 		macAddress: string;
 		enabled: boolean;
-		priority: number;
 	}) {
 		saving = true;
-		saveError = null;
+		modalError = null;
+
 		try {
-			let response: Response;
-			if (modalMode === 'edit' && editingAccount) {
-				response = await fetch(`/api/livetv/accounts/${editingAccount.id}`, {
-					method: 'PUT',
-					headers: { 'Content-Type': 'application/json' },
-					body: JSON.stringify(formData)
-				});
-			} else {
-				response = await fetch('/api/livetv/accounts', {
-					method: 'POST',
-					headers: { 'Content-Type': 'application/json' },
-					body: JSON.stringify(formData)
-				});
+			const url =
+				modalMode === 'add' ? '/api/livetv/accounts' : `/api/livetv/accounts/${editingAccount!.id}`;
+
+			const method = modalMode === 'add' ? 'POST' : 'PUT';
+
+			const response = await fetch(url, {
+				method,
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify(data)
+			});
+
+			if (!response.ok) {
+				const result = await response.json();
+				throw new Error(result.error || 'Failed to save account');
 			}
 
-			const result = await response.json();
-			if (!response.ok || result.error) {
-				saveError = result.error || 'Failed to save account';
-				return;
-			}
-
+			await loadAccounts();
 			closeModal();
-			await invalidateAll();
 		} catch (e) {
-			saveError = e instanceof Error ? e.message : 'Unknown error';
+			modalError = e instanceof Error ? e.message : 'Failed to save account';
 		} finally {
 			saving = false;
 		}
 	}
 
-	// Delete confirmation
-	function confirmDelete(account: StalkerAccount) {
-		deleteTarget = account;
-		confirmDeleteOpen = true;
-	}
-
-	function confirmDeleteFromModal() {
-		if (editingAccount) {
-			deleteTarget = editingAccount;
-			modalOpen = false;
-			confirmDeleteOpen = true;
-		}
-	}
-
 	async function handleDelete() {
-		if (!deleteTarget) return;
+		if (!editingAccount) return;
+
+		const confirmed = confirm(`Are you sure you want to delete "${editingAccount.name}"?`);
+		if (!confirmed) return;
+
+		saving = true;
+		modalError = null;
 
 		try {
-			await fetch(`/api/livetv/accounts/${deleteTarget.id}`, {
+			const response = await fetch(`/api/livetv/accounts/${editingAccount.id}`, {
 				method: 'DELETE'
 			});
-			await invalidateAll();
+
+			if (!response.ok) {
+				const result = await response.json();
+				throw new Error(result.error || 'Failed to delete account');
+			}
+
+			await loadAccounts();
+			closeModal();
+		} catch (e) {
+			modalError = e instanceof Error ? e.message : 'Failed to delete account';
 		} finally {
-			confirmDeleteOpen = false;
-			deleteTarget = null;
+			saving = false;
 		}
 	}
 
-	// Toggle enabled
 	async function handleToggle(account: StalkerAccount) {
-		await fetch(`/api/livetv/accounts/${account.id}`, {
-			method: 'PUT',
+		try {
+			const response = await fetch(`/api/livetv/accounts/${account.id}`, {
+				method: 'PUT',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({ enabled: !account.enabled })
+			});
+
+			if (!response.ok) {
+				throw new Error('Failed to update account');
+			}
+
+			await loadAccounts();
+		} catch (e) {
+			console.error('Failed to toggle account:', e);
+		}
+	}
+
+	async function handleTest(account: StalkerAccount) {
+		testingId = account.id;
+
+		try {
+			const response = await fetch(`/api/livetv/accounts/${account.id}/test`, {
+				method: 'POST'
+			});
+
+			if (!response.ok) {
+				throw new Error('Failed to test account');
+			}
+
+			// Reload to get updated test results
+			await loadAccounts();
+		} catch (e) {
+			console.error('Failed to test account:', e);
+		} finally {
+			testingId = null;
+		}
+	}
+
+	async function handleSync(account: StalkerAccount) {
+		syncingId = account.id;
+
+		try {
+			const response = await fetch('/api/livetv/channels/sync', {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({ accountIds: [account.id] })
+			});
+
+			if (!response.ok) {
+				throw new Error('Failed to sync account');
+			}
+
+			// Reload to get updated sync results
+			await loadAccounts();
+		} catch (e) {
+			console.error('Failed to sync account:', e);
+		} finally {
+			syncingId = null;
+		}
+	}
+
+	async function handleTestConfig(config: {
+		portalUrl: string;
+		macAddress: string;
+	}): Promise<StalkerAccountTestResult> {
+		const response = await fetch('/api/livetv/accounts/test', {
+			method: 'POST',
 			headers: { 'Content-Type': 'application/json' },
-			body: JSON.stringify({ enabled: !account.enabled })
+			body: JSON.stringify(config)
 		});
-		await invalidateAll();
+
+		return response.json();
 	}
 </script>
 
 <svelte:head>
-	<title>IPTV Accounts - Cinephage</title>
+	<title>Stalker Accounts - Live TV - Cinephage</title>
 </svelte:head>
 
-<div class="w-full p-4">
-	<div class="mb-6">
-		<h1 class="text-2xl font-bold">IPTV Accounts</h1>
-		<p class="text-base-content/70">Manage your Stalker Portal accounts for live TV streaming.</p>
-	</div>
-
-	<div class="mb-4 flex items-center justify-end">
-		<button class="btn gap-2 btn-primary" onclick={openAddModal}>
-			<Plus class="h-4 w-4" />
-			Add Account
-		</button>
-	</div>
-
-	<div class="card bg-base-100 shadow-xl">
-		<div class="card-body p-0">
-			<StalkerAccountTable
-				accounts={data.accounts}
-				onEdit={openEditModal}
-				onDelete={confirmDelete}
-				onToggle={handleToggle}
-				onTest={handleTestAccount}
-				onSync={handleSyncAccount}
-				{testingId}
-				{syncingId}
-			/>
+<div class="space-y-6">
+	<!-- Header -->
+	<div class="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+		<div>
+			<h1 class="text-2xl font-bold">Stalker Accounts</h1>
+			<p class="mt-1 text-base-content/60">Manage your Stalker Portal IPTV accounts</p>
+		</div>
+		<div class="flex gap-2">
+			<button
+				class="btn btn-ghost btn-sm"
+				onclick={refreshAccounts}
+				disabled={loading || refreshing}
+				title="Refresh"
+			>
+				{#if refreshing}
+					<Loader2 class="h-4 w-4 animate-spin" />
+				{:else}
+					<RefreshCw class="h-4 w-4" />
+				{/if}
+			</button>
+			<button class="btn btn-sm btn-primary" onclick={openAddModal}>
+				<Plus class="h-4 w-4" />
+				Add Account
+			</button>
 		</div>
 	</div>
+
+	<!-- Content -->
+	{#if loading}
+		<div class="flex items-center justify-center py-12">
+			<Loader2 class="h-8 w-8 animate-spin text-primary" />
+		</div>
+	{:else if error}
+		<div class="alert alert-error">
+			<span>{error}</span>
+			<button class="btn btn-ghost btn-sm" onclick={loadAccounts}>Retry</button>
+		</div>
+	{:else}
+		<StalkerAccountTable
+			{accounts}
+			onEdit={openEditModal}
+			onDelete={(account) => {
+				editingAccount = account;
+				handleDelete();
+			}}
+			onToggle={handleToggle}
+			onTest={handleTest}
+			onSync={handleSync}
+			{testingId}
+			{syncingId}
+		/>
+	{/if}
 </div>
 
-<!-- Add/Edit Modal -->
+<!-- Modal -->
 <StalkerAccountModal
 	open={modalOpen}
 	mode={modalMode}
 	account={editingAccount}
 	{saving}
-	error={saveError}
+	error={modalError}
 	onClose={closeModal}
 	onSave={handleSave}
-	onDelete={confirmDeleteFromModal}
-	onTest={handleTest}
-/>
-
-<!-- Delete Confirmation -->
-<ConfirmationModal
-	open={confirmDeleteOpen}
-	title="Delete Account"
-	message={`Are you sure you want to delete "${deleteTarget?.name}"? This cannot be undone.`}
-	confirmLabel="Delete"
-	confirmVariant="error"
-	onConfirm={handleDelete}
-	onCancel={() => {
-		confirmDeleteOpen = false;
-		deleteTarget = null;
-	}}
+	onDelete={handleDelete}
+	onTest={handleTestConfig}
 />

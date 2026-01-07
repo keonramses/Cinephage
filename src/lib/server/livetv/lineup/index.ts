@@ -1,1 +1,1 @@
-export { getChannelLineupService, type ChannelLineupService } from './ChannelLineupService';
+export { channelLineupService } from './ChannelLineupService';

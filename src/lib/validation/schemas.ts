@@ -746,30 +746,93 @@ export type NntpServerUpdate = z.infer<typeof nntpServerUpdateSchema>;
 export type NntpServerTest = z.infer<typeof nntpServerTestSchema>;
 
 // ============================================================
-// Stalker Portal Account Schemas (for Live TV IPTV)
+// MediaBrowser (Jellyfin/Emby) Schemas
 // ============================================================
 
 /**
- * MAC address format validation.
- * Standard format: 00:1A:79:XX:XX:XX
+ * Server type for MediaBrowser servers.
  */
-export const macAddressSchema = z
-	.string()
-	.regex(
-		/^([0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}$/,
-		'Invalid MAC address format (expected XX:XX:XX:XX:XX:XX)'
-	)
-	.transform((v) => v.toUpperCase());
+export const mediaBrowserServerTypeSchema = z.enum(['jellyfin', 'emby']);
+
+/**
+ * Path mapping for MediaBrowser servers.
+ */
+export const mediaBrowserPathMappingSchema = z.object({
+	localPath: z.string().min(1, 'Local path is required'),
+	remotePath: z.string().min(1, 'Remote path is required')
+});
+
+/**
+ * Schema for creating a MediaBrowser server.
+ */
+export const mediaBrowserServerCreateSchema = z.object({
+	name: z.string().min(1, 'Name is required').max(100, 'Name must be 100 characters or less'),
+	serverType: mediaBrowserServerTypeSchema,
+	host: z.string().url('Must be a valid URL'),
+	apiKey: z.string().min(1, 'API key is required'),
+	enabled: z.boolean().default(true),
+	onImport: z.boolean().default(true),
+	onUpgrade: z.boolean().default(true),
+	onRename: z.boolean().default(true),
+	onDelete: z.boolean().default(true),
+	pathMappings: z.array(mediaBrowserPathMappingSchema).default([])
+});
+
+/**
+ * Schema for updating a MediaBrowser server.
+ */
+export const mediaBrowserServerUpdateSchema = mediaBrowserServerCreateSchema.partial();
+
+/**
+ * Schema for testing a MediaBrowser server connection.
+ */
+export const mediaBrowserServerTestSchema = z.object({
+	host: z.string().url('Must be a valid URL'),
+	apiKey: z.string().min(1, 'API key is required'),
+	serverType: mediaBrowserServerTypeSchema.optional().default('jellyfin')
+});
+
+// MediaBrowser Type Exports
+export type MediaBrowserServerType = z.infer<typeof mediaBrowserServerTypeSchema>;
+export type MediaBrowserPathMapping = z.infer<typeof mediaBrowserPathMappingSchema>;
+export type MediaBrowserServerCreate = z.infer<typeof mediaBrowserServerCreateSchema>;
+export type MediaBrowserServerUpdate = z.infer<typeof mediaBrowserServerUpdateSchema>;
+export type MediaBrowserServerTest = z.infer<typeof mediaBrowserServerTestSchema>;
+
+// ============================================================
+// Stalker Portal Account Schemas (Live TV)
+// ============================================================
+
+/**
+ * MAC address validation regex.
+ * Format: XX:XX:XX:XX:XX:XX (uppercase or lowercase hex)
+ */
+const MAC_ADDRESS_REGEX = /^([0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}$/;
 
 /**
  * Schema for creating a Stalker Portal account.
  */
 export const stalkerAccountCreateSchema = z.object({
 	name: z.string().min(1, 'Name is required').max(100, 'Name must be 100 characters or less'),
-	portalUrl: z.string().url('Must be a valid URL'),
-	macAddress: macAddressSchema,
-	enabled: z.boolean().default(true),
-	priority: z.number().int().min(0).max(99).default(1)
+	portalUrl: z
+		.string()
+		.url('Must be a valid URL')
+		.refine(
+			(url) => {
+				// Allow any valid URL - portal path varies by provider
+				try {
+					new URL(url);
+					return true;
+				} catch {
+					return false;
+				}
+			},
+			{ message: 'Must be a valid portal URL' }
+		),
+	macAddress: z.string().regex(MAC_ADDRESS_REGEX, {
+		message: 'Invalid MAC address format (expected XX:XX:XX:XX:XX:XX)'
+	}),
+	enabled: z.boolean().default(true)
 });
 
 /**
@@ -782,122 +845,12 @@ export const stalkerAccountUpdateSchema = stalkerAccountCreateSchema.partial();
  */
 export const stalkerAccountTestSchema = z.object({
 	portalUrl: z.string().url('Must be a valid URL'),
-	macAddress: macAddressSchema
+	macAddress: z.string().regex(MAC_ADDRESS_REGEX, {
+		message: 'Invalid MAC address format (expected XX:XX:XX:XX:XX:XX)'
+	})
 });
 
 // Stalker Account Type Exports
 export type StalkerAccountCreate = z.infer<typeof stalkerAccountCreateSchema>;
 export type StalkerAccountUpdate = z.infer<typeof stalkerAccountUpdateSchema>;
 export type StalkerAccountTest = z.infer<typeof stalkerAccountTestSchema>;
-
-// ============================================================
-// Channel Lineup Schemas
-// ============================================================
-
-/**
- * Schema for adding channels to the lineup
- */
-export const addToLineupSchema = z.object({
-	channels: z
-		.array(
-			z.object({
-				accountId: z.string().uuid('Account ID must be a valid UUID'),
-				channelId: z.string().min(1, 'Channel ID is required'),
-				name: z.string().min(1, 'Channel name is required'),
-				logo: z.string().optional(),
-				categoryId: z.string().optional(),
-				categoryName: z.string().optional(),
-				// User's custom category to assign to this channel
-				userCategoryId: z.string().uuid().nullable().optional()
-			})
-		)
-		.min(1, 'At least one channel is required')
-});
-
-/**
- * Schema for reordering lineup items
- */
-export const reorderLineupSchema = z.object({
-	itemIds: z
-		.array(z.string().uuid('Item ID must be a valid UUID'))
-		.min(1, 'At least one item ID is required')
-});
-
-/**
- * Schema for removing items from lineup
- */
-export const removeFromLineupSchema = z.object({
-	itemIds: z
-		.array(z.string().uuid('Item ID must be a valid UUID'))
-		.min(1, 'At least one item ID is required')
-});
-
-// Channel Lineup Type Exports
-export type AddToLineup = z.infer<typeof addToLineupSchema>;
-export type ReorderLineup = z.infer<typeof reorderLineupSchema>;
-export type RemoveFromLineup = z.infer<typeof removeFromLineupSchema>;
-
-// ============================================================
-// Channel Category Schemas
-// ============================================================
-
-/**
- * Schema for creating a channel category
- */
-export const channelCategoryCreateSchema = z.object({
-	name: z.string().min(1, 'Name is required').max(50, 'Name must be 50 characters or less'),
-	color: z
-		.string()
-		.regex(/^#[0-9A-Fa-f]{6}$/, 'Must be a valid hex color')
-		.optional(),
-	icon: z.string().max(50, 'Icon name must be 50 characters or less').optional()
-});
-
-/**
- * Schema for updating a channel category
- */
-export const channelCategoryUpdateSchema = channelCategoryCreateSchema.partial();
-
-/**
- * Schema for reordering categories
- */
-export const reorderCategoriesSchema = z.object({
-	categoryIds: z
-		.array(z.string().uuid('Category ID must be a valid UUID'))
-		.min(1, 'At least one category ID is required')
-});
-
-// Channel Category Type Exports
-export type ChannelCategoryCreate = z.infer<typeof channelCategoryCreateSchema>;
-export type ChannelCategoryUpdate = z.infer<typeof channelCategoryUpdateSchema>;
-export type ReorderCategories = z.infer<typeof reorderCategoriesSchema>;
-
-// ============================================================
-// Channel Update Schemas
-// ============================================================
-
-/**
- * Schema for updating a channel's customization
- */
-export const channelUpdateSchema = z.object({
-	channelNumber: z.number().int().min(1).max(9999).nullable().optional(),
-	customName: z.string().max(100, 'Name must be 100 characters or less').nullable().optional(),
-	customLogo: z.string().url('Must be a valid URL').nullable().optional(),
-	epgId: z.string().max(100, 'EPG ID must be 100 characters or less').nullable().optional(),
-	categoryId: z.string().uuid('Category ID must be a valid UUID').nullable().optional()
-});
-
-/**
- * Schema for bulk updating channels
- */
-export const bulkChannelUpdateSchema = z.object({
-	itemIds: z
-		.array(z.string().uuid('Item ID must be a valid UUID'))
-		.min(1, 'At least one item ID is required'),
-	categoryId: z.string().uuid('Category ID must be a valid UUID').nullable().optional(),
-	channelNumberStart: z.number().int().min(1).optional()
-});
-
-// Channel Update Type Exports
-export type ChannelUpdate = z.infer<typeof channelUpdateSchema>;
-export type BulkChannelUpdate = z.infer<typeof bulkChannelUpdateSchema>;

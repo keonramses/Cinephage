@@ -1,0 +1,74 @@
+/**
+ * GET /api/notifications/mediabrowser/:id - Get a specific server
+ * PUT /api/notifications/mediabrowser/:id - Update a server
+ * DELETE /api/notifications/mediabrowser/:id - Delete a server
+ */
+
+import { json } from '@sveltejs/kit';
+import type { RequestHandler } from './$types';
+import { getMediaBrowserManager } from '$lib/server/notifications/mediabrowser';
+import { mediaBrowserServerUpdateSchema } from '$lib/validation/schemas';
+
+/**
+ * GET /api/notifications/mediabrowser/:id
+ * Get a specific MediaBrowser server by ID.
+ */
+export const GET: RequestHandler = async ({ params }) => {
+	const manager = getMediaBrowserManager();
+	const server = await manager.getServer(params.id);
+
+	if (!server) {
+		return json({ error: 'Server not found' }, { status: 404 });
+	}
+
+	return json(server);
+};
+
+/**
+ * PUT /api/notifications/mediabrowser/:id
+ * Update an existing MediaBrowser server.
+ */
+export const PUT: RequestHandler = async ({ params, request }) => {
+	let data: unknown;
+	try {
+		data = await request.json();
+	} catch {
+		return json({ error: 'Invalid JSON body' }, { status: 400 });
+	}
+
+	const result = mediaBrowserServerUpdateSchema.safeParse(data);
+
+	if (!result.success) {
+		return json(
+			{
+				error: 'Validation failed',
+				details: result.error.flatten()
+			},
+			{ status: 400 }
+		);
+	}
+
+	const manager = getMediaBrowserManager();
+	const updated = await manager.updateServer(params.id, result.data);
+
+	if (!updated) {
+		return json({ error: 'Server not found' }, { status: 404 });
+	}
+
+	return json({ success: true, server: updated });
+};
+
+/**
+ * DELETE /api/notifications/mediabrowser/:id
+ * Delete a MediaBrowser server.
+ */
+export const DELETE: RequestHandler = async ({ params }) => {
+	const manager = getMediaBrowserManager();
+	const deleted = await manager.deleteServer(params.id);
+
+	if (!deleted) {
+		return json({ error: 'Server not found' }, { status: 404 });
+	}
+
+	return json({ success: true });
+};

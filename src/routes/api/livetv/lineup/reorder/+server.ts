@@ -1,36 +1,35 @@
 /**
+ * Lineup Reorder API
+ *
  * POST /api/livetv/lineup/reorder - Reorder lineup items
  */
 
 import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
-import { getChannelLineupService } from '$lib/server/livetv/lineup';
-import { reorderLineupSchema } from '$lib/validation/schemas';
+import { channelLineupService } from '$lib/server/livetv/lineup';
+import { ValidationError } from '$lib/errors';
+import type { ReorderLineupRequest } from '$lib/types/livetv';
 
-/**
- * POST /api/livetv/lineup/reorder
- * Reorder lineup items. The itemIds array represents the new order.
- */
 export const POST: RequestHandler = async ({ request }) => {
-	let data: unknown;
 	try {
-		data = await request.json();
-	} catch {
-		return json({ error: 'Invalid JSON body' }, { status: 400 });
-	}
+		const body = (await request.json()) as ReorderLineupRequest;
 
-	const result = reorderLineupSchema.safeParse(data);
-	if (!result.success) {
-		return json({ error: 'Validation failed', details: result.error.flatten() }, { status: 400 });
-	}
+		if (!body.itemIds || !Array.isArray(body.itemIds)) {
+			throw new ValidationError('itemIds array is required');
+		}
 
-	const service = getChannelLineupService();
+		if (body.itemIds.length === 0) {
+			return json({ success: true });
+		}
 
-	try {
-		await service.reorderLineup(result.data.itemIds);
-		return json({ success: true, updated: result.data.itemIds.length });
+		await channelLineupService.reorderLineup(body.itemIds);
+
+		return json({ success: true });
 	} catch (error) {
-		const message = error instanceof Error ? error.message : 'Unknown error';
-		return json({ error: message }, { status: 500 });
+		if (error instanceof ValidationError) {
+			return json({ error: error.message }, { status: 400 });
+		}
+		console.error('[API] Failed to reorder lineup:', error);
+		return json({ error: 'Failed to reorder lineup' }, { status: 500 });
 	}
 };

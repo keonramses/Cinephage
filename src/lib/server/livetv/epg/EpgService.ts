@@ -1,593 +1,545 @@
 /**
- * EpgService - Manages EPG (Electronic Program Guide) data.
- * Fetches EPG from providers and external XMLTV sources, stores in database.
+ * EPG Service
+ *
+ * Manages Electronic Program Guide (EPG) data for Live TV.
+ * Fetches EPG from Stalker portal accounts and provides query methods.
  */
 
+import { eq, and, gte, lte, inArray, sql } from 'drizzle-orm';
+import { randomUUID } from 'crypto';
 import { db } from '$lib/server/db';
 import {
+	stalkerAccounts,
+	stalkerChannels,
 	epgPrograms,
-	epgSources,
-	channelLineupItems,
-	stalkerPortalAccounts,
-	type EpgProgramRecord,
-	type EpgSourceRecord
+	type EpgProgramRecord
 } from '$lib/server/db/schema';
-import { eq, and, gte, lte, sql, asc } from 'drizzle-orm';
 import { logger } from '$lib/logging';
-import { randomUUID } from 'crypto';
-import { getStalkerPortalManager } from '../stalker/StalkerPortalManager';
-import { StalkerPortalClient } from '../stalker/StalkerPortalClient';
-import { getXmltvParser } from './XmltvParser';
+import { createStalkerClient } from '../stalker/StalkerPortalClient';
+import type {
+	EpgProgram,
+	EpgProgramWithProgress,
+	EpgSyncResult,
+	ChannelNowNext,
+	EpgProgramRaw
+} from '$lib/types/livetv';
 
-export interface EpgProgram {
-	id: string;
-	channelXmltvId: string;
-	accountId: string | null;
-	epgSourceId: string | null;
-	startTime: string;
-	endTime: string;
-	title: string;
-	description: string | null;
-	category: string | null;
-	icon: string | null;
-}
+const BATCH_SIZE = 1000;
+const DEFAULT_RETENTION_HOURS = 48;
+const DEFAULT_LOOKAHEAD_HOURS = 24;
 
-export interface CurrentProgram extends EpgProgram {
-	progress: number; // 0-100 percentage
-	remainingMinutes: number;
-}
-
-export interface ChannelEpg {
-	channelId: string; // Lineup item ID
-	channelName: string;
-	current: CurrentProgram | null;
-	next: EpgProgram | null;
-	programs: EpgProgram[];
-}
-
-function toEpgProgram(record: EpgProgramRecord): EpgProgram {
-	return {
-		id: record.id,
-		channelXmltvId: record.channelXmltvId,
-		accountId: record.accountId,
-		epgSourceId: record.epgSourceId,
-		startTime: record.startTime,
-		endTime: record.endTime,
-		title: record.title,
-		description: record.description,
-		category: record.category,
-		icon: record.icon
-	};
-}
-
-class EpgService {
-	private manager = getStalkerPortalManager();
-
+export class EpgService {
 	/**
-	 * Fetch and store EPG from a provider account.
-	 * @param accountId Account ID to fetch EPG from
-	 * @param hours Number of hours of EPG to fetch (default: 6)
+	 * Sync EPG data for a single account
 	 */
-	async fetchProviderEpg(accountId: string, hours: number = 6): Promise<number> {
-		const account = await this.manager.getAccountRecord(accountId);
+	async syncAccount(accountId: string): Promise<EpgSyncResult> {
+		const startTime = Date.now();
+
+		// Get account
+		const account = db
+			.select()
+			.from(stalkerAccounts)
+			.where(eq(stalkerAccounts.id, accountId))
+			.get();
+
 		if (!account) {
-			throw new Error('Account not found');
+			return {
+				success: false,
+				accountId,
+				accountName: 'Unknown',
+				programsAdded: 0,
+				programsUpdated: 0,
+				programsRemoved: 0,
+				duration: Date.now() - startTime,
+				error: 'Account not found'
+			};
 		}
 
-		if (account.epgEnabled === false) {
-			logger.info('[EpgService] EPG disabled for account', { accountId });
-			return 0;
+		if (!account.enabled) {
+			return {
+				success: false,
+				accountId,
+				accountName: account.name,
+				programsAdded: 0,
+				programsUpdated: 0,
+				programsRemoved: 0,
+				duration: Date.now() - startTime,
+				error: 'Account is disabled'
+			};
 		}
 
-		const client = new StalkerPortalClient({
-			portalUrl: account.portalUrl,
-			macAddress: account.macAddress
-		});
+		try {
+			logger.info('[EpgService] Starting EPG sync', { accountId, name: account.name });
 
-		const epgData = await client.getEpgInfo(hours);
-		const now = new Date().toISOString();
-		let programCount = 0;
+			const client = createStalkerClient(account.portalUrl, account.macAddress);
 
-		// Get lineup items for this account to map channel IDs
-		const lineupItems = await db
-			.select({
-				channelId: channelLineupItems.channelId,
-				cachedXmltvId: channelLineupItems.cachedXmltvId
-			})
-			.from(channelLineupItems)
-			.where(eq(channelLineupItems.accountId, accountId));
+			// Fetch EPG data from portal
+			const epgData = await client.getEpgInfo(DEFAULT_LOOKAHEAD_HOURS);
 
-		// Build a set of channel IDs we care about
-		const lineupChannelIds = new Set(lineupItems.map((item) => item.channelId));
-
-		// Delete existing EPG for this account (will be replaced)
-		await db.delete(epgPrograms).where(eq(epgPrograms.accountId, accountId));
-
-		// Insert new EPG data
-		for (const [channelId, programs] of epgData.programs) {
-			// Only store EPG for channels in our lineup
-			if (!lineupChannelIds.has(channelId)) continue;
-
-			for (const prog of programs) {
-				// Convert provider timestamps to ISO format
-				const startTime = this.timestampToIso(prog.startTimestamp, prog.startTime);
-				const endTime = this.timestampToIso(prog.endTimestamp, prog.endTime);
-
-				if (!startTime || !endTime) continue;
-
-				await db.insert(epgPrograms).values({
-					id: randomUUID(),
-					channelXmltvId: channelId, // Use provider channel ID
-					accountId: accountId,
-					epgSourceId: null, // Provider EPG, not external
-					startTime,
-					endTime,
-					title: prog.title,
-					description: prog.description || null,
-					category: prog.category || null,
-					icon: null,
-					createdAt: now
+			if (epgData.size === 0) {
+				logger.info('[EpgService] No EPG data returned from portal', {
+					accountId,
+					name: account.name
 				});
-				programCount++;
+				return {
+					success: true,
+					accountId,
+					accountName: account.name,
+					programsAdded: 0,
+					programsUpdated: 0,
+					programsRemoved: 0,
+					duration: Date.now() - startTime
+				};
 			}
+
+			// Build a map of stalker channel IDs to our local channel IDs
+			const channels = db
+				.select({ id: stalkerChannels.id, stalkerId: stalkerChannels.stalkerId })
+				.from(stalkerChannels)
+				.where(eq(stalkerChannels.accountId, accountId))
+				.all();
+
+			const channelMap = new Map<string, string>();
+			for (const ch of channels) {
+				channelMap.set(ch.stalkerId, ch.id);
+			}
+
+			// Process and store EPG data
+			const result = await this.storeEpgData(accountId, epgData, channelMap);
+
+			logger.info('[EpgService] EPG sync complete', {
+				accountId,
+				name: account.name,
+				...result,
+				duration: Date.now() - startTime
+			});
+
+			return {
+				success: true,
+				accountId,
+				accountName: account.name,
+				...result,
+				duration: Date.now() - startTime
+			};
+		} catch (error) {
+			const message = error instanceof Error ? error.message : 'Unknown error';
+			logger.error('[EpgService] EPG sync failed', {
+				accountId,
+				name: account.name,
+				error: message
+			});
+
+			return {
+				success: false,
+				accountId,
+				accountName: account.name,
+				programsAdded: 0,
+				programsUpdated: 0,
+				programsRemoved: 0,
+				duration: Date.now() - startTime,
+				error: message
+			};
 		}
-
-		logger.info('[EpgService] Fetched provider EPG', {
-			accountId,
-			accountName: account.name,
-			programs: programCount,
-			channels: epgData.programs.size
-		});
-
-		return programCount;
 	}
 
 	/**
-	 * Fetch EPG from all enabled accounts with EPG enabled.
+	 * Sync EPG data for all enabled accounts
 	 */
-	async fetchAllProviderEpg(hours: number = 6): Promise<Map<string, number>> {
-		const results = new Map<string, number>();
-		const accounts = await db
+	async syncAll(): Promise<EpgSyncResult[]> {
+		const accounts = db
 			.select()
-			.from(stalkerPortalAccounts)
-			.where(
-				and(eq(stalkerPortalAccounts.enabled, true), eq(stalkerPortalAccounts.epgEnabled, true))
-			);
+			.from(stalkerAccounts)
+			.where(eq(stalkerAccounts.enabled, true))
+			.all();
+
+		logger.info('[EpgService] Starting EPG sync for all accounts', {
+			accountCount: accounts.length
+		});
+
+		const results: EpgSyncResult[] = [];
 
 		for (const account of accounts) {
-			try {
-				const count = await this.fetchProviderEpg(account.id, hours);
-				results.set(account.id, count);
-			} catch (error) {
-				logger.error('[EpgService] Failed to fetch EPG for account', {
-					accountId: account.id,
-					error: error instanceof Error ? error.message : 'Unknown error'
-				});
-				results.set(account.id, 0);
-			}
+			const result = await this.syncAccount(account.id);
+			results.push(result);
 		}
+
+		const totalAdded = results.reduce((sum, r) => sum + r.programsAdded, 0);
+		const totalUpdated = results.reduce((sum, r) => sum + r.programsUpdated, 0);
+		const successful = results.filter((r) => r.success).length;
+
+		logger.info('[EpgService] EPG sync complete for all accounts', {
+			accounts: accounts.length,
+			successful,
+			totalAdded,
+			totalUpdated
+		});
 
 		return results;
 	}
 
 	/**
-	 * Get EPG for a lineup item.
+	 * Store EPG data in the database
 	 */
-	async getEpgForChannel(lineupItemId: string, start?: Date, end?: Date): Promise<EpgProgram[]> {
-		// Get the lineup item to find the channel ID and account
-		const items = await db
-			.select()
-			.from(channelLineupItems)
-			.where(eq(channelLineupItems.id, lineupItemId))
-			.limit(1);
+	private async storeEpgData(
+		accountId: string,
+		epgData: Map<string, EpgProgramRaw[]>,
+		channelMap: Map<string, string>
+	): Promise<{ programsAdded: number; programsUpdated: number; programsRemoved: number }> {
+		let programsAdded = 0;
+		let programsUpdated = 0;
+		const now = new Date().toISOString();
 
-		if (items.length === 0) return [];
+		// Collect all programs to upsert
+		const allPrograms: {
+			id: string;
+			channelId: string;
+			stalkerChannelId: string;
+			accountId: string;
+			title: string;
+			description: string | null;
+			category: string | null;
+			director: string | null;
+			actor: string | null;
+			startTime: string;
+			endTime: string;
+			duration: number;
+			hasArchive: boolean;
+			cachedAt: string;
+			updatedAt: string;
+		}[] = [];
 
-		const item = items[0];
-		const channelId = item.channelId;
-		const accountId = item.accountId;
+		for (const [stalkerChannelId, programs] of epgData) {
+			const localChannelId = channelMap.get(stalkerChannelId);
+			if (!localChannelId) {
+				// Channel not in our database, skip
+				continue;
+			}
 
-		// Build query conditions
-		const conditions = [
-			eq(epgPrograms.channelXmltvId, channelId),
-			eq(epgPrograms.accountId, accountId)
-		];
+			for (const program of programs) {
+				// Convert portal timestamps to ISO strings
+				const startTime = new Date(program.start_timestamp * 1000).toISOString();
+				const endTime = new Date(program.stop_timestamp * 1000).toISOString();
 
-		if (start) {
-			conditions.push(gte(epgPrograms.endTime, start.toISOString()));
+				allPrograms.push({
+					id: randomUUID(),
+					channelId: localChannelId,
+					stalkerChannelId,
+					accountId,
+					title: program.name,
+					description: program.descr || null,
+					category: program.category || null,
+					director: program.director || null,
+					actor: program.actor || null,
+					startTime,
+					endTime,
+					duration: program.duration,
+					hasArchive: program.mark_archive === 1,
+					cachedAt: now,
+					updatedAt: now
+				});
+			}
 		}
-		if (end) {
-			conditions.push(lte(epgPrograms.startTime, end.toISOString()));
+
+		// Upsert programs in batches
+		for (let i = 0; i < allPrograms.length; i += BATCH_SIZE) {
+			const batch = allPrograms.slice(i, i + BATCH_SIZE);
+
+			// Use INSERT OR REPLACE for upsert behavior
+			for (const program of batch) {
+				// Check if program exists (by unique constraint: account_id, stalker_channel_id, start_time)
+				const existing = db
+					.select({ id: epgPrograms.id })
+					.from(epgPrograms)
+					.where(
+						and(
+							eq(epgPrograms.accountId, program.accountId),
+							eq(epgPrograms.stalkerChannelId, program.stalkerChannelId),
+							eq(epgPrograms.startTime, program.startTime)
+						)
+					)
+					.get();
+
+				if (existing) {
+					// Update existing
+					db.update(epgPrograms)
+						.set({
+							title: program.title,
+							description: program.description,
+							category: program.category,
+							director: program.director,
+							actor: program.actor,
+							endTime: program.endTime,
+							duration: program.duration,
+							hasArchive: program.hasArchive,
+							updatedAt: now
+						})
+						.where(eq(epgPrograms.id, existing.id))
+						.run();
+					programsUpdated++;
+				} else {
+					// Insert new
+					db.insert(epgPrograms).values(program).run();
+					programsAdded++;
+				}
+			}
 		}
 
-		const programs = await db
-			.select()
-			.from(epgPrograms)
-			.where(and(...conditions))
-			.orderBy(epgPrograms.startTime);
-
-		return programs.map(toEpgProgram);
-	}
-
-	/**
-	 * Get current program for a lineup item.
-	 */
-	async getCurrentProgram(lineupItemId: string): Promise<CurrentProgram | null> {
-		const now = new Date();
-		const nowIso = now.toISOString();
-
-		// Get the lineup item
-		const items = await db
-			.select()
-			.from(channelLineupItems)
-			.where(eq(channelLineupItems.id, lineupItemId))
-			.limit(1);
-
-		if (items.length === 0) return null;
-
-		const item = items[0];
-
-		// Find program that's currently airing
-		const programs = await db
-			.select()
-			.from(epgPrograms)
-			.where(
-				and(
-					eq(epgPrograms.channelXmltvId, item.channelId),
-					eq(epgPrograms.accountId, item.accountId),
-					lte(epgPrograms.startTime, nowIso),
-					gte(epgPrograms.endTime, nowIso)
-				)
-			)
-			.limit(1);
-
-		if (programs.length === 0) return null;
-
-		const prog = programs[0];
-		const startMs = new Date(prog.startTime).getTime();
-		const endMs = new Date(prog.endTime).getTime();
-		const nowMs = now.getTime();
-
-		const duration = endMs - startMs;
-		const elapsed = nowMs - startMs;
-		const progress = Math.min(100, Math.max(0, (elapsed / duration) * 100));
-		const remainingMinutes = Math.max(0, Math.round((endMs - nowMs) / 60000));
+		// Remove old programs (past retention period)
+		const cutoffTime = new Date(
+			Date.now() - DEFAULT_RETENTION_HOURS * 60 * 60 * 1000
+		).toISOString();
+		const deleted = db
+			.delete(epgPrograms)
+			.where(and(eq(epgPrograms.accountId, accountId), lte(epgPrograms.endTime, cutoffTime)))
+			.run();
 
 		return {
-			...toEpgProgram(prog),
-			progress,
-			remainingMinutes
+			programsAdded,
+			programsUpdated,
+			programsRemoved: deleted.changes
 		};
 	}
 
 	/**
-	 * Get current programs for all lineup items.
+	 * Get current and next program for multiple channels
+	 * @param channelIds - Array of local channel IDs (from channel_lineup_items.channel_id)
 	 */
-	async getCurrentPrograms(): Promise<Map<string, CurrentProgram>> {
-		const results = new Map<string, CurrentProgram>();
+	getNowAndNext(channelIds: string[]): Map<string, ChannelNowNext> {
+		if (channelIds.length === 0) {
+			return new Map();
+		}
+
 		const now = new Date();
 		const nowIso = now.toISOString();
 
-		// Get all lineup items with their channel IDs
-		const lineupItems = await db
-			.select({
-				id: channelLineupItems.id,
-				channelId: channelLineupItems.channelId,
-				accountId: channelLineupItems.accountId
-			})
-			.from(channelLineupItems);
+		const result = new Map<string, ChannelNowNext>();
 
-		if (lineupItems.length === 0) return results;
-
-		// Get all current programs
-		const programs = await db
-			.select()
-			.from(epgPrograms)
-			.where(and(lte(epgPrograms.startTime, nowIso), gte(epgPrograms.endTime, nowIso)));
-
-		// Build a lookup map: accountId:channelId -> program
-		const programLookup = new Map<string, EpgProgramRecord>();
-		for (const prog of programs) {
-			if (prog.accountId) {
-				programLookup.set(`${prog.accountId}:${prog.channelXmltvId}`, prog);
-			}
-		}
-
-		// Match lineup items to programs
-		for (const item of lineupItems) {
-			const prog = programLookup.get(`${item.accountId}:${item.channelId}`);
-			if (!prog) continue;
-
-			const startMs = new Date(prog.startTime).getTime();
-			const endMs = new Date(prog.endTime).getTime();
-			const nowMs = now.getTime();
-
-			const duration = endMs - startMs;
-			const elapsed = nowMs - startMs;
-			const progress = Math.min(100, Math.max(0, (elapsed / duration) * 100));
-			const remainingMinutes = Math.max(0, Math.round((endMs - nowMs) / 60000));
-
-			results.set(item.id, {
-				...toEpgProgram(prog),
-				progress,
-				remainingMinutes
+		// Initialize results
+		for (const channelId of channelIds) {
+			result.set(channelId, {
+				channelId,
+				now: null,
+				next: null
 			});
 		}
 
-		return results;
-	}
+		// Get all programs that could be current or next
+		// (starts before now+2h and ends after now)
+		const twoHoursLater = new Date(now.getTime() + 2 * 60 * 60 * 1000).toISOString();
 
-	/**
-	 * Get next program after the current one.
-	 */
-	async getNextProgram(lineupItemId: string): Promise<EpgProgram | null> {
-		const now = new Date();
-		const nowIso = now.toISOString();
-
-		// Get the lineup item
-		const items = await db
-			.select()
-			.from(channelLineupItems)
-			.where(eq(channelLineupItems.id, lineupItemId))
-			.limit(1);
-
-		if (items.length === 0) return null;
-
-		const item = items[0];
-
-		// Find next program (starts after now)
-		const programs = await db
+		const programs = db
 			.select()
 			.from(epgPrograms)
 			.where(
 				and(
-					eq(epgPrograms.channelXmltvId, item.channelId),
-					eq(epgPrograms.accountId, item.accountId),
-					gte(epgPrograms.startTime, nowIso)
+					inArray(epgPrograms.channelId, channelIds),
+					lte(epgPrograms.startTime, twoHoursLater),
+					gte(epgPrograms.endTime, nowIso)
 				)
 			)
 			.orderBy(epgPrograms.startTime)
-			.limit(1);
+			.all();
 
-		if (programs.length === 0) return null;
-
-		return toEpgProgram(programs[0]);
-	}
-
-	/**
-	 * Clean up old EPG data.
-	 * @param hoursOld Delete programs that ended more than this many hours ago
-	 */
-	async cleanupOldPrograms(hoursOld: number = 24): Promise<number> {
-		const cutoff = new Date(Date.now() - hoursOld * 60 * 60 * 1000).toISOString();
-
-		const result = await db.delete(epgPrograms).where(lte(epgPrograms.endTime, cutoff));
-
-		const deleted = result.changes ?? 0;
-		if (deleted > 0) {
-			logger.info('[EpgService] Cleaned up old EPG programs', { deleted, hoursOld });
+		// Group by channel
+		const byChannel = new Map<string, EpgProgramRecord[]>();
+		for (const program of programs) {
+			const existing = byChannel.get(program.channelId) || [];
+			existing.push(program);
+			byChannel.set(program.channelId, existing);
 		}
 
-		return deleted;
-	}
+		// Find current and next for each channel
+		for (const [channelId, channelPrograms] of byChannel) {
+			const entry = result.get(channelId);
+			if (!entry) continue;
 
-	/**
-	 * Get EPG program count.
-	 */
-	async getProgramCount(): Promise<number> {
-		const result = await db.select({ count: sql<number>`count(*)` }).from(epgPrograms);
-		return result[0]?.count || 0;
-	}
+			for (const program of channelPrograms) {
+				const startTime = new Date(program.startTime);
+				const endTime = new Date(program.endTime);
 
-	/**
-	 * Convert provider timestamp or time string to ISO format.
-	 */
-	private timestampToIso(timestamp: number, timeStr: string): string | null {
-		if (timestamp > 0) {
-			return new Date(timestamp * 1000).toISOString();
-		}
-
-		// Try parsing the time string (format: "YYYY-MM-DD HH:MM:SS")
-		if (timeStr) {
-			try {
-				const date = new Date(timeStr.replace(' ', 'T') + 'Z');
-				if (!isNaN(date.getTime())) {
-					return date.toISOString();
+				// Check if current (now is between start and end)
+				if (startTime <= now && endTime > now) {
+					entry.now = this.programToWithProgress(program, now);
 				}
-			} catch {
-				// Fall through
+				// Check if next (starts after now and we don't have a next yet)
+				else if (startTime > now && !entry.next) {
+					entry.next = this.programRecordToEpgProgram(program);
+				}
+
+				// If we have both, stop
+				if (entry.now && entry.next) break;
 			}
 		}
 
-		return null;
-	}
-
-	// ========================================================================
-	// XMLTV Source Management
-	// ========================================================================
-
-	/**
-	 * Get all XMLTV sources.
-	 */
-	async getXmltvSources(): Promise<EpgSourceRecord[]> {
-		return db.select().from(epgSources).orderBy(asc(epgSources.priority));
+		return result;
 	}
 
 	/**
-	 * Get a single XMLTV source by ID.
+	 * Get programs for a time range (for guide view)
+	 * @param channelIds - Array of local channel IDs
+	 * @param start - Start time
+	 * @param end - End time
 	 */
-	async getXmltvSource(id: string): Promise<EpgSourceRecord | null> {
-		const sources = await db.select().from(epgSources).where(eq(epgSources.id, id)).limit(1);
-		return sources.length > 0 ? sources[0] : null;
+	getGuideData(channelIds: string[], start: Date, end: Date): Map<string, EpgProgram[]> {
+		if (channelIds.length === 0) {
+			return new Map();
+		}
+
+		const startIso = start.toISOString();
+		const endIso = end.toISOString();
+
+		const programs = db
+			.select()
+			.from(epgPrograms)
+			.where(
+				and(
+					inArray(epgPrograms.channelId, channelIds),
+					// Program overlaps with time range if:
+					// - starts before end AND ends after start
+					lte(epgPrograms.startTime, endIso),
+					gte(epgPrograms.endTime, startIso)
+				)
+			)
+			.orderBy(epgPrograms.startTime)
+			.all();
+
+		// Group by channel
+		const result = new Map<string, EpgProgram[]>();
+
+		for (const program of programs) {
+			const existing = result.get(program.channelId) || [];
+			existing.push(this.programRecordToEpgProgram(program));
+			result.set(program.channelId, existing);
+		}
+
+		return result;
 	}
 
 	/**
-	 * Add a new XMLTV source.
+	 * Get programs for a single channel
 	 */
-	async addXmltvSource(name: string, url: string): Promise<EpgSourceRecord> {
-		const now = new Date().toISOString();
-		const [source] = await db
-			.insert(epgSources)
-			.values({
-				id: randomUUID(),
-				name,
-				url,
-				enabled: true,
-				priority: 1,
-				status: 'pending',
-				createdAt: now,
-				updatedAt: now
+	getChannelPrograms(channelId: string, start: Date, end: Date): EpgProgram[] {
+		const startIso = start.toISOString();
+		const endIso = end.toISOString();
+
+		const programs = db
+			.select()
+			.from(epgPrograms)
+			.where(
+				and(
+					eq(epgPrograms.channelId, channelId),
+					lte(epgPrograms.startTime, endIso),
+					gte(epgPrograms.endTime, startIso)
+				)
+			)
+			.orderBy(epgPrograms.startTime)
+			.all();
+
+		return programs.map((p) => this.programRecordToEpgProgram(p));
+	}
+
+	/**
+	 * Cleanup old EPG programs
+	 * @param retentionHours - Number of hours to keep past programs
+	 * @returns Number of deleted programs
+	 */
+	cleanup(retentionHours: number = DEFAULT_RETENTION_HOURS): number {
+		const cutoffTime = new Date(Date.now() - retentionHours * 60 * 60 * 1000).toISOString();
+
+		const deleted = db.delete(epgPrograms).where(lte(epgPrograms.endTime, cutoffTime)).run();
+
+		if (deleted.changes > 0) {
+			logger.info('[EpgService] Cleaned up old EPG programs', {
+				deleted: deleted.changes,
+				cutoffTime
+			});
+		}
+
+		return deleted.changes;
+	}
+
+	/**
+	 * Get total program count
+	 */
+	getProgramCount(): number {
+		const result = db
+			.select({ count: sql<number>`count(*)` })
+			.from(epgPrograms)
+			.get();
+		return result?.count ?? 0;
+	}
+
+	/**
+	 * Get program count by account
+	 */
+	getProgramCountByAccount(): Map<string, number> {
+		const results = db
+			.select({
+				accountId: epgPrograms.accountId,
+				count: sql<number>`count(*)`
 			})
-			.returning();
+			.from(epgPrograms)
+			.groupBy(epgPrograms.accountId)
+			.all();
 
-		logger.info('[EpgService] Added XMLTV source', { id: source.id, name, url });
-		return source;
+		const map = new Map<string, number>();
+		for (const row of results) {
+			map.set(row.accountId, row.count);
+		}
+		return map;
 	}
 
 	/**
-	 * Update an XMLTV source.
+	 * Convert database record to EpgProgram type
 	 */
-	async updateXmltvSource(
-		id: string,
-		updates: { name?: string; url?: string; enabled?: boolean; priority?: number }
-	): Promise<EpgSourceRecord | null> {
-		const now = new Date().toISOString();
-		const [updated] = await db
-			.update(epgSources)
-			.set({ ...updates, updatedAt: now })
-			.where(eq(epgSources.id, id))
-			.returning();
-
-		return updated || null;
+	private programRecordToEpgProgram(record: EpgProgramRecord): EpgProgram {
+		return {
+			id: record.id,
+			channelId: record.channelId,
+			stalkerChannelId: record.stalkerChannelId,
+			accountId: record.accountId,
+			title: record.title,
+			description: record.description,
+			category: record.category,
+			director: record.director,
+			actor: record.actor,
+			startTime: record.startTime,
+			endTime: record.endTime,
+			duration: record.duration,
+			hasArchive: record.hasArchive ?? false,
+			cachedAt: record.cachedAt ?? '',
+			updatedAt: record.updatedAt ?? ''
+		};
 	}
 
 	/**
-	 * Delete an XMLTV source.
+	 * Convert database record to EpgProgramWithProgress
 	 */
-	async deleteXmltvSource(id: string): Promise<boolean> {
-		const result = await db.delete(epgSources).where(eq(epgSources.id, id));
-		return (result.changes ?? 0) > 0;
-	}
+	private programToWithProgress(record: EpgProgramRecord, now: Date): EpgProgramWithProgress {
+		const startTime = new Date(record.startTime);
+		const endTime = new Date(record.endTime);
 
-	/**
-	 * Fetch and store EPG from an XMLTV source.
-	 */
-	async fetchXmltvSource(sourceId: string): Promise<number> {
-		const source = await this.getXmltvSource(sourceId);
-		if (!source) {
-			throw new Error('XMLTV source not found');
-		}
+		const elapsed = now.getTime() - startTime.getTime();
+		const total = endTime.getTime() - startTime.getTime();
+		const progress = total > 0 ? Math.min(1, Math.max(0, elapsed / total)) : 0;
+		const remainingMs = endTime.getTime() - now.getTime();
+		const remainingMinutes = Math.max(0, Math.floor(remainingMs / 60000));
 
-		if (!source.enabled) {
-			logger.info('[EpgService] XMLTV source disabled', { sourceId });
-			return 0;
-		}
-
-		const parser = getXmltvParser();
-		const now = new Date().toISOString();
-
-		try {
-			const xmltvData = await parser.fetchAndParse(source.url);
-
-			// Delete existing programs from this source
-			await db.delete(epgPrograms).where(eq(epgPrograms.epgSourceId, sourceId));
-
-			let programCount = 0;
-
-			// Insert new programs
-			for (const prog of xmltvData.programs) {
-				await db.insert(epgPrograms).values({
-					id: randomUUID(),
-					channelXmltvId: prog.channel,
-					epgSourceId: sourceId,
-					accountId: null,
-					startTime: prog.start.toISOString(),
-					endTime: prog.stop.toISOString(),
-					title: prog.title,
-					description: prog.description || null,
-					category: prog.category || null,
-					icon: prog.icon || null,
-					rating: prog.rating || null,
-					episodeNumber: prog.episodeNum || null,
-					createdAt: now
-				});
-				programCount++;
-			}
-
-			// Update source status
-			await db
-				.update(epgSources)
-				.set({
-					status: 'ok',
-					errorMessage: null,
-					lastFetchedAt: now,
-					channelCount: xmltvData.channels.length,
-					updatedAt: now
-				})
-				.where(eq(epgSources.id, sourceId));
-
-			logger.info('[EpgService] Fetched XMLTV source', {
-				sourceId,
-				name: source.name,
-				channels: xmltvData.channels.length,
-				programs: programCount
-			});
-
-			return programCount;
-		} catch (error) {
-			const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-
-			// Update source with error status
-			await db
-				.update(epgSources)
-				.set({
-					status: 'error',
-					errorMessage,
-					updatedAt: now
-				})
-				.where(eq(epgSources.id, sourceId));
-
-			logger.error('[EpgService] Failed to fetch XMLTV source', {
-				sourceId,
-				error: errorMessage
-			});
-
-			throw error;
-		}
-	}
-
-	/**
-	 * Fetch all enabled XMLTV sources.
-	 */
-	async fetchAllXmltvSources(): Promise<Map<string, number>> {
-		const results = new Map<string, number>();
-		const sources = await db.select().from(epgSources).where(eq(epgSources.enabled, true));
-
-		for (const source of sources) {
-			try {
-				const count = await this.fetchXmltvSource(source.id);
-				results.set(source.id, count);
-			} catch (error) {
-				logger.error('[EpgService] Failed to fetch XMLTV source', {
-					sourceId: source.id,
-					error: error instanceof Error ? error.message : 'Unknown error'
-				});
-				results.set(source.id, 0);
-			}
-		}
-
-		return results;
+		return {
+			...this.programRecordToEpgProgram(record),
+			progress,
+			isLive: true,
+			remainingMinutes
+		};
 	}
 }
 
 // Singleton instance
-let instance: EpgService | null = null;
+let epgServiceInstance: EpgService | null = null;
 
 export function getEpgService(): EpgService {
-	if (!instance) {
-		instance = new EpgService();
+	if (!epgServiceInstance) {
+		epgServiceInstance = new EpgService();
 	}
-	return instance;
+	return epgServiceInstance;
 }
-
-export type { EpgService };

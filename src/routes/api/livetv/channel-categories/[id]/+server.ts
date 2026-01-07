@@ -1,93 +1,71 @@
 /**
- * Channel Category API - Single category operations
+ * Single Channel Category API
+ *
+ * GET /api/livetv/channel-categories/[id] - Get single category
+ * PUT /api/livetv/channel-categories/[id] - Update category
+ * DELETE /api/livetv/channel-categories/[id] - Delete category
  */
 
 import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
-import { getChannelCategoryService } from '$lib/server/livetv/categories';
-import { channelCategoryUpdateSchema } from '$lib/validation/schemas';
-import { ValidationError, NotFoundError } from '$lib/errors';
+import { channelCategoryService } from '$lib/server/livetv/categories';
+import { ValidationError } from '$lib/errors';
+import type { ChannelCategoryFormData } from '$lib/types/livetv';
 
-/**
- * GET /api/livetv/channel-categories/:id
- * Get a single category
- */
 export const GET: RequestHandler = async ({ params }) => {
-	const service = getChannelCategoryService();
-
 	try {
-		const category = await service.getCategoryById(params.id);
+		const category = await channelCategoryService.getCategoryById(params.id);
 
 		if (!category) {
-			throw new NotFoundError('Category not found');
+			return json({ error: 'Category not found' }, { status: 404 });
 		}
 
 		return json(category);
 	} catch (error) {
-		if (error instanceof NotFoundError) {
-			return json({ error: error.message }, { status: 404 });
-		}
-		const message = error instanceof Error ? error.message : 'Unknown error';
-		return json({ error: message }, { status: 500 });
+		console.error('[API] Failed to get channel category:', error);
+		return json({ error: 'Failed to get channel category' }, { status: 500 });
 	}
 };
 
-/**
- * PUT /api/livetv/channel-categories/:id
- * Update a category
- */
 export const PUT: RequestHandler = async ({ params, request }) => {
-	const service = getChannelCategoryService();
-
 	try {
-		const existing = await service.getCategoryById(params.id);
-		if (!existing) {
-			throw new NotFoundError('Category not found');
+		const body = (await request.json()) as ChannelCategoryFormData;
+
+		if (!body.name || typeof body.name !== 'string') {
+			throw new ValidationError('name is required');
 		}
 
-		const body = await request.json();
-		const validated = channelCategoryUpdateSchema.safeParse(body);
+		const category = await channelCategoryService.updateCategory(params.id, {
+			name: body.name.trim(),
+			color: body.color,
+			icon: body.icon
+		});
 
-		if (!validated.success) {
-			throw new ValidationError(validated.error.issues[0]?.message || 'Invalid input');
+		if (!category) {
+			return json({ error: 'Category not found' }, { status: 404 });
 		}
 
-		await service.updateCategory(params.id, validated.data);
-
-		const updated = await service.getCategoryById(params.id);
-		return json(updated);
+		return json(category);
 	} catch (error) {
-		if (error instanceof NotFoundError) {
-			return json({ error: error.message }, { status: 404 });
-		}
 		if (error instanceof ValidationError) {
 			return json({ error: error.message }, { status: 400 });
 		}
-		const message = error instanceof Error ? error.message : 'Unknown error';
-		return json({ error: message }, { status: 500 });
+		console.error('[API] Failed to update channel category:', error);
+		return json({ error: 'Failed to update channel category' }, { status: 500 });
 	}
 };
 
-/**
- * DELETE /api/livetv/channel-categories/:id
- * Delete a category
- */
 export const DELETE: RequestHandler = async ({ params }) => {
-	const service = getChannelCategoryService();
-
 	try {
-		const existing = await service.getCategoryById(params.id);
-		if (!existing) {
-			throw new NotFoundError('Category not found');
+		const success = await channelCategoryService.deleteCategory(params.id);
+
+		if (!success) {
+			return json({ error: 'Category not found' }, { status: 404 });
 		}
 
-		await service.deleteCategory(params.id);
 		return json({ success: true });
 	} catch (error) {
-		if (error instanceof NotFoundError) {
-			return json({ error: error.message }, { status: 404 });
-		}
-		const message = error instanceof Error ? error.message : 'Unknown error';
-		return json({ error: message }, { status: 500 });
+		console.error('[API] Failed to delete channel category:', error);
+		return json({ error: 'Failed to delete channel category' }, { status: 500 });
 	}
 };

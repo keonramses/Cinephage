@@ -1,93 +1,63 @@
 /**
- * Channel Lineup Item API - Single channel operations
+ * Single Lineup Item API
+ *
+ * GET /api/livetv/lineup/[id] - Get single lineup item
+ * PUT /api/livetv/lineup/[id] - Update lineup item
+ * DELETE /api/livetv/lineup/[id] - Remove from lineup
  */
 
 import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
-import { getChannelLineupService } from '$lib/server/livetv/lineup/ChannelLineupService';
-import { channelUpdateSchema } from '$lib/validation/schemas';
-import { ValidationError, NotFoundError } from '$lib/errors';
+import { channelLineupService } from '$lib/server/livetv/lineup';
+import { ValidationError } from '$lib/errors';
+import type { UpdateChannelRequest } from '$lib/types/livetv';
 
-/**
- * GET /api/livetv/lineup/:id
- * Get a single lineup item
- */
 export const GET: RequestHandler = async ({ params }) => {
-	const service = getChannelLineupService();
-
 	try {
-		const item = await service.getChannelById(params.id);
+		const item = await channelLineupService.getChannelById(params.id);
 
 		if (!item) {
-			throw new NotFoundError('Channel not found in lineup');
+			return json({ error: 'Lineup item not found' }, { status: 404 });
 		}
 
 		return json(item);
 	} catch (error) {
-		if (error instanceof NotFoundError) {
-			return json({ error: error.message }, { status: 404 });
-		}
-		const message = error instanceof Error ? error.message : 'Unknown error';
-		return json({ error: message }, { status: 500 });
+		console.error('[API] Failed to get lineup item:', error);
+		return json({ error: 'Failed to get lineup item' }, { status: 500 });
 	}
 };
 
-/**
- * PUT /api/livetv/lineup/:id
- * Update a channel's customization
- */
 export const PUT: RequestHandler = async ({ params, request }) => {
-	const service = getChannelLineupService();
-
 	try {
-		const existing = await service.getChannelById(params.id);
-		if (!existing) {
-			throw new NotFoundError('Channel not found in lineup');
+		const body = (await request.json()) as UpdateChannelRequest;
+
+		const item = await channelLineupService.updateChannel(params.id, body);
+
+		if (!item) {
+			return json({ error: 'Lineup item not found' }, { status: 404 });
 		}
 
-		const body = await request.json();
-		const validated = channelUpdateSchema.safeParse(body);
-
-		if (!validated.success) {
-			throw new ValidationError(validated.error.issues[0]?.message || 'Invalid input');
-		}
-
-		await service.updateChannel(params.id, validated.data);
-
-		const updated = await service.getChannelById(params.id);
-		return json(updated);
+		return json(item);
 	} catch (error) {
-		if (error instanceof NotFoundError) {
-			return json({ error: error.message }, { status: 404 });
-		}
 		if (error instanceof ValidationError) {
 			return json({ error: error.message }, { status: 400 });
 		}
-		const message = error instanceof Error ? error.message : 'Unknown error';
-		return json({ error: message }, { status: 500 });
+		console.error('[API] Failed to update lineup item:', error);
+		return json({ error: 'Failed to update lineup item' }, { status: 500 });
 	}
 };
 
-/**
- * DELETE /api/livetv/lineup/:id
- * Remove a channel from lineup
- */
 export const DELETE: RequestHandler = async ({ params }) => {
-	const service = getChannelLineupService();
-
 	try {
-		const existing = await service.getChannelById(params.id);
-		if (!existing) {
-			throw new NotFoundError('Channel not found in lineup');
+		const success = await channelLineupService.removeFromLineup(params.id);
+
+		if (!success) {
+			return json({ error: 'Lineup item not found' }, { status: 404 });
 		}
 
-		await service.removeFromLineup([params.id]);
 		return json({ success: true });
 	} catch (error) {
-		if (error instanceof NotFoundError) {
-			return json({ error: error.message }, { status: 404 });
-		}
-		const message = error instanceof Error ? error.message : 'Unknown error';
-		return json({ error: message }, { status: 500 });
+		console.error('[API] Failed to remove from lineup:', error);
+		return json({ error: 'Failed to remove from lineup' }, { status: 500 });
 	}
 };

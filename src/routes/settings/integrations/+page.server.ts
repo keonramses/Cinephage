@@ -6,6 +6,7 @@ import { getIndexerManager } from '$lib/server/indexers/IndexerManager';
 import { getDownloadClientManager } from '$lib/server/downloadClients';
 import { getSubtitleProviderManager } from '$lib/server/subtitles/services/SubtitleProviderManager';
 import { LanguageProfileService } from '$lib/server/subtitles/services/LanguageProfileService';
+import { getMediaBrowserManager } from '$lib/server/notifications/mediabrowser';
 
 export const load: PageServerLoad = async () => {
 	// Get TMDB status
@@ -34,6 +35,11 @@ export const load: PageServerLoad = async () => {
 	const languageProfiles = await profileService.getProfiles();
 	const defaultProfile = languageProfiles.find((p) => p.isDefault);
 
+	// Get media browser stats
+	const mediaBrowserManager = getMediaBrowserManager();
+	const mediaBrowserServers = await mediaBrowserManager.getServers();
+	const enabledMediaBrowsers = mediaBrowserServers.filter((s) => s.enabled);
+
 	return {
 		tmdb: {
 			hasApiKey: !!apiKeySetting,
@@ -56,6 +62,10 @@ export const load: PageServerLoad = async () => {
 		languageProfiles: {
 			total: languageProfiles.length,
 			hasDefault: !!defaultProfile
+		},
+		mediaBrowsers: {
+			total: mediaBrowserServers.length,
+			enabled: enabledMediaBrowsers.length
 		}
 	};
 };

@@ -25,7 +25,7 @@ import {
 	rootFolders,
 	downloadClients
 } from '$lib/server/db/schema';
-import { eq, and } from 'drizzle-orm';
+import { eq, and, or, inArray, gte } from 'drizzle-orm';
 import { downloadMonitor } from '../monitoring/DownloadMonitorService';
 import {
 	transferFile,
@@ -118,14 +118,44 @@ export class ImportService extends EventEmitter {
 
 	/**
 	 * Check for downloads that completed but weren't imported
+	 * This handles:
+	 * - Usenet items with 'completed' status
+	 * - Torrent items with 'paused' or 'seeding' status and 100% progress
+	 *   (qBittorrent goes downloading -> seeding -> paused, never 'completed')
 	 */
 	private async checkPendingImports(): Promise<void> {
+		// Find items that should have been imported:
+		// 1. Status is 'completed' (usenet)
+		// 2. Status is 'paused' or 'seeding' with progress >= 99% (torrents)
 		const pendingItems = await db
 			.select()
 			.from(downloadQueue)
-			.where(eq(downloadQueue.status, 'completed'));
+			.where(
+				or(
+					eq(downloadQueue.status, 'completed'),
+					and(
+						inArray(downloadQueue.status, ['paused', 'seeding']),
+						gte(downloadQueue.progress, '0.99')
+					)
+				)
+			);
 
 		for (const item of pendingItems) {
+			// Skip if no media linkage (can't import without knowing the target)
+			if (!item.movieId && !item.seriesId) {
+				continue;
+			}
+			// Skip if no output path
+			if (!item.outputPath) {
+				continue;
+			}
+
+			logger.info('Found pending import from previous run', {
+				id: item.id,
+				title: item.title,
+				status: item.status,
+				progress: item.progress
+			});
 			this.queueImport(item.id);
 		}
 	}

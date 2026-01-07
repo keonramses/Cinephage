@@ -1,9 +1,11 @@
 /**
- * TypeScript types for Live TV UI components
+ * Live TV Types
+ *
+ * Type definitions for Live TV functionality, starting with Stalker Portal accounts.
  */
 
 /**
- * Stalker Portal account as returned by the API
+ * Stalker Portal Account - stored in database
  */
 export interface StalkerAccount {
 	id: string;
@@ -11,111 +13,223 @@ export interface StalkerAccount {
 	portalUrl: string;
 	macAddress: string;
 	enabled: boolean;
-	priority: number;
-	accountInfo: {
-		expDate?: string;
-		maxConnections?: number;
-		activeConnections?: number;
-		status?: string;
-	} | null;
-	channelCount: number;
-	categoryCount: number;
+	playbackLimit: number | null;
+	channelCount: number | null;
+	categoryCount: number | null;
+	expiresAt: string | null;
+	serverTimezone: string | null;
 	lastTestedAt: string | null;
-	testResult: 'success' | 'failed' | null;
-	testError: string | null;
-	// Sync and EPG fields
+	lastTestSuccess: boolean | null;
+	lastTestError: string | null;
+	// Sync tracking
 	lastSyncAt: string | null;
-	syncIntervalHours: number | null;
-	epgEnabled: boolean;
-	createdAt: string | null;
-	updatedAt: string | null;
+	lastSyncError: string | null;
+	syncStatus: 'never' | 'syncing' | 'success' | 'failed';
+	createdAt: string;
+	updatedAt: string;
 }
 
 /**
- * Form data for creating/editing an account
+ * Input for creating a new Stalker account
  */
-export interface StalkerAccountFormData {
+export interface StalkerAccountInput {
 	name: string;
 	portalUrl: string;
 	macAddress: string;
-	enabled: boolean;
-	priority: number;
+	enabled?: boolean;
 }
 
 /**
- * Result from testing an account
+ * Input for updating an existing Stalker account
+ */
+export interface StalkerAccountUpdate {
+	name?: string;
+	portalUrl?: string;
+	macAddress?: string;
+	enabled?: boolean;
+}
+
+/**
+ * Configuration for testing a Stalker account (before saving)
+ */
+export interface StalkerAccountTestConfig {
+	portalUrl: string;
+	macAddress: string;
+}
+
+/**
+ * Profile data returned from Stalker Portal API
+ */
+export interface StalkerPortalProfile {
+	playbackLimit: number;
+	status: 'active' | 'blocked' | 'expired';
+	serverTimezone: string;
+	expiresAt: string | null;
+}
+
+/**
+ * Result of testing a Stalker account connection
  */
 export interface StalkerAccountTestResult {
 	success: boolean;
 	error?: string;
-	accountInfo?: {
-		expDate: string | null;
-		maxConnections: number;
-		activeConnections: number;
-		status: string;
-		tariffName: string | null;
-		phone: string | null;
-	};
-	serverInfo?: {
-		timezone: string;
-		serverTimestamp: number;
-	};
-	contentStats?: {
-		liveChannels: number;
-		liveCategories: number;
-		vodItems: number;
+	profile?: {
+		playbackLimit: number;
+		channelCount: number;
+		categoryCount: number;
+		expiresAt: string | null;
+		serverTimezone: string;
+		status: 'active' | 'blocked' | 'expired';
 	};
 }
 
 /**
- * Channel category from Stalker Portal
+ * Raw profile response from Stalker Portal API
+ * Contains many fields, we only use a subset
+ */
+export interface StalkerRawProfile {
+	id: number;
+	mac: string;
+	status: number;
+	blocked: string;
+	phone: string;
+	fname: string;
+	expire_billing_date: string;
+	tariff_expired_date: string | null;
+	playback_limit: number;
+	default_timezone: string;
+	[key: string]: unknown;
+}
+
+/**
+ * Category from Stalker Portal (genre)
  */
 export interface StalkerCategory {
 	id: string;
 	title: string;
 	alias: string;
-	number: number;
 	censored: boolean;
 }
 
 /**
- * Category with account information (for aggregated views)
- */
-export interface StalkerCategoryWithAccount extends StalkerCategory {
-	accountId: string;
-	accountName: string;
-}
-
-/**
- * Live TV channel from Stalker Portal
+ * Channel from Stalker Portal
  */
 export interface StalkerChannel {
 	id: string;
 	name: string;
-	number: number;
+	number: string;
 	logo: string;
-	categoryId: string;
+	genreId: string;
 	cmd: string;
-	archive: boolean;
-	archiveDays: number;
-	xmltvId: string;
+	tvArchive: boolean;
+	archiveDuration: number;
 }
 
+// ============================================================================
+// CACHED DATA TYPES (stored in local database)
+// ============================================================================
+
 /**
- * Channel with account and category information (for aggregated views)
+ * Cached category from database
  */
-export interface StalkerChannelWithAccount extends StalkerChannel {
+export interface CachedCategory {
+	id: string;
 	accountId: string;
-	accountName: string;
-	categoryName: string;
+	stalkerId: string;
+	title: string;
+	alias: string | null;
+	censored: boolean;
+	channelCount: number;
+	createdAt: string;
+	updatedAt: string;
+	// Joined fields
+	accountName?: string;
+}
+
+/**
+ * Cached channel from database
+ */
+export interface CachedChannel {
+	id: string;
+	accountId: string;
+	stalkerId: string;
+	name: string;
+	number: string | null;
+	logo: string | null;
+	categoryId: string | null;
+	categoryTitle: string | null;
+	stalkerGenreId: string | null;
+	cmd: string;
+	tvArchive: boolean;
+	archiveDuration: number;
+	createdAt: string;
+	updatedAt: string;
+	// Joined fields
+	accountName?: string;
 }
 
 // ============================================================================
-// CHANNEL CATEGORY TYPES
+// QUERY AND RESPONSE TYPES
 // ============================================================================
 
 /**
- * User-created channel category for organizing lineup
+ * Query options for channel listing
+ */
+export interface ChannelQueryOptions {
+	accountIds?: string[];
+	categoryIds?: string[];
+	search?: string;
+	hasArchive?: boolean;
+	page?: number;
+	pageSize?: number;
+	sortBy?: 'name' | 'number' | 'category';
+	sortOrder?: 'asc' | 'desc';
+}
+
+/**
+ * Paginated response for channel listing
+ */
+export interface PaginatedChannelResponse {
+	items: CachedChannel[];
+	total: number;
+	page: number;
+	pageSize: number;
+	totalPages: number;
+}
+
+/**
+ * Result of syncing channels from portal
+ */
+export interface ChannelSyncResult {
+	success: boolean;
+	categoriesAdded: number;
+	categoriesUpdated: number;
+	channelsAdded: number;
+	channelsUpdated: number;
+	channelsRemoved: number;
+	duration: number;
+	error?: string;
+}
+
+/**
+ * Sync status for account display
+ */
+export interface AccountSyncStatus {
+	id: string;
+	name: string;
+	syncStatus: 'never' | 'syncing' | 'success' | 'failed';
+	lastSyncAt: string | null;
+	lastSyncError: string | null;
+	channelCount: number | null;
+	categoryCount: number | null;
+}
+
+// ============================================================================
+// USER CHANNEL CATEGORIES
+// ============================================================================
+
+/**
+ * User-defined category for organizing their channel lineup
  */
 export interface ChannelCategory {
 	id: string;
@@ -149,13 +263,6 @@ export interface ChannelLineupItem {
 	channelId: string;
 	position: number;
 	channelNumber: number | null;
-	// Cached from portal (original values)
-	cachedName: string;
-	cachedLogo: string | null;
-	cachedCategoryId: string | null;
-	cachedCategoryName: string | null;
-	cachedCmd: string | null; // Channel cmd for streaming
-	// User customizations (override cached values when set)
 	customName: string | null;
 	customLogo: string | null;
 	epgId: string | null;
@@ -165,16 +272,65 @@ export interface ChannelLineupItem {
 }
 
 /**
- * Enriched lineup item with account name, category, and computed display values
+ * Enriched lineup item with channel data, account name, and computed display values
  */
-export interface ChannelLineupItemWithAccount extends ChannelLineupItem {
+export interface ChannelLineupItemWithDetails extends ChannelLineupItem {
+	// From stalkerChannels join
+	channel: CachedChannel;
+	// From stalkerAccounts join
 	accountName: string;
+	// From channelCategories join
 	category: ChannelCategory | null;
-	/** Resolved display name: customName if set, otherwise cachedName */
+	// Computed display values
 	displayName: string;
-	/** Resolved display logo: customLogo if set, otherwise cachedLogo */
 	displayLogo: string | null;
 }
+
+// ============================================================================
+// CHANNEL LINEUP BACKUPS
+// ============================================================================
+
+/**
+ * Backup link for a lineup item - alternative channel source for failover
+ */
+export interface ChannelBackupLink {
+	id: string;
+	lineupItemId: string;
+	accountId: string;
+	channelId: string;
+	priority: number;
+	createdAt: string;
+	updatedAt: string;
+	// Joined data
+	channel: CachedChannel;
+	accountName: string;
+}
+
+/**
+ * Lineup item extended with backup links
+ */
+export interface ChannelLineupItemWithBackups extends ChannelLineupItemWithDetails {
+	backups: ChannelBackupLink[];
+}
+
+/**
+ * Request to add a backup link to a lineup item
+ */
+export interface AddBackupLinkRequest {
+	accountId: string;
+	channelId: string;
+}
+
+/**
+ * Request to reorder backup links for a lineup item
+ */
+export interface ReorderBackupsRequest {
+	backupIds: string[];
+}
+
+// ============================================================================
+// CHANNEL LINEUP REQUESTS
+// ============================================================================
 
 /**
  * Request to update a channel's customization
@@ -188,27 +344,13 @@ export interface UpdateChannelRequest {
 }
 
 /**
- * Request to bulk update channels
- */
-export interface BulkUpdateChannelsRequest {
-	itemIds: string[];
-	categoryId?: string | null;
-	channelNumberStart?: number;
-}
-
-/**
  * Request to add channels to the lineup
  */
 export interface AddToLineupRequest {
 	channels: Array<{
 		accountId: string;
 		channelId: string;
-		name: string;
-		logo?: string;
-		categoryId?: string;
-		categoryName?: string;
-		/** User's custom category to assign to this channel */
-		userCategoryId?: string | null;
+		categoryId?: string | null;
 	}>;
 }
 
@@ -216,7 +358,6 @@ export interface AddToLineupRequest {
  * Request to reorder lineup items
  */
 export interface ReorderLineupRequest {
-	/** Array of lineup item IDs in the new order */
 	itemIds: string[];
 }
 
@@ -224,6 +365,100 @@ export interface ReorderLineupRequest {
  * Request to remove items from lineup
  */
 export interface RemoveFromLineupRequest {
-	/** Array of lineup item IDs to remove */
 	itemIds: string[];
+}
+
+// ============================================================================
+// EPG (Electronic Program Guide) TYPES
+// ============================================================================
+
+/**
+ * Raw EPG program data from Stalker Portal API
+ */
+export interface EpgProgramRaw {
+	id: string;
+	ch_id: string;
+	time: string;
+	time_to: string;
+	duration: number;
+	name: string;
+	descr: string;
+	category: string;
+	director: string;
+	actor: string;
+	start_timestamp: number;
+	stop_timestamp: number;
+	mark_archive: number;
+}
+
+/**
+ * EPG program stored in database
+ */
+export interface EpgProgram {
+	id: string;
+	channelId: string;
+	stalkerChannelId: string;
+	accountId: string;
+	title: string;
+	description: string | null;
+	category: string | null;
+	director: string | null;
+	actor: string | null;
+	startTime: string;
+	endTime: string;
+	duration: number;
+	hasArchive: boolean;
+	cachedAt: string;
+	updatedAt: string;
+}
+
+/**
+ * EPG program with computed progress for display
+ */
+export interface EpgProgramWithProgress extends EpgProgram {
+	progress: number; // 0-1 representing how far through the program
+	isLive: boolean; // true if currently airing
+	remainingMinutes: number;
+}
+
+/**
+ * Current and next program for a channel
+ */
+export interface ChannelNowNext {
+	channelId: string;
+	now: EpgProgramWithProgress | null;
+	next: EpgProgram | null;
+}
+
+/**
+ * Result of syncing EPG from a Stalker account
+ */
+export interface EpgSyncResult {
+	success: boolean;
+	accountId: string;
+	accountName: string;
+	programsAdded: number;
+	programsUpdated: number;
+	programsRemoved: number;
+	duration: number;
+	error?: string;
+}
+
+/**
+ * EPG sync status for display
+ */
+export interface EpgStatus {
+	isEnabled: boolean;
+	syncIntervalHours: number;
+	retentionHours: number;
+	lastSyncAt: string | null;
+	nextSyncAt: string | null;
+	totalPrograms: number;
+	accounts: Array<{
+		id: string;
+		name: string;
+		lastSyncAt: string | null;
+		programCount: number;
+		error?: string;
+	}>;
 }

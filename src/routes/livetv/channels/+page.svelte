@@ -1,806 +1,756 @@
 <script lang="ts">
-	import { goto, invalidateAll } from '$app/navigation';
-	import { page } from '$app/stores';
-	import { Search, X, Radio, List, ArrowUpDown, Filter, Download } from 'lucide-svelte';
-	import { SvelteMap, SvelteSet } from 'svelte/reactivity';
+	import { SvelteSet, SvelteMap } from 'svelte/reactivity';
+	import { RefreshCw, Loader2, FolderOpen, Tv, Search, Download, Copy, Check } from 'lucide-svelte';
 	import {
-		ChannelLineupGrouped,
-		ChannelBrowseTable,
-		ChannelBulkActionBar,
-		ChannelCategoryModal,
+		ChannelLineupTable,
 		ChannelEditModal,
-		ExportModal
+		ChannelCategoryManagerModal,
+		ChannelBulkActionBar,
+		ChannelBrowserModal
 	} from '$lib/components/livetv';
-	import { toasts } from '$lib/stores/toast.svelte';
-	import type { PageData } from './$types';
 	import type {
+		ChannelLineupItemWithDetails,
 		ChannelCategory,
-		ChannelCategoryFormData,
-		ChannelLineupItemWithAccount,
-		UpdateChannelRequest
+		UpdateChannelRequest,
+		EpgProgram,
+		EpgProgramWithProgress
 	} from '$lib/types/livetv';
+	import { onMount, onDestroy } from 'svelte';
 
-	let { data }: { data: PageData } = $props();
+	interface NowNextEntry {
+		now: EpgProgramWithProgress | null;
+		next: EpgProgram | null;
+	}
 
-	// Mode state
-	const mode = $derived(data.mode);
-	const isBrowseMode = $derived(mode === 'browse');
+	// Data state
+	let lineup = $state<ChannelLineupItemWithDetails[]>([]);
+	let categories = $state<ChannelCategory[]>([]);
+	let loading = $state(true);
+	let refreshing = $state(false);
+	let error = $state<string | null>(null);
 
 	// Selection state
-	let selectedLineupIds = new SvelteSet<string>();
-	let selectedBrowseKeys = new SvelteSet<string>();
-	let categorySelections = new SvelteMap<string, string | null>();
+	let selectedIds = new SvelteSet<string>();
 
-	// Reorder mode for lineup
-	let reorderMode = $state(false);
+	// Expanded categories state (all expanded by default)
+	let expandedCategories = new SvelteSet<string | null>();
 
-	// Loading states
-	let addingToLineup = $state(false);
+	// Drag state
+	let draggedItemId = $state<string | null>(null);
+	let dragOverCategoryId = $state<string | null>(null);
+	let isDragging = $state(false);
 
-	// Category management state
-	let categoryModalOpen = $state(false);
-	let categoryModalMode = $state<'add' | 'edit'>('add');
-	let editingCategory = $state<ChannelCategory | null>(null);
-	let savingCategory = $state(false);
-	let categoryError = $state<string | null>(null);
-
-	// Channel edit modal state
+	// Modal state
 	let editModalOpen = $state(false);
-	let editingChannel = $state<ChannelLineupItemWithAccount | null>(null);
-	let savingChannel = $state(false);
-	let channelError = $state<string | null>(null);
+	let editingChannel = $state<ChannelLineupItemWithDetails | null>(null);
+	let editModalSaving = $state(false);
+	let editModalError = $state<string | null>(null);
 
-	// Export modal state
-	let exportModalOpen = $state(false);
+	let categoryModalOpen = $state(false);
 
-	// Filter UI state
-	let sortDropdownOpen = $state(false);
-	let filterDropdownOpen = $state(false);
-	let searchInput = $state('');
+	// Browser modal state
+	let browserModalOpen = $state(false);
+	let lineupChannelIds = new SvelteSet<string>();
 
-	// Sync searchInput with URL params on navigation
+	// Backup browser state
+	let browserMode = $state<'add-to-lineup' | 'select-backup'>('add-to-lineup');
+	let backupLineupItemId = $state<string | undefined>(undefined);
+	let backupExcludeChannelId = $state<string | undefined>(undefined);
+
+	// Export state
+	let exportDropdownOpen = $state(false);
+	let copiedField = $state<'m3u' | 'epg' | null>(null);
+
+	// Edit modal reference for refreshing backups
+	let editModalRef: { refreshBackups: () => void } | undefined = $state(undefined);
+
+	// Bulk action state
+	let bulkActionLoading = $state(false);
+	let bulkAction = $state<'category' | 'remove' | null>(null);
+
+	// EPG state
+	let epgData = new SvelteMap<string, NowNextEntry>();
+	let epgInterval: ReturnType<typeof setInterval> | null = null;
+
+	// Derived: Group channels by category
+	const groupedChannels = $derived.by(() => {
+		const groups = new SvelteMap<string | null, ChannelLineupItemWithDetails[]>();
+
+		// Initialize with all categories (even empty ones)
+		for (const cat of categories) {
+			groups.set(cat.id, []);
+		}
+		groups.set(null, []); // Uncategorized
+
+		// Populate groups
+		for (const item of lineup) {
+			const catId = item.categoryId;
+			const existing = groups.get(catId);
+			if (existing) {
+				existing.push(item);
+			} else {
+				// Category doesn't exist, put in uncategorized
+				const uncategorized = groups.get(null);
+				if (uncategorized) {
+					uncategorized.push(item);
+				}
+			}
+		}
+
+		return groups;
+	});
+
+	// Derived: Ordered categories for display
+	const orderedCategories = $derived([...categories].sort((a, b) => a.position - b.position));
+
+	// Derived: Selection helpers
+	const _hasSelection = $derived(selectedIds.size > 0);
+	const selectedCount = $derived(selectedIds.size);
+
+	// Initialize expanded categories when data loads
 	$effect(() => {
-		searchInput = data.filters.search;
-	});
-
-	// Lineup keys as a Set for quick lookup
-	const lineupKeySet = $derived(new Set(data.lineupKeys));
-
-	// Enabled accounts only
-	const enabledAccounts = $derived(data.accounts.filter((a) => a.enabled));
-
-	// Sort options
-	const sortOptions = [
-		{ value: 'number-asc', label: 'Channel # (Low to High)' },
-		{ value: 'number-desc', label: 'Channel # (High to Low)' },
-		{ value: 'name-asc', label: 'Name (A-Z)' },
-		{ value: 'name-desc', label: 'Name (Z-A)' },
-		{ value: 'category-asc', label: 'Category' },
-		{ value: 'account-asc', label: 'Account' }
-	];
-
-	// Filter options
-	const lineupStatusOptions = [
-		{ value: 'all', label: 'All Channels' },
-		{ value: 'notInLineup', label: 'Not in Lineup' },
-		{ value: 'inLineup', label: 'In Lineup' }
-	];
-
-	// Computed filter state
-	const hasActiveFilters = $derived(
-		data.filters.account !== 'all' ||
-			data.filters.category !== 'all' ||
-			data.filters.lineupStatus !== 'all' ||
-			data.filters.search !== ''
-	);
-
-	const activeFilterCount = $derived(() => {
-		let count = 0;
-		if (data.filters.account !== 'all') count++;
-		if (data.filters.category !== 'all') count++;
-		if (data.filters.lineupStatus !== 'all') count++;
-		if (data.filters.search !== '') count++;
-		return count;
-	});
-
-	const activeFilterLabels = $derived(() => {
-		const labels: string[] = [];
-		if (data.filters.account !== 'all') {
-			const account = data.accounts.find((a) => a.id === data.filters.account);
-			labels.push(account?.name || 'Unknown Account');
-		}
-		if (data.filters.category !== 'all') {
-			const cat = data.portalCategories.find((c) => c.id === data.filters.category);
-			labels.push(cat?.title || 'Unknown Category');
-		}
-		if (data.filters.lineupStatus !== 'all') {
-			const opt = lineupStatusOptions.find((o) => o.value === data.filters.lineupStatus);
-			labels.push(opt?.label || '');
-		}
-		if (data.filters.search !== '') {
-			labels.push(`"${data.filters.search}"`);
-		}
-		return labels;
-	});
-
-	const currentSortLabel = $derived(
-		sortOptions.find((o) => o.value === data.filters.sort)?.label || 'Channel #'
-	);
-
-	// Reset selections when mode changes
-	$effect(() => {
-		if (!isBrowseMode) {
-			selectedBrowseKeys.clear();
-			categorySelections.clear();
+		if (categories.length > 0 && expandedCategories.size === 0) {
+			for (const cat of categories) {
+				expandedCategories.add(cat.id);
+			}
+			expandedCategories.add(null); // Include uncategorized
 		}
 	});
 
-	// URL-based filter updates
-	function updateFilter(key: string, value: string) {
-		const url = new URL($page.url);
-		if (value === 'all' || value === '' || (key === 'sort' && value === 'number-asc')) {
-			url.searchParams.delete(key);
+	onMount(() => {
+		loadData();
+		fetchEpgData();
+		// Refresh EPG data every 60 seconds
+		epgInterval = setInterval(fetchEpgData, 60000);
+	});
+
+	onDestroy(() => {
+		if (epgInterval) {
+			clearInterval(epgInterval);
+			epgInterval = null;
+		}
+	});
+
+	async function fetchEpgData() {
+		try {
+			const res = await fetch('/api/livetv/epg/now');
+			if (!res.ok) return;
+			const data = await res.json();
+			if (data.channels) {
+				epgData = new SvelteMap(Object.entries(data.channels) as [string, NowNextEntry][]);
+			}
+		} catch {
+			// Silent failure - EPG is not critical
+		}
+	}
+
+	async function loadData() {
+		loading = true;
+		error = null;
+
+		try {
+			const [lineupRes, categoriesRes] = await Promise.all([
+				fetch('/api/livetv/lineup'),
+				fetch('/api/livetv/channel-categories')
+			]);
+
+			if (!lineupRes.ok) {
+				throw new Error('Failed to load lineup');
+			}
+			if (!categoriesRes.ok) {
+				throw new Error('Failed to load categories');
+			}
+
+			const lineupData = await lineupRes.json();
+			const categoriesData = await categoriesRes.json();
+
+			lineup = lineupData.lineup || [];
+			lineupChannelIds = new SvelteSet(lineupData.lineupChannelIds || []);
+			categories = categoriesData.categories || [];
+		} catch (e) {
+			error = e instanceof Error ? e.message : 'Failed to load data';
+		} finally {
+			loading = false;
+		}
+	}
+
+	async function refreshData() {
+		refreshing = true;
+		await loadData();
+		refreshing = false;
+	}
+
+	// Selection handlers
+	function handleSelect(id: string, selected: boolean) {
+		const newSet = new SvelteSet(selectedIds);
+		if (selected) {
+			newSet.add(id);
 		} else {
-			url.searchParams.set(key, value);
+			newSet.delete(id);
 		}
-		url.searchParams.set('mode', 'browse');
-		goto(url.pathname + url.search, { keepFocus: true, noScroll: true });
+		selectedIds = newSet;
 	}
 
-	function clearFilters() {
-		goto('/livetv/channels?mode=browse', { keepFocus: true, noScroll: true });
-		searchInput = '';
+	function handleSelectAll(categoryId: string | null, selected: boolean) {
+		const channelsInCategory = groupedChannels.get(categoryId) || [];
+		const newSet = new SvelteSet(selectedIds);
+
+		for (const channel of channelsInCategory) {
+			if (selected) {
+				newSet.add(channel.id);
+			} else {
+				newSet.delete(channel.id);
+			}
+		}
+		selectedIds = newSet;
 	}
 
-	function handleSearchSubmit() {
-		updateFilter('search', searchInput.trim());
+	function clearSelection() {
+		selectedIds = new SvelteSet();
 	}
 
-	function handleSearchClear() {
-		searchInput = '';
-		updateFilter('search', '');
-	}
-
-	function switchMode(newMode: 'lineup' | 'browse') {
-		if (newMode === 'lineup') {
-			goto('/livetv/channels', { replaceState: true });
+	// Expand/collapse handlers
+	function handleToggleExpand(categoryId: string | null) {
+		const newSet = new SvelteSet(expandedCategories);
+		if (newSet.has(categoryId)) {
+			newSet.delete(categoryId);
 		} else {
-			goto('/livetv/channels?mode=browse', { replaceState: true });
+			newSet.add(categoryId);
 		}
-		// Clear selections when switching modes
-		selectedLineupIds.clear();
-		selectedBrowseKeys.clear();
-		categorySelections.clear();
-		reorderMode = false;
+		expandedCategories = newSet;
 	}
 
-	// Lineup handlers
-	function handleLineupToggleSelect(id: string) {
-		if (selectedLineupIds.has(id)) {
-			selectedLineupIds.delete(id);
+	// Drag handlers
+	function handleDragStart(e: DragEvent, itemId: string) {
+		draggedItemId = itemId;
+		isDragging = true;
+		if (e.dataTransfer) {
+			e.dataTransfer.effectAllowed = 'move';
+			e.dataTransfer.setData('text/plain', itemId);
+		}
+	}
+
+	function handleDragOverCategory(e: DragEvent, categoryId: string | null) {
+		if (!isDragging) return;
+		e.preventDefault();
+		dragOverCategoryId = categoryId;
+	}
+
+	function handleDragLeaveCategory() {
+		dragOverCategoryId = null;
+	}
+
+	async function handleDropOnCategory(e: DragEvent, categoryId: string | null) {
+		e.preventDefault();
+		if (!draggedItemId) return;
+
+		const item = lineup.find((i) => i.id === draggedItemId);
+		if (item && item.categoryId !== categoryId) {
+			// Update category
+			try {
+				const response = await fetch(`/api/livetv/lineup/${draggedItemId}`, {
+					method: 'PUT',
+					headers: { 'Content-Type': 'application/json' },
+					body: JSON.stringify({ categoryId })
+				});
+
+				if (!response.ok) {
+					throw new Error('Failed to update channel category');
+				}
+
+				await loadData();
+			} catch (e) {
+				console.error('Failed to update category:', e);
+			}
+		}
+
+		resetDragState();
+	}
+
+	async function handleReorder(categoryId: string | null, itemIds: string[]) {
+		// Get all items in order, with this category's items replaced
+		const allItemIds: string[] = [];
+
+		for (const cat of orderedCategories) {
+			const items = groupedChannels.get(cat.id) || [];
+			if (cat.id === categoryId) {
+				allItemIds.push(...itemIds);
+			} else {
+				allItemIds.push(...items.map((i) => i.id));
+			}
+		}
+
+		// Add uncategorized
+		const uncategorized = groupedChannels.get(null) || [];
+		if (categoryId === null) {
+			allItemIds.push(...itemIds);
 		} else {
-			selectedLineupIds.add(id);
+			allItemIds.push(...uncategorized.map((i) => i.id));
 		}
-	}
 
-	function handleLineupSelectAll() {
-		for (const item of data.lineup) {
-			selectedLineupIds.add(item.id);
-		}
-	}
-
-	function handleLineupClearSelection() {
-		selectedLineupIds.clear();
-	}
-
-	async function handleReorder(itemIds: string[]) {
 		try {
 			const response = await fetch('/api/livetv/lineup/reorder', {
 				method: 'POST',
 				headers: { 'Content-Type': 'application/json' },
-				body: JSON.stringify({ itemIds })
+				body: JSON.stringify({ itemIds: allItemIds })
 			});
 
 			if (!response.ok) {
-				const error = await response.json();
-				throw new Error(error.error || 'Failed to reorder');
+				throw new Error('Failed to reorder channels');
 			}
 
-			await invalidateAll();
-			toasts.success('Lineup reordered');
-		} catch (error) {
-			const message = error instanceof Error ? error.message : 'Unknown error';
-			toasts.error(`Failed to reorder: ${message}`);
+			await loadData();
+		} catch (e) {
+			console.error('Failed to reorder:', e);
 		}
 	}
 
-	async function handleRemoveFromLineup(itemIds: string[]) {
+	function handleDragEnd() {
+		resetDragState();
+	}
+
+	function resetDragState() {
+		draggedItemId = null;
+		dragOverCategoryId = null;
+		isDragging = false;
+	}
+
+	// Edit modal handlers
+	function handleEdit(item: ChannelLineupItemWithDetails) {
+		editingChannel = item;
+		editModalError = null;
+		editModalOpen = true;
+	}
+
+	function closeEditModal() {
+		editModalOpen = false;
+		editingChannel = null;
+		editModalError = null;
+	}
+
+	async function handleEditDelete() {
+		if (!editingChannel) return;
+		const item = editingChannel;
+		closeEditModal();
+		await handleRemove(item);
+	}
+
+	async function handleEditSave(id: string, data: UpdateChannelRequest) {
+		editModalSaving = true;
+		editModalError = null;
+
+		try {
+			const response = await fetch(`/api/livetv/lineup/${id}`, {
+				method: 'PUT',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify(data)
+			});
+
+			if (!response.ok) {
+				const result = await response.json();
+				throw new Error(result.error || 'Failed to save channel');
+			}
+
+			await loadData();
+			closeEditModal();
+		} catch (e) {
+			editModalError = e instanceof Error ? e.message : 'Failed to save channel';
+		} finally {
+			editModalSaving = false;
+		}
+	}
+
+	// Remove handler
+	async function handleRemove(item: ChannelLineupItemWithDetails) {
+		const confirmed = confirm(`Remove "${item.displayName}" from your lineup?`);
+		if (!confirmed) return;
+
+		try {
+			const response = await fetch(`/api/livetv/lineup/${item.id}`, {
+				method: 'DELETE'
+			});
+
+			if (!response.ok) {
+				throw new Error('Failed to remove channel');
+			}
+
+			// Remove from selection if selected
+			if (selectedIds.has(item.id)) {
+				const newSet = new SvelteSet(selectedIds);
+				newSet.delete(item.id);
+				selectedIds = newSet;
+			}
+
+			await loadData();
+		} catch (e) {
+			console.error('Failed to remove channel:', e);
+		}
+	}
+
+	// Inline edit handler
+	async function handleInlineEdit(
+		id: string,
+		field: 'channelNumber' | 'customName',
+		value: number | string | null
+	): Promise<boolean> {
+		try {
+			const data: Partial<UpdateChannelRequest> = { [field]: value };
+			const response = await fetch(`/api/livetv/lineup/${id}`, {
+				method: 'PUT',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify(data)
+			});
+
+			if (!response.ok) {
+				console.error('Inline edit failed');
+				return false;
+			}
+
+			await loadData();
+			return true;
+		} catch (e) {
+			console.error('Inline edit error:', e);
+			return false;
+		}
+	}
+
+	// Category modal handlers
+	function openCategoryModal() {
+		categoryModalOpen = true;
+	}
+
+	function closeCategoryModal() {
+		categoryModalOpen = false;
+	}
+
+	async function handleCategoryChange() {
+		await loadData();
+	}
+
+	// Bulk action handlers
+	async function handleBulkSetCategory(categoryId: string | null) {
+		if (selectedIds.size === 0) return;
+
+		bulkActionLoading = true;
+		bulkAction = 'category';
+
+		try {
+			const response = await fetch('/api/livetv/lineup/bulk-category', {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({
+					itemIds: Array.from(selectedIds),
+					categoryId
+				})
+			});
+
+			if (!response.ok) {
+				throw new Error('Failed to update categories');
+			}
+
+			await loadData();
+			clearSelection();
+		} catch (e) {
+			console.error('Failed to bulk update categories:', e);
+		} finally {
+			bulkActionLoading = false;
+			bulkAction = null;
+		}
+	}
+
+	async function handleBulkRemove() {
+		if (selectedIds.size === 0) return;
+
+		const confirmed = confirm(`Remove ${selectedIds.size} channel(s) from your lineup?`);
+		if (!confirmed) return;
+
+		bulkActionLoading = true;
+		bulkAction = 'remove';
+
 		try {
 			const response = await fetch('/api/livetv/lineup/remove', {
 				method: 'POST',
 				headers: { 'Content-Type': 'application/json' },
-				body: JSON.stringify({ itemIds })
+				body: JSON.stringify({
+					itemIds: Array.from(selectedIds)
+				})
 			});
 
 			if (!response.ok) {
-				const error = await response.json();
-				throw new Error(error.error || 'Failed to remove');
+				throw new Error('Failed to remove channels');
 			}
 
-			const result = await response.json();
-			await invalidateAll();
-			selectedLineupIds.clear();
-			toasts.success(
-				`Removed ${result.removed} channel${result.removed !== 1 ? 's' : ''} from lineup`
-			);
-		} catch (error) {
-			const message = error instanceof Error ? error.message : 'Unknown error';
-			toasts.error(`Failed to remove: ${message}`);
-		}
-	}
-
-	function handleToggleReorderMode() {
-		reorderMode = !reorderMode;
-		if (reorderMode) {
-			selectedLineupIds.clear();
-		}
-	}
-
-	// Browse handlers
-	function handleBrowseToggleSelect(key: string) {
-		if (selectedBrowseKeys.has(key)) {
-			selectedBrowseKeys.delete(key);
-		} else {
-			selectedBrowseKeys.add(key);
-		}
-	}
-
-	function handleBrowseSelectAll() {
-		for (const channel of data.channels) {
-			const key = `${channel.accountId}:${channel.id}`;
-			if (!lineupKeySet.has(key)) {
-				selectedBrowseKeys.add(key);
-			}
-		}
-	}
-
-	function handleBrowseClearSelection() {
-		selectedBrowseKeys.clear();
-		categorySelections.clear();
-	}
-
-	function handleCategoryChange(key: string, categoryId: string | null) {
-		if (categoryId === null) {
-			categorySelections.delete(key);
-		} else {
-			categorySelections.set(key, categoryId);
-		}
-	}
-
-	async function handleAddToLineup() {
-		addingToLineup = true;
-		try {
-			// Build channels lookup from selected keys
-			const channelMap: Record<string, (typeof data.channels)[0]> = {};
-			for (const channel of data.channels) {
-				const key = `${channel.accountId}:${channel.id}`;
-				channelMap[key] = channel;
-			}
-
-			const channelsToAdd = Array.from(selectedBrowseKeys)
-				.map((key) => channelMap[key])
-				.filter((c) => c !== undefined)
-				.map((c) => {
-					const key = `${c.accountId}:${c.id}`;
-					return {
-						accountId: c.accountId,
-						channelId: c.id,
-						name: c.name,
-						logo: c.logo || undefined,
-						categoryId: c.categoryId || undefined,
-						categoryName: c.categoryName || undefined,
-						userCategoryId: categorySelections.get(key) || undefined
-					};
-				});
-
-			const response = await fetch('/api/livetv/lineup', {
-				method: 'POST',
-				headers: { 'Content-Type': 'application/json' },
-				body: JSON.stringify({ channels: channelsToAdd })
-			});
-
-			if (!response.ok) {
-				const error = await response.json();
-				throw new Error(error.error || 'Failed to add');
-			}
-
-			const result = await response.json();
-			await invalidateAll();
-			selectedBrowseKeys.clear();
-			categorySelections.clear();
-
-			if (result.added > 0) {
-				toasts.success(`Added ${result.added} channel${result.added !== 1 ? 's' : ''} to lineup`);
-			}
-			if (result.skipped > 0) {
-				toasts.info(
-					`${result.skipped} channel${result.skipped !== 1 ? 's' : ''} already in lineup`
-				);
-			}
-		} catch (error) {
-			const message = error instanceof Error ? error.message : 'Unknown error';
-			toasts.error(`Failed to add: ${message}`);
+			await loadData();
+			clearSelection();
+		} catch (e) {
+			console.error('Failed to bulk remove:', e);
 		} finally {
-			addingToLineup = false;
+			bulkActionLoading = false;
+			bulkAction = null;
 		}
 	}
 
-	// Category handlers
-	function handleOpenAddCategory() {
-		categoryModalMode = 'add';
-		editingCategory = null;
-		categoryError = null;
-		categoryModalOpen = true;
+	// Backup browser handlers
+	function openBackupBrowser(lineupItemId: string, excludeChannelId: string) {
+		browserMode = 'select-backup';
+		backupLineupItemId = lineupItemId;
+		backupExcludeChannelId = excludeChannelId;
+		browserModalOpen = true;
 	}
 
-	function handleOpenEditCategory(category: ChannelCategory) {
-		categoryModalMode = 'edit';
-		editingCategory = category;
-		categoryError = null;
-		categoryModalOpen = true;
+	function handleBackupSelected(_accountId: string, _channelId: string) {
+		// Refresh the edit modal's backups list
+		editModalRef?.refreshBackups();
 	}
 
-	function handleCloseCategoryModal() {
-		categoryModalOpen = false;
-		editingCategory = null;
-		categoryError = null;
+	function closeBrowserModal() {
+		browserModalOpen = false;
+		// Reset to default mode
+		browserMode = 'add-to-lineup';
+		backupLineupItemId = undefined;
+		backupExcludeChannelId = undefined;
 	}
 
-	async function handleSaveCategory(formData: ChannelCategoryFormData) {
-		savingCategory = true;
-		categoryError = null;
+	function openChannelBrowser() {
+		browserMode = 'add-to-lineup';
+		backupLineupItemId = undefined;
+		backupExcludeChannelId = undefined;
+		browserModalOpen = true;
+	}
 
+	// Export functions
+	function getBaseUrl(): string {
+		return window.location.origin;
+	}
+
+	function getM3uUrl(): string {
+		return `${getBaseUrl()}/api/livetv/playlist.m3u`;
+	}
+
+	function getEpgUrl(): string {
+		return `${getBaseUrl()}/api/livetv/epg.xml`;
+	}
+
+	async function copyToClipboard(type: 'm3u' | 'epg') {
+		const url = type === 'm3u' ? getM3uUrl() : getEpgUrl();
 		try {
-			if (categoryModalMode === 'add') {
-				const response = await fetch('/api/livetv/channel-categories', {
-					method: 'POST',
-					headers: { 'Content-Type': 'application/json' },
-					body: JSON.stringify(formData)
-				});
-
-				if (!response.ok) {
-					const error = await response.json();
-					throw new Error(error.error || 'Failed to create category');
-				}
-
-				toasts.success('Category created');
-			} else if (editingCategory) {
-				const response = await fetch(`/api/livetv/channel-categories/${editingCategory.id}`, {
-					method: 'PUT',
-					headers: { 'Content-Type': 'application/json' },
-					body: JSON.stringify(formData)
-				});
-
-				if (!response.ok) {
-					const error = await response.json();
-					throw new Error(error.error || 'Failed to update category');
-				}
-
-				toasts.success('Category updated');
-			}
-
-			await invalidateAll();
-			handleCloseCategoryModal();
-		} catch (error) {
-			const message = error instanceof Error ? error.message : 'Unknown error';
-			categoryError = message;
-		} finally {
-			savingCategory = false;
+			await navigator.clipboard.writeText(url);
+			copiedField = type;
+			setTimeout(() => {
+				copiedField = null;
+			}, 2000);
+		} catch (e) {
+			console.error('Failed to copy:', e);
 		}
 	}
 
-	async function handleDeleteCategory() {
-		if (!editingCategory) return;
-
-		savingCategory = true;
-		try {
-			const response = await fetch(`/api/livetv/channel-categories/${editingCategory.id}`, {
-				method: 'DELETE'
-			});
-
-			if (!response.ok) {
-				const error = await response.json();
-				throw new Error(error.error || 'Failed to delete category');
-			}
-
-			await invalidateAll();
-			handleCloseCategoryModal();
-			toasts.success('Category deleted');
-		} catch (error) {
-			const message = error instanceof Error ? error.message : 'Unknown error';
-			categoryError = message;
-		} finally {
-			savingCategory = false;
-		}
+	function toggleExportDropdown() {
+		exportDropdownOpen = !exportDropdownOpen;
 	}
 
-	// Channel edit handlers
-	function handleOpenEditChannel(channel: ChannelLineupItemWithAccount) {
-		editingChannel = channel;
-		channelError = null;
-		editModalOpen = true;
-	}
-
-	function handleCloseEditModal() {
-		editModalOpen = false;
-		editingChannel = null;
-		channelError = null;
-	}
-
-	async function handleSaveChannel(updateData: UpdateChannelRequest) {
-		if (!editingChannel) return;
-
-		savingChannel = true;
-		channelError = null;
-
-		try {
-			const response = await fetch(`/api/livetv/lineup/${editingChannel.id}`, {
-				method: 'PUT',
-				headers: { 'Content-Type': 'application/json' },
-				body: JSON.stringify(updateData)
-			});
-
-			if (!response.ok) {
-				const error = await response.json();
-				throw new Error(error.error || 'Failed to update channel');
-			}
-
-			await invalidateAll();
-			handleCloseEditModal();
-			toasts.success('Channel updated');
-		} catch (error) {
-			const message = error instanceof Error ? error.message : 'Unknown error';
-			channelError = message;
-		} finally {
-			savingChannel = false;
-		}
-	}
-
-	async function handleDeleteChannel() {
-		if (!editingChannel) return;
-
-		savingChannel = true;
-		try {
-			const response = await fetch(`/api/livetv/lineup/${editingChannel.id}`, {
-				method: 'DELETE'
-			});
-
-			if (!response.ok) {
-				const error = await response.json();
-				throw new Error(error.error || 'Failed to remove channel');
-			}
-
-			await invalidateAll();
-			handleCloseEditModal();
-			toasts.success('Channel removed from lineup');
-		} catch (error) {
-			const message = error instanceof Error ? error.message : 'Unknown error';
-			channelError = message;
-		} finally {
-			savingChannel = false;
-		}
+	function closeExportDropdown() {
+		exportDropdownOpen = false;
 	}
 </script>
 
 <svelte:head>
-	<title>Channels - Cinephage</title>
+	<title>Channels - Live TV - Cinephage</title>
 </svelte:head>
 
-<div class="flex min-h-screen w-full flex-col">
-	{#if isBrowseMode}
-		<!-- Browse Mode: Sticky Header -->
-		<div class="sticky top-0 z-30 border-b border-base-200 bg-base-100/80 backdrop-blur-md">
-			<div class="flex h-16 items-center justify-between px-4 lg:px-8">
-				<!-- Left: Title + count -->
-				<div class="flex items-center gap-3">
-					<h1
-						class="bg-gradient-to-r from-primary to-secondary bg-clip-text text-2xl font-bold text-transparent"
-					>
-						Browse Channels
-					</h1>
-					<span class="badge badge-ghost badge-lg">{data.total.toLocaleString()}</span>
-					{#if data.total !== data.totalUnfiltered}
-						<span class="text-sm text-base-content/50"
-							>of {data.totalUnfiltered.toLocaleString()}</span
-						>
-					{/if}
-				</div>
+<div class="space-y-6">
+	<!-- Header -->
+	<div class="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+		<div>
+			<h1 class="text-2xl font-bold">Channels</h1>
+			<p class="mt-1 text-base-content/60">Organize your channel lineup</p>
+		</div>
+		<div class="flex gap-2">
+			<button
+				class="btn btn-ghost btn-sm"
+				onclick={refreshData}
+				disabled={loading || refreshing}
+				title="Refresh"
+			>
+				{#if refreshing}
+					<Loader2 class="h-4 w-4 animate-spin" />
+				{:else}
+					<RefreshCw class="h-4 w-4" />
+				{/if}
+			</button>
+			<button class="btn btn-ghost btn-sm" onclick={openCategoryModal}>
+				<FolderOpen class="h-4 w-4" />
+				Categories
+			</button>
+			<!-- Export Dropdown -->
+			<div class="dropdown dropdown-end">
+				<button
+					class="btn btn-ghost btn-sm"
+					onclick={toggleExportDropdown}
+					disabled={lineup.length === 0}
+				>
+					<Download class="h-4 w-4" />
+					Export
+				</button>
+				{#if exportDropdownOpen}
+					<!-- svelte-ignore a11y_no_static_element_interactions -->
+					<div
+						class="fixed inset-0 z-40"
+						onclick={closeExportDropdown}
+						onkeydown={(e) => e.key === 'Escape' && closeExportDropdown()}
+					></div>
+					<div class="dropdown-content menu z-50 mt-1 w-80 rounded-box bg-base-200 p-4 shadow-lg">
+						<div class="space-y-4">
+							<div class="text-sm font-medium">Playlist URLs for Plex/Jellyfin/Emby</div>
 
-				<!-- Right: Controls -->
-				<div class="flex items-center gap-2">
-					<!-- Search -->
-					<form
-						onsubmit={(e) => {
-							e.preventDefault();
-							handleSearchSubmit();
-						}}
-						class="relative"
-					>
-						<Search
-							class="pointer-events-none absolute top-1/2 left-3 h-4 w-4 -translate-y-1/2 text-base-content/50"
-						/>
-						<input
-							type="text"
-							placeholder="Search..."
-							class="input-bordered input input-sm w-48 pr-8 pl-9"
-							bind:value={searchInput}
-							onkeydown={(e) => e.key === 'Escape' && handleSearchClear()}
-						/>
-						{#if searchInput}
-							<button
-								type="button"
-								class="absolute top-1/2 right-2 -translate-y-1/2 text-base-content/50 hover:text-base-content"
-								onclick={handleSearchClear}
-							>
-								<X class="h-4 w-4" />
-							</button>
-						{/if}
-					</form>
-
-					<!-- Sort Dropdown -->
-					<div class="dropdown dropdown-end">
-						<button
-							class="btn gap-1 btn-ghost btn-sm"
-							onclick={() => (sortDropdownOpen = !sortDropdownOpen)}
-						>
-							<ArrowUpDown class="h-4 w-4" />
-							<span class="hidden sm:inline">{currentSortLabel}</span>
-						</button>
-						{#if sortDropdownOpen}
-							<ul
-								class="dropdown-content menu z-50 mt-1 w-56 rounded-box bg-base-100 p-2 shadow-lg"
-							>
-								{#each sortOptions as option (option.value)}
-									<li>
-										<button
-											class={data.filters.sort === option.value ? 'active' : ''}
-											onclick={() => {
-												updateFilter('sort', option.value);
-												sortDropdownOpen = false;
-											}}
-										>
-											{option.label}
-										</button>
-									</li>
-								{/each}
-							</ul>
-						{/if}
-					</div>
-
-					<!-- Filter Dropdown -->
-					<div class="dropdown dropdown-end">
-						<button
-							class="btn gap-1 btn-ghost btn-sm"
-							onclick={() => (filterDropdownOpen = !filterDropdownOpen)}
-						>
-							<Filter class="h-4 w-4" />
-							<span class="hidden sm:inline">Filter</span>
-							{#if activeFilterCount() > 0}
-								<span class="badge badge-xs badge-primary">{activeFilterCount()}</span>
-							{/if}
-						</button>
-						{#if filterDropdownOpen}
-							<div class="dropdown-content z-50 mt-1 w-72 rounded-box bg-base-100 p-4 shadow-lg">
-								<!-- Account Filter -->
-								<div class="form-control mb-3">
-									<label class="label py-1">
-										<span class="label-text font-medium">Account</span>
-									</label>
-									<select
-										class="select-bordered select select-sm"
-										value={data.filters.account}
-										onchange={(e) => updateFilter('account', e.currentTarget.value)}
+							<!-- M3U URL -->
+							<div class="space-y-1">
+								<label class="text-xs font-medium text-base-content/70">M3U Playlist</label>
+								<div class="flex gap-2">
+									<input
+										type="text"
+										readonly
+										value={getM3uUrl()}
+										class="input-bordered input input-sm flex-1 font-mono text-xs"
+									/>
+									<button
+										class="btn btn-ghost btn-sm"
+										onclick={() => copyToClipboard('m3u')}
+										title="Copy M3U URL"
 									>
-										<option value="all">All Accounts</option>
-										{#each enabledAccounts as account (account.id)}
-											<option value={account.id}>{account.name}</option>
-										{/each}
-									</select>
-								</div>
-
-								<!-- Category Filter -->
-								<div class="form-control mb-3">
-									<label class="label py-1">
-										<span class="label-text font-medium">Category</span>
-									</label>
-									<select
-										class="select-bordered select select-sm"
-										value={data.filters.category}
-										onchange={(e) => updateFilter('category', e.currentTarget.value)}
-									>
-										<option value="all">All Categories</option>
-										{#each data.portalCategories as cat (cat.id)}
-											<option value={cat.id}>{cat.title}</option>
-										{/each}
-									</select>
-								</div>
-
-								<!-- Lineup Status Filter -->
-								<div class="form-control mb-3">
-									<label class="label py-1">
-										<span class="label-text font-medium">Lineup Status</span>
-									</label>
-									<select
-										class="select-bordered select select-sm"
-										value={data.filters.lineupStatus}
-										onchange={(e) => updateFilter('lineupStatus', e.currentTarget.value)}
-									>
-										{#each lineupStatusOptions as option (option.value)}
-											<option value={option.value}>{option.label}</option>
-										{/each}
-									</select>
-								</div>
-
-								{#if hasActiveFilters}
-									<button class="btn w-full btn-ghost btn-sm" onclick={clearFilters}>
-										<X class="h-4 w-4" />
-										Clear All Filters
+										{#if copiedField === 'm3u'}
+											<Check class="h-4 w-4 text-success" />
+										{:else}
+											<Copy class="h-4 w-4" />
+										{/if}
 									</button>
-								{/if}
+								</div>
 							</div>
-						{/if}
-					</div>
 
-					<!-- Back to Lineup -->
-					<button class="btn btn-ghost btn-sm" onclick={() => switchMode('lineup')}>
-						<List class="h-4 w-4" />
-						<span class="hidden sm:inline">My Lineup</span>
-					</button>
-				</div>
+							<!-- EPG URL -->
+							<div class="space-y-1">
+								<label class="text-xs font-medium text-base-content/70">XMLTV EPG Guide</label>
+								<div class="flex gap-2">
+									<input
+										type="text"
+										readonly
+										value={getEpgUrl()}
+										class="input-bordered input input-sm flex-1 font-mono text-xs"
+									/>
+									<button
+										class="btn btn-ghost btn-sm"
+										onclick={() => copyToClipboard('epg')}
+										title="Copy EPG URL"
+									>
+										{#if copiedField === 'epg'}
+											<Check class="h-4 w-4 text-success" />
+										{:else}
+											<Copy class="h-4 w-4" />
+										{/if}
+									</button>
+								</div>
+							</div>
+
+							<div class="text-xs text-base-content/50">
+								Add these URLs to your media server's Live TV/DVR settings.
+							</div>
+						</div>
+					</div>
+				{/if}
 			</div>
-
-			<!-- Active filter badges row -->
-			{#if hasActiveFilters}
-				<div class="flex items-center gap-2 border-t border-base-200/50 px-4 py-2 lg:px-8">
-					{#each activeFilterLabels() as label (label)}
-						<span class="badge badge-outline badge-sm">{label}</span>
-					{/each}
-					<button class="btn btn-ghost btn-xs" onclick={clearFilters}>
-						<X class="h-3 w-3" />
-						Clear
-					</button>
-				</div>
-			{/if}
+			<button class="btn btn-sm btn-primary" onclick={openChannelBrowser}>
+				<Search class="h-4 w-4" />
+				Browse Channels
+			</button>
 		</div>
+	</div>
 
-		<!-- Browse Content -->
-		<div class="flex-1 p-4 pb-20 lg:px-8">
-			{#if enabledAccounts.length === 0}
-				<!-- No enabled accounts -->
-				<div class="flex flex-col items-center justify-center py-16 text-base-content/60">
-					<Radio class="h-12 w-12 opacity-40" />
-					<p class="mt-4 text-lg font-medium">No IPTV accounts</p>
-					<p class="mt-1 text-sm">Add an IPTV account to browse channels</p>
-					<a href="/livetv/accounts" class="btn mt-4 btn-primary">Add Account</a>
-				</div>
-			{:else if data.channels.length === 0}
-				<!-- No channels found -->
-				<div class="flex flex-col items-center justify-center py-16 text-base-content/60">
-					<Radio class="h-12 w-12 opacity-40" />
-					<p class="mt-4 text-lg font-medium">No channels found</p>
-					<p class="mt-1 text-sm">Try adjusting your filters</p>
-					{#if hasActiveFilters}
-						<button class="btn mt-4 btn-ghost" onclick={clearFilters}>Clear Filters</button>
-					{/if}
-				</div>
-			{:else}
-				<!-- Channel Table -->
-				<div class="card bg-base-100 shadow-xl">
-					<div class="card-body p-0">
-						<ChannelBrowseTable
-							channels={data.channels}
-							selectedKeys={selectedBrowseKeys}
-							lineupKeys={lineupKeySet}
-							categories={data.channelCategories}
-							{categorySelections}
-							onToggleSelect={handleBrowseToggleSelect}
-							onSelectAll={handleBrowseSelectAll}
-							onClearSelection={handleBrowseClearSelection}
-							onCategoryChange={handleCategoryChange}
-						/>
-					</div>
-				</div>
-			{/if}
+	<!-- Content -->
+	{#if loading}
+		<div class="flex items-center justify-center py-12">
+			<Loader2 class="h-8 w-8 animate-spin text-primary" />
 		</div>
-
-		<!-- Bulk Action Bar for Browse -->
-		{#if selectedBrowseKeys.size > 0}
-			<ChannelBulkActionBar
-				selectedCount={selectedBrowseKeys.size}
-				loading={addingToLineup}
-				onAdd={handleAddToLineup}
-				onClear={handleBrowseClearSelection}
-			/>
-		{/if}
+	{:else if error}
+		<div class="alert alert-error">
+			<span>{error}</span>
+			<button class="btn btn-ghost btn-sm" onclick={loadData}>Retry</button>
+		</div>
+	{:else if lineup.length === 0}
+		<div class="flex flex-col items-center justify-center py-12 text-base-content/50">
+			<Tv class="mb-4 h-12 w-12" />
+			<p class="text-lg font-medium">No channels in your lineup</p>
+			<p class="text-sm">Add channels from your Stalker accounts to build your lineup</p>
+			<a href="/livetv/accounts" class="btn mt-4 btn-primary">Manage Accounts</a>
+		</div>
 	{:else}
-		<!-- Lineup Mode: Header -->
-		<div class="sticky top-0 z-30 border-b border-base-200 bg-base-100/80 backdrop-blur-md">
-			<div class="flex h-16 items-center justify-between px-4 lg:px-8">
-				<div class="flex items-center gap-3">
-					<h1
-						class="bg-gradient-to-r from-primary to-secondary bg-clip-text text-2xl font-bold text-transparent"
-					>
-						My Lineup
-					</h1>
-					<span class="badge badge-ghost badge-lg">{data.lineup.length}</span>
-				</div>
-
-				<div class="flex items-center gap-2">
-					<button class="btn btn-ghost btn-sm" onclick={() => (exportModalOpen = true)}>
-						<Download class="h-4 w-4" />
-						<span class="hidden sm:inline">Export</span>
-					</button>
-					<button class="btn btn-ghost btn-sm" onclick={() => switchMode('browse')}>
-						<Radio class="h-4 w-4" />
-						<span class="hidden sm:inline">Browse Channels</span>
-					</button>
-				</div>
-			</div>
-		</div>
-
-		<!-- Lineup Content -->
-		<div class="flex-1 p-4 lg:px-8">
-			<div class="card bg-base-100 shadow-xl">
-				<div class="card-body p-0">
-					<ChannelLineupGrouped
-						items={data.lineup}
-						categories={data.channelCategories}
-						selectedIds={selectedLineupIds}
-						{reorderMode}
-						onToggleSelect={handleLineupToggleSelect}
-						onSelectAll={handleLineupSelectAll}
-						onClearSelection={handleLineupClearSelection}
-						onReorder={handleReorder}
-						onRemove={handleRemoveFromLineup}
-						onToggleReorderMode={handleToggleReorderMode}
-						onEdit={handleOpenEditChannel}
-						onAddCategory={handleOpenAddCategory}
-						onEditCategory={handleOpenEditCategory}
-						onDeleteCategory={handleOpenEditCategory}
-					/>
-				</div>
-			</div>
-		</div>
+		<ChannelLineupTable
+			{lineup}
+			{categories}
+			{groupedChannels}
+			{orderedCategories}
+			{selectedIds}
+			{expandedCategories}
+			{draggedItemId}
+			{dragOverCategoryId}
+			{isDragging}
+			{epgData}
+			onSelect={handleSelect}
+			onSelectAll={handleSelectAll}
+			onToggleExpand={handleToggleExpand}
+			onDragStart={handleDragStart}
+			onDragOverCategory={handleDragOverCategory}
+			onDragLeaveCategory={handleDragLeaveCategory}
+			onDropOnCategory={handleDropOnCategory}
+			onReorder={handleReorder}
+			onDragEnd={handleDragEnd}
+			onEdit={handleEdit}
+			onRemove={handleRemove}
+			onInlineEdit={handleInlineEdit}
+		/>
 	{/if}
 </div>
 
-<!-- Category Modal -->
-<ChannelCategoryModal
-	open={categoryModalOpen}
-	mode={categoryModalMode}
-	category={editingCategory}
-	saving={savingCategory}
-	error={categoryError}
-	onClose={handleCloseCategoryModal}
-	onSave={handleSaveCategory}
-	onDelete={handleDeleteCategory}
-/>
-
-<!-- Channel Edit Modal -->
+<!-- Edit Modal -->
 <ChannelEditModal
+	bind:this={editModalRef}
 	open={editModalOpen}
 	channel={editingChannel}
-	categories={data.channelCategories}
-	saving={savingChannel}
-	error={channelError}
-	onClose={handleCloseEditModal}
-	onSave={handleSaveChannel}
-	onDelete={handleDeleteChannel}
+	{categories}
+	saving={editModalSaving}
+	error={editModalError}
+	onClose={closeEditModal}
+	onSave={handleEditSave}
+	onDelete={handleEditDelete}
+	onOpenBackupBrowser={openBackupBrowser}
 />
 
-<!-- Export Modal -->
-<ExportModal
-	open={exportModalOpen}
-	baseUrl={$page.url.origin}
-	onClose={() => (exportModalOpen = false)}
+<!-- Category Manager Modal -->
+<ChannelCategoryManagerModal
+	open={categoryModalOpen}
+	{categories}
+	{groupedChannels}
+	onClose={closeCategoryModal}
+	onChange={handleCategoryChange}
+/>
+
+<!-- Bulk Action Bar -->
+<ChannelBulkActionBar
+	{selectedCount}
+	{categories}
+	loading={bulkActionLoading}
+	currentAction={bulkAction}
+	onSetCategory={handleBulkSetCategory}
+	onRemove={handleBulkRemove}
+	onClear={clearSelection}
+/>
+
+<!-- Channel Browser Modal -->
+<ChannelBrowserModal
+	open={browserModalOpen}
+	{lineupChannelIds}
+	onClose={closeBrowserModal}
+	onChannelsAdded={loadData}
+	mode={browserMode}
+	lineupItemId={backupLineupItemId}
+	excludeChannelId={backupExcludeChannelId}
+	onBackupSelected={handleBackupSelected}
 />

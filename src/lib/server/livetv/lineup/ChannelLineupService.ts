@@ -6,18 +6,25 @@
 import { db } from '$lib/server/db';
 import {
 	channelLineupItems,
-	stalkerPortalAccounts,
+	channelLineupBackups,
 	channelCategories,
+	stalkerAccounts,
+	stalkerChannels,
+	stalkerCategories,
 	type ChannelLineupItemRecord,
-	type ChannelCategoryRecord
+	type ChannelCategoryRecord,
+	type StalkerChannelRecord
 } from '$lib/server/db/schema';
 import { eq, asc, inArray, sql, and } from 'drizzle-orm';
 import { logger } from '$lib/logging';
 import { randomUUID } from 'crypto';
 import type {
-	ChannelLineupItemWithAccount,
-	AddToLineupRequest,
+	ChannelLineupItemWithDetails,
+	ChannelLineupItemWithBackups,
+	ChannelBackupLink,
 	ChannelCategory,
+	CachedChannel,
+	AddToLineupRequest,
 	UpdateChannelRequest
 } from '$lib/types/livetv';
 
@@ -38,70 +45,119 @@ function toCategoryResponse(record: ChannelCategoryRecord | null): ChannelCatego
 }
 
 /**
+ * Convert channel record to cached channel format
+ */
+function toChannelResponse(
+	record: StalkerChannelRecord,
+	categoryTitle: string | null
+): CachedChannel {
+	return {
+		id: record.id,
+		accountId: record.accountId,
+		stalkerId: record.stalkerId,
+		name: record.name,
+		number: record.number,
+		logo: record.logo,
+		categoryId: record.categoryId,
+		categoryTitle,
+		stalkerGenreId: record.stalkerGenreId,
+		cmd: record.cmd,
+		tvArchive: record.tvArchive ?? false,
+		archiveDuration: record.archiveDuration ?? 0,
+		createdAt: record.createdAt || new Date().toISOString(),
+		updatedAt: record.updatedAt || new Date().toISOString()
+	};
+}
+
+/**
  * Convert database record to API response format with computed display values
  */
 function toLineupItem(
 	record: ChannelLineupItemRecord,
 	accountName: string,
+	channel: StalkerChannelRecord,
+	channelCategoryTitle: string | null,
 	category: ChannelCategoryRecord | null = null
-): ChannelLineupItemWithAccount {
+): ChannelLineupItemWithDetails {
+	const channelData = toChannelResponse(channel, channelCategoryTitle);
+
 	return {
 		id: record.id,
 		accountId: record.accountId,
 		channelId: record.channelId,
 		position: record.position,
 		channelNumber: record.channelNumber,
-		cachedName: record.cachedName,
-		cachedLogo: record.cachedLogo,
-		cachedCategoryId: record.cachedCategoryId,
-		cachedCategoryName: record.cachedCategoryName,
-		cachedCmd: record.cachedCmd,
 		customName: record.customName,
 		customLogo: record.customLogo,
 		epgId: record.epgId,
 		categoryId: record.categoryId,
 		addedAt: record.addedAt || new Date().toISOString(),
 		updatedAt: record.updatedAt || new Date().toISOString(),
+		channel: channelData,
 		accountName,
 		category: toCategoryResponse(category),
-		displayName: record.customName || record.cachedName,
-		displayLogo: record.customLogo || record.cachedLogo
+		displayName: record.customName || channel.name,
+		displayLogo: record.customLogo || channel.logo
 	};
 }
 
 class ChannelLineupService {
 	/**
-	 * Get all lineup items ordered by position with category info
+	 * Get all lineup items ordered by position with joined data
 	 */
-	async getLineup(): Promise<ChannelLineupItemWithAccount[]> {
+	async getLineup(): Promise<ChannelLineupItemWithDetails[]> {
 		const items = await db
 			.select({
 				item: channelLineupItems,
-				accountName: stalkerPortalAccounts.name,
+				accountName: stalkerAccounts.name,
+				channel: stalkerChannels,
 				category: channelCategories
 			})
 			.from(channelLineupItems)
-			.leftJoin(stalkerPortalAccounts, eq(channelLineupItems.accountId, stalkerPortalAccounts.id))
+			.innerJoin(stalkerAccounts, eq(channelLineupItems.accountId, stalkerAccounts.id))
+			.innerJoin(stalkerChannels, eq(channelLineupItems.channelId, stalkerChannels.id))
 			.leftJoin(channelCategories, eq(channelLineupItems.categoryId, channelCategories.id))
 			.orderBy(asc(channelLineupItems.position));
 
+		// Get channel categories for the category title display
+		const channelCategoryIds = [...new Set(items.map((i) => i.channel.categoryId).filter(Boolean))];
+		const channelCategoriesMap = new Map<string, string>();
+
+		if (channelCategoryIds.length > 0) {
+			const cats = await db
+				.select({ id: stalkerCategories.id, title: stalkerCategories.title })
+				.from(stalkerCategories)
+				.where(inArray(stalkerCategories.id, channelCategoryIds as string[]));
+			for (const cat of cats) {
+				channelCategoriesMap.set(cat.id, cat.title);
+			}
+		}
+
 		return items.map((row) =>
-			toLineupItem(row.item, row.accountName || 'Unknown Account', row.category)
+			toLineupItem(
+				row.item,
+				row.accountName || 'Unknown Account',
+				row.channel,
+				row.channel.categoryId ? channelCategoriesMap.get(row.channel.categoryId) || null : null,
+				row.category
+			)
 		);
 	}
 
 	/**
 	 * Get a single lineup item by ID
 	 */
-	async getChannelById(id: string): Promise<ChannelLineupItemWithAccount | null> {
+	async getChannelById(id: string): Promise<ChannelLineupItemWithDetails | null> {
 		const items = await db
 			.select({
 				item: channelLineupItems,
-				accountName: stalkerPortalAccounts.name,
+				accountName: stalkerAccounts.name,
+				channel: stalkerChannels,
 				category: channelCategories
 			})
 			.from(channelLineupItems)
-			.leftJoin(stalkerPortalAccounts, eq(channelLineupItems.accountId, stalkerPortalAccounts.id))
+			.innerJoin(stalkerAccounts, eq(channelLineupItems.accountId, stalkerAccounts.id))
+			.innerJoin(stalkerChannels, eq(channelLineupItems.channelId, stalkerChannels.id))
 			.leftJoin(channelCategories, eq(channelLineupItems.categoryId, channelCategories.id))
 			.where(eq(channelLineupItems.id, id))
 			.limit(1);
@@ -109,7 +165,25 @@ class ChannelLineupService {
 		if (items.length === 0) return null;
 
 		const row = items[0];
-		return toLineupItem(row.item, row.accountName || 'Unknown Account', row.category);
+
+		// Get channel category title
+		let channelCategoryTitle: string | null = null;
+		if (row.channel.categoryId) {
+			const [cat] = await db
+				.select({ title: stalkerCategories.title })
+				.from(stalkerCategories)
+				.where(eq(stalkerCategories.id, row.channel.categoryId))
+				.limit(1);
+			channelCategoryTitle = cat?.title || null;
+		}
+
+		return toLineupItem(
+			row.item,
+			row.accountName || 'Unknown Account',
+			row.channel,
+			channelCategoryTitle,
+			row.category
+		);
 	}
 
 	/**
@@ -123,52 +197,50 @@ class ChannelLineupService {
 	/**
 	 * Check if a channel is already in the lineup
 	 */
-	async isInLineup(accountId: string, channelId: string): Promise<boolean> {
+	async isInLineup(channelId: string): Promise<boolean> {
 		const existing = await db
 			.select({ id: channelLineupItems.id })
 			.from(channelLineupItems)
-			.where(
-				and(
-					eq(channelLineupItems.accountId, accountId),
-					eq(channelLineupItems.channelId, channelId)
-				)
-			)
+			.where(eq(channelLineupItems.channelId, channelId))
 			.limit(1);
 		return existing.length > 0;
 	}
 
 	/**
-	 * Get set of channel keys already in lineup (for bulk checking)
-	 * Returns Set of "accountId:channelId" strings
+	 * Get set of channel IDs already in lineup (for bulk checking)
 	 */
-	async getLineupChannelKeys(): Promise<Set<string>> {
+	async getLineupChannelIds(): Promise<Set<string>> {
 		const items = await db
-			.select({
-				accountId: channelLineupItems.accountId,
-				channelId: channelLineupItems.channelId
-			})
+			.select({ channelId: channelLineupItems.channelId })
 			.from(channelLineupItems);
-
-		return new Set(items.map((item) => `${item.accountId}:${item.channelId}`));
+		return new Set(items.map((i) => i.channelId));
 	}
 
 	/**
 	 * Add channels to the lineup
 	 */
 	async addToLineup(request: AddToLineupRequest): Promise<{ added: number; skipped: number }> {
-		const existingKeys = await this.getLineupChannelKeys();
-		const currentCount = await this.getLineupCount();
+		if (request.channels.length === 0) {
+			return { added: 0, skipped: 0 };
+		}
 
-		let position = currentCount + 1;
+		// Get existing channel IDs in lineup
+		const existingIds = await this.getLineupChannelIds();
+
+		// Get next position
+		const maxPosResult = await db
+			.select({ maxPos: sql<number>`COALESCE(MAX(position), 0)` })
+			.from(channelLineupItems);
+		let nextPosition = (maxPosResult[0]?.maxPos || 0) + 1;
+
 		let added = 0;
 		let skipped = 0;
 
 		const now = new Date().toISOString();
 
 		for (const channel of request.channels) {
-			const key = `${channel.accountId}:${channel.channelId}`;
-
-			if (existingKeys.has(key)) {
+			// Skip if already in lineup
+			if (existingIds.has(channel.channelId)) {
 				skipped++;
 				continue;
 			}
@@ -177,52 +249,71 @@ class ChannelLineupService {
 				id: randomUUID(),
 				accountId: channel.accountId,
 				channelId: channel.channelId,
-				position: position++,
-				cachedName: channel.name,
-				cachedLogo: channel.logo || null,
-				cachedCategoryId: channel.categoryId || null,
-				cachedCategoryName: channel.categoryName || null,
-				categoryId: channel.userCategoryId || null,
+				position: nextPosition++,
+				categoryId: channel.categoryId || null,
 				addedAt: now,
 				updatedAt: now
 			});
 
 			added++;
-			existingKeys.add(key);
+			existingIds.add(channel.channelId);
 		}
 
-		logger.info('[ChannelLineupService] Added channels to lineup', {
-			added,
-			skipped
-		});
+		logger.info('[ChannelLineupService] Added channels to lineup', { added, skipped });
 		return { added, skipped };
 	}
 
 	/**
-	 * Remove items from the lineup
+	 * Remove a channel from the lineup
 	 */
-	async removeFromLineup(itemIds: string[]): Promise<number> {
-		if (itemIds.length === 0) return 0;
-
-		await db.delete(channelLineupItems).where(inArray(channelLineupItems.id, itemIds));
-
-		// Recompact positions after deletion
-		await this.recompactPositions();
-
-		logger.info('[ChannelLineupService] Removed items from lineup', {
-			count: itemIds.length
-		});
-		return itemIds.length;
+	async removeFromLineup(id: string): Promise<boolean> {
+		const result = await db.delete(channelLineupItems).where(eq(channelLineupItems.id, id));
+		return result.changes > 0;
 	}
 
 	/**
-	 * Reorder lineup items.
-	 * The itemIds array represents the new order (first = position 1).
+	 * Remove multiple channels from the lineup
+	 */
+	async bulkRemoveFromLineup(ids: string[]): Promise<number> {
+		if (ids.length === 0) return 0;
+
+		const result = await db.delete(channelLineupItems).where(inArray(channelLineupItems.id, ids));
+
+		logger.info('[ChannelLineupService] Removed channels from lineup', { count: result.changes });
+		return result.changes;
+	}
+
+	/**
+	 * Update a lineup item
+	 */
+	async updateChannel(
+		id: string,
+		update: UpdateChannelRequest
+	): Promise<ChannelLineupItemWithDetails | null> {
+		const now = new Date().toISOString();
+
+		await db
+			.update(channelLineupItems)
+			.set({
+				channelNumber: update.channelNumber,
+				customName: update.customName,
+				customLogo: update.customLogo,
+				epgId: update.epgId,
+				categoryId: update.categoryId,
+				updatedAt: now
+			})
+			.where(eq(channelLineupItems.id, id));
+
+		return this.getChannelById(id);
+	}
+
+	/**
+	 * Reorder lineup items
 	 */
 	async reorderLineup(itemIds: string[]): Promise<void> {
 		const now = new Date().toISOString();
 
-		// Update positions based on array order
+		// Update positions in order
 		for (let i = 0; i < itemIds.length; i++) {
 			await db
 				.update(channelLineupItems)
@@ -230,146 +321,193 @@ class ChannelLineupService {
 				.where(eq(channelLineupItems.id, itemIds[i]));
 		}
 
-		logger.info('[ChannelLineupService] Reordered lineup', {
-			count: itemIds.length
-		});
+		logger.info('[ChannelLineupService] Reordered lineup', { count: itemIds.length });
 	}
 
 	/**
-	 * Recompact positions to ensure sequential ordering (no gaps).
+	 * Set category for multiple lineup items
 	 */
-	private async recompactPositions(): Promise<void> {
-		const items = await db
-			.select({ id: channelLineupItems.id })
-			.from(channelLineupItems)
-			.orderBy(asc(channelLineupItems.position));
-
-		for (let i = 0; i < items.length; i++) {
-			await db
-				.update(channelLineupItems)
-				.set({ position: i + 1 })
-				.where(eq(channelLineupItems.id, items[i].id));
-		}
-	}
-
-	/**
-	 * Update cached channel metadata (for when live data is refreshed).
-	 */
-	async updateCachedMetadata(
-		accountId: string,
-		channelId: string,
-		metadata: {
-			name: string;
-			logo?: string;
-			categoryId?: string;
-			categoryName?: string;
-		}
-	): Promise<void> {
-		await db
-			.update(channelLineupItems)
-			.set({
-				cachedName: metadata.name,
-				cachedLogo: metadata.logo || null,
-				cachedCategoryId: metadata.categoryId || null,
-				cachedCategoryName: metadata.categoryName || null,
-				updatedAt: new Date().toISOString()
-			})
-			.where(
-				and(
-					eq(channelLineupItems.accountId, accountId),
-					eq(channelLineupItems.channelId, channelId)
-				)
-			);
-	}
-
-	/**
-	 * Update a channel's customization fields
-	 */
-	async updateChannel(id: string, data: UpdateChannelRequest): Promise<void> {
-		const now = new Date().toISOString();
-
-		await db
-			.update(channelLineupItems)
-			.set({
-				...(data.channelNumber !== undefined && { channelNumber: data.channelNumber }),
-				...(data.customName !== undefined && { customName: data.customName }),
-				...(data.customLogo !== undefined && { customLogo: data.customLogo }),
-				...(data.epgId !== undefined && { epgId: data.epgId }),
-				...(data.categoryId !== undefined && { categoryId: data.categoryId }),
-				updatedAt: now
-			})
-			.where(eq(channelLineupItems.id, id));
-
-		logger.info('[ChannelLineupService] Updated channel', { id });
-	}
-
-	/**
-	 * Bulk assign category to multiple channels
-	 */
-	async bulkAssignCategory(itemIds: string[], categoryId: string | null): Promise<number> {
+	async bulkSetCategory(itemIds: string[], categoryId: string | null): Promise<number> {
 		if (itemIds.length === 0) return 0;
 
 		const now = new Date().toISOString();
-
-		await db
+		const result = await db
 			.update(channelLineupItems)
-			.set({
-				categoryId: categoryId,
-				updatedAt: now
-			})
+			.set({ categoryId, updatedAt: now })
 			.where(inArray(channelLineupItems.id, itemIds));
 
-		logger.info('[ChannelLineupService] Bulk assigned category', {
-			count: itemIds.length,
-			categoryId
-		});
-		return itemIds.length;
+		return result.changes;
+	}
+
+	// =========================================================================
+	// BACKUP LINKS
+	// =========================================================================
+
+	/**
+	 * Get all backup links for a lineup item
+	 */
+	async getBackups(lineupItemId: string): Promise<ChannelBackupLink[]> {
+		const rows = await db
+			.select({
+				backup: channelLineupBackups,
+				channel: stalkerChannels,
+				accountName: stalkerAccounts.name,
+				categoryTitle: stalkerCategories.title
+			})
+			.from(channelLineupBackups)
+			.innerJoin(stalkerChannels, eq(channelLineupBackups.channelId, stalkerChannels.id))
+			.innerJoin(stalkerAccounts, eq(channelLineupBackups.accountId, stalkerAccounts.id))
+			.leftJoin(stalkerCategories, eq(stalkerChannels.categoryId, stalkerCategories.id))
+			.where(eq(channelLineupBackups.lineupItemId, lineupItemId))
+			.orderBy(asc(channelLineupBackups.priority));
+
+		return rows.map((row) => ({
+			id: row.backup.id,
+			lineupItemId: row.backup.lineupItemId,
+			accountId: row.backup.accountId,
+			channelId: row.backup.channelId,
+			priority: row.backup.priority,
+			createdAt: row.backup.createdAt || new Date().toISOString(),
+			updatedAt: row.backup.updatedAt || new Date().toISOString(),
+			channel: toChannelResponse(row.channel, row.categoryTitle || null),
+			accountName: row.accountName || 'Unknown Account'
+		}));
 	}
 
 	/**
-	 * Auto-number channels starting from a given number
+	 * Add a backup link to a lineup item
 	 */
-	async autoNumberChannels(itemIds: string[], startNumber: number): Promise<number> {
-		if (itemIds.length === 0) return 0;
-
-		const now = new Date().toISOString();
-
-		for (let i = 0; i < itemIds.length; i++) {
-			await db
-				.update(channelLineupItems)
-				.set({
-					channelNumber: startNumber + i,
-					updatedAt: now
-				})
-				.where(eq(channelLineupItems.id, itemIds[i]));
+	async addBackup(
+		lineupItemId: string,
+		accountId: string,
+		channelId: string
+	): Promise<ChannelBackupLink | null> {
+		// Get the lineup item to check it exists and that we're not adding primary as backup
+		const item = await this.getChannelById(lineupItemId);
+		if (!item) {
+			logger.warn('[ChannelLineupService] Cannot add backup: lineup item not found', {
+				lineupItemId
+			});
+			return null;
 		}
 
-		logger.info('[ChannelLineupService] Auto-numbered channels', {
-			count: itemIds.length,
-			startNumber
-		});
-		return itemIds.length;
+		// Prevent adding the primary channel as a backup
+		if (channelId === item.channelId) {
+			logger.warn('[ChannelLineupService] Cannot add primary channel as backup', {
+				lineupItemId,
+				channelId
+			});
+			return null;
+		}
+
+		// Get next priority (max + 1)
+		const maxPriorityResult = await db
+			.select({ maxPriority: sql<number>`COALESCE(MAX(priority), 0)` })
+			.from(channelLineupBackups)
+			.where(eq(channelLineupBackups.lineupItemId, lineupItemId));
+		const nextPriority = (maxPriorityResult[0]?.maxPriority || 0) + 1;
+
+		const now = new Date().toISOString();
+		const id = randomUUID();
+
+		try {
+			await db.insert(channelLineupBackups).values({
+				id,
+				lineupItemId,
+				accountId,
+				channelId,
+				priority: nextPriority,
+				createdAt: now,
+				updatedAt: now
+			});
+
+			logger.info('[ChannelLineupService] Added backup link', {
+				lineupItemId,
+				channelId,
+				priority: nextPriority
+			});
+
+			// Return the newly created backup with joined data
+			const backups = await this.getBackups(lineupItemId);
+			return backups.find((b) => b.id === id) || null;
+		} catch (error) {
+			// Unique constraint violation - backup already exists
+			if (error instanceof Error && error.message.includes('UNIQUE constraint')) {
+				logger.warn('[ChannelLineupService] Backup already exists', {
+					lineupItemId,
+					channelId
+				});
+				return null;
+			}
+			throw error;
+		}
 	}
 
 	/**
-	 * Clear the entire lineup
+	 * Remove a backup link
 	 */
-	async clearLineup(): Promise<number> {
-		const count = await this.getLineupCount();
-		await db.delete(channelLineupItems);
-		logger.info('[ChannelLineupService] Cleared lineup', { count });
-		return count;
+	async removeBackup(backupId: string): Promise<boolean> {
+		const result = await db
+			.delete(channelLineupBackups)
+			.where(eq(channelLineupBackups.id, backupId));
+
+		if (result.changes > 0) {
+			logger.info('[ChannelLineupService] Removed backup link', { backupId });
+			return true;
+		}
+		return false;
+	}
+
+	/**
+	 * Reorder backup links for a lineup item
+	 */
+	async reorderBackups(lineupItemId: string, backupIds: string[]): Promise<void> {
+		const now = new Date().toISOString();
+
+		// Update priorities in order (1-based)
+		for (let i = 0; i < backupIds.length; i++) {
+			await db
+				.update(channelLineupBackups)
+				.set({ priority: i + 1, updatedAt: now })
+				.where(
+					and(
+						eq(channelLineupBackups.id, backupIds[i]),
+						eq(channelLineupBackups.lineupItemId, lineupItemId)
+					)
+				);
+		}
+
+		logger.info('[ChannelLineupService] Reordered backups', {
+			lineupItemId,
+			count: backupIds.length
+		});
+	}
+
+	/**
+	 * Get a lineup item with its backup links
+	 */
+	async getChannelWithBackups(id: string): Promise<ChannelLineupItemWithBackups | null> {
+		const item = await this.getChannelById(id);
+		if (!item) return null;
+
+		const backups = await this.getBackups(id);
+
+		return {
+			...item,
+			backups
+		};
+	}
+
+	/**
+	 * Get backup count for a lineup item
+	 */
+	async getBackupCount(lineupItemId: string): Promise<number> {
+		const result = await db
+			.select({ count: sql<number>`count(*)` })
+			.from(channelLineupBackups)
+			.where(eq(channelLineupBackups.lineupItemId, lineupItemId));
+		return result[0]?.count || 0;
 	}
 }
 
-// Singleton instance
-let instance: ChannelLineupService | null = null;
-
-export function getChannelLineupService(): ChannelLineupService {
-	if (!instance) {
-		instance = new ChannelLineupService();
-	}
-	return instance;
-}
-
-export type { ChannelLineupService };
+export const channelLineupService = new ChannelLineupService();

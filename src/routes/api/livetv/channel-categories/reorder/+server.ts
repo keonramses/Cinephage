@@ -1,35 +1,34 @@
 /**
  * Channel Categories Reorder API
+ *
+ * POST /api/livetv/channel-categories/reorder - Reorder categories
  */
 
 import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
-import { getChannelCategoryService } from '$lib/server/livetv/categories';
-import { reorderCategoriesSchema } from '$lib/validation/schemas';
+import { channelCategoryService } from '$lib/server/livetv/categories';
 import { ValidationError } from '$lib/errors';
 
-/**
- * POST /api/livetv/channel-categories/reorder
- * Reorder categories
- */
 export const POST: RequestHandler = async ({ request }) => {
-	const service = getChannelCategoryService();
-
 	try {
-		const body = await request.json();
-		const validated = reorderCategoriesSchema.safeParse(body);
+		const body = (await request.json()) as { categoryIds: string[] };
 
-		if (!validated.success) {
-			throw new ValidationError(validated.error.issues[0]?.message || 'Invalid input');
+		if (!body.categoryIds || !Array.isArray(body.categoryIds)) {
+			throw new ValidationError('categoryIds array is required');
 		}
 
-		await service.reorderCategories(validated.data.categoryIds);
+		if (body.categoryIds.length === 0) {
+			return json({ success: true });
+		}
+
+		await channelCategoryService.reorderCategories(body.categoryIds);
+
 		return json({ success: true });
 	} catch (error) {
 		if (error instanceof ValidationError) {
 			return json({ error: error.message }, { status: 400 });
 		}
-		const message = error instanceof Error ? error.message : 'Unknown error';
-		return json({ error: message }, { status: 500 });
+		console.error('[API] Failed to reorder channel categories:', error);
+		return json({ error: 'Failed to reorder channel categories' }, { status: 500 });
 	}
 };

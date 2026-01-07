@@ -911,7 +911,8 @@ export class DownloadMonitorService extends EventEmitter implements BackgroundSe
 				}
 
 				// Download still exists in client
-				const wasCompleted = queueItem.status === 'completed';
+				const wasDownloadingOrQueued =
+					queueItem.status === 'downloading' || queueItem.status === 'queued';
 				const isNowDownloading = download.status === 'downloading';
 
 				if (isNowDownloading || download.status === 'queued') {
@@ -920,11 +921,17 @@ export class DownloadMonitorService extends EventEmitter implements BackgroundSe
 
 				await this.updateQueueItem(queueItem, download, client);
 
-				// Check if just completed
-				// IMPORTANT: Only trigger when status is 'completed' (not just progress >= 1)
-				// SABnzbd reports 100% progress during post-processing (Extracting, Moving, etc.)
-				// but status remains 'downloading' until it moves to history with 'Completed' status
-				if (!wasCompleted && download.status === 'completed') {
+				// Check if download just finished
+				// For usenet (SABnzbd): triggers when status becomes 'completed'
+				// For torrents (qBittorrent): triggers when status becomes 'seeding' with 100% progress
+				// Note: qBittorrent goes downloading -> seeding (never 'completed')
+				// SABnzbd reports 100% during post-processing but status stays 'downloading'
+				// until it moves to history with 'Completed' status
+				const justFinishedDownloading =
+					download.status === 'completed' ||
+					(download.status === 'seeding' && download.progress >= 1);
+
+				if (wasDownloadingOrQueued && justFinishedDownloading) {
 					const updatedItem = await this.getQueueItem(queueItem.id);
 					if (updatedItem) {
 						this.emit('queue:completed', updatedItem);

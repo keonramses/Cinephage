@@ -1,54 +1,79 @@
 /**
- * GET /api/livetv/accounts - List all Stalker Portal accounts
- * POST /api/livetv/accounts - Create a new account
+ * Live TV Accounts API
+ *
+ * GET  /api/livetv/accounts - List all Stalker accounts
+ * POST /api/livetv/accounts - Create a new Stalker account
  */
 
 import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
-import { getStalkerPortalManager } from '$lib/server/livetv/stalker';
+import { getStalkerAccountManager } from '$lib/server/livetv/stalker';
 import { stalkerAccountCreateSchema } from '$lib/validation/schemas';
+import { logger } from '$lib/logging';
 
 /**
- * GET /api/livetv/accounts
- * List all configured Stalker Portal accounts.
+ * List all Stalker accounts
  */
 export const GET: RequestHandler = async () => {
-	const manager = getStalkerPortalManager();
-	const accounts = await manager.getAccounts();
-	return json(accounts);
+	try {
+		const manager = getStalkerAccountManager();
+		const accounts = await manager.getAccounts();
+
+		return json(accounts);
+	} catch (error) {
+		logger.error('[API] Failed to list Stalker accounts', {
+			error: error instanceof Error ? error.message : String(error)
+		});
+
+		return json({ error: 'Failed to list accounts' }, { status: 500 });
+	}
 };
 
 /**
- * POST /api/livetv/accounts
- * Create a new Stalker Portal account.
+ * Create a new Stalker account
  */
 export const POST: RequestHandler = async ({ request }) => {
-	let data: unknown;
 	try {
-		data = await request.json();
-	} catch {
-		return json({ error: 'Invalid JSON body' }, { status: 400 });
-	}
+		const body = await request.json();
 
-	const result = stalkerAccountCreateSchema.safeParse(data);
+		// Validate input
+		const parsed = stalkerAccountCreateSchema.safeParse(body);
+		if (!parsed.success) {
+			return json(
+				{
+					error: 'Validation failed',
+					details: parsed.error.flatten().fieldErrors
+				},
+				{ status: 400 }
+			);
+		}
 
-	if (!result.success) {
-		return json(
-			{
-				error: 'Validation failed',
-				details: result.error.flatten()
-			},
-			{ status: 400 }
-		);
-	}
+		const manager = getStalkerAccountManager();
 
-	const manager = getStalkerPortalManager();
+		// Check if testFirst is explicitly set to false
+		const testFirst = body.testFirst !== false;
 
-	try {
-		const created = await manager.createAccount(result.data);
-		return json({ success: true, account: created });
+		const account = await manager.createAccount(parsed.data, testFirst);
+
+		return json(account, { status: 201 });
 	} catch (error) {
-		const message = error instanceof Error ? error.message : 'Unknown error';
-		return json({ error: message }, { status: 500 });
+		const message = error instanceof Error ? error.message : String(error);
+
+		logger.error('[API] Failed to create Stalker account', { error: message });
+
+		// Connection test failures return specific error
+		if (message.includes('Connection test failed')) {
+			return json({ error: message }, { status: 400 });
+		}
+
+		// Unique constraint violation
+		if (message.includes('UNIQUE constraint failed')) {
+			return json(
+				{ error: 'An account with this portal URL and MAC address already exists' },
+				{ status: 409 }
+			);
+		}
+
+		return json({ error: 'Failed to create account' }, { status: 500 });
 	}
 };

@@ -1,53 +1,59 @@
 /**
- * GET /api/livetv/lineup - Get the custom channel lineup
- * POST /api/livetv/lineup - Add channels to the lineup
+ * Channel Lineup API
+ *
+ * GET /api/livetv/lineup - Get all lineup items
+ * POST /api/livetv/lineup - Add channels to lineup
  */
 
 import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
-import { getChannelLineupService } from '$lib/server/livetv/lineup';
-import { addToLineupSchema } from '$lib/validation/schemas';
+import { channelLineupService } from '$lib/server/livetv/lineup';
+import { ValidationError } from '$lib/errors';
+import type { AddToLineupRequest } from '$lib/types/livetv';
 
-/**
- * GET /api/livetv/lineup
- * Get all lineup items ordered by position.
- */
 export const GET: RequestHandler = async () => {
-	const service = getChannelLineupService();
-
 	try {
-		const lineup = await service.getLineup();
-		return json(lineup);
+		const lineup = await channelLineupService.getLineup();
+		const lineupChannelIds = await channelLineupService.getLineupChannelIds();
+
+		return json({
+			lineup,
+			lineupChannelIds: Array.from(lineupChannelIds),
+			total: lineup.length
+		});
 	} catch (error) {
-		const message = error instanceof Error ? error.message : 'Unknown error';
-		return json({ error: message }, { status: 500 });
+		console.error('[API] Failed to get lineup:', error);
+		return json({ error: 'Failed to get lineup' }, { status: 500 });
 	}
 };
 
-/**
- * POST /api/livetv/lineup
- * Add channels to the lineup.
- */
 export const POST: RequestHandler = async ({ request }) => {
-	let data: unknown;
 	try {
-		data = await request.json();
-	} catch {
-		return json({ error: 'Invalid JSON body' }, { status: 400 });
-	}
+		const body = (await request.json()) as AddToLineupRequest;
 
-	const result = addToLineupSchema.safeParse(data);
-	if (!result.success) {
-		return json({ error: 'Validation failed', details: result.error.flatten() }, { status: 400 });
-	}
+		if (!body.channels || !Array.isArray(body.channels)) {
+			throw new ValidationError('channels array is required');
+		}
 
-	const service = getChannelLineupService();
+		if (body.channels.length === 0) {
+			return json({ added: 0, skipped: 0 });
+		}
 
-	try {
-		const { added, skipped } = await service.addToLineup(result.data);
-		return json({ success: true, added, skipped });
+		// Validate each channel has required fields
+		for (const channel of body.channels) {
+			if (!channel.accountId || !channel.channelId) {
+				throw new ValidationError('Each channel must have accountId and channelId');
+			}
+		}
+
+		const result = await channelLineupService.addToLineup(body);
+
+		return json(result, { status: 201 });
 	} catch (error) {
-		const message = error instanceof Error ? error.message : 'Unknown error';
-		return json({ error: message }, { status: 500 });
+		if (error instanceof ValidationError) {
+			return json({ error: error.message }, { status: 400 });
+		}
+		console.error('[API] Failed to add to lineup:', error);
+		return json({ error: 'Failed to add to lineup' }, { status: 500 });
 	}
 };

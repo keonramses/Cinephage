@@ -1,51 +1,130 @@
 /**
- * GET /api/livetv/playlist.m3u
+ * M3U Playlist Generator for Live TV
  *
- * Returns M3U playlist with proxied stream URLs for user's channel lineup.
- * Compatible with VLC, Jellyfin, Plex, and other M3U-compatible players.
+ * Generates an M3U playlist for Plex/Jellyfin/Emby consumption.
+ * Each channel in the user's lineup is listed with proxy URLs.
+ *
+ * GET /api/livetv/playlist.m3u
+ * GET /api/livetv/playlist.m3u?category=<categoryId>
  */
 
 import type { RequestHandler } from './$types';
+import { channelLineupService } from '$lib/server/livetv/lineup/ChannelLineupService';
 import { getBaseUrlAsync } from '$lib/server/streaming/url';
-import { getPlaylistGenerator, M3U_CONTENT_TYPE } from '$lib/server/livetv/proxy';
 import { logger } from '$lib/logging';
+import type { ChannelLineupItemWithDetails } from '$lib/types/livetv';
 
-export const GET: RequestHandler = async ({ request }) => {
+/**
+ * Build an M3U playlist from lineup items
+ */
+function buildM3UPlaylist(lineup: ChannelLineupItemWithDetails[], baseUrl: string): string {
+	const lines: string[] = ['#EXTM3U'];
+
+	for (const item of lineup) {
+		// Build EXTINF attributes
+		const tvgId = item.epgId || item.id;
+		const tvgName = item.displayName;
+		const tvgLogo = item.displayLogo || '';
+		const groupTitle = item.category?.name || 'Uncategorized';
+		const chno = item.channelNumber ?? item.position;
+
+		// EXTINF line with metadata
+		// Format: #EXTINF:-1 tvg-id="..." tvg-name="..." tvg-chno="..." tvg-logo="..." group-title="...",Display Name
+		const extinf = [
+			'#EXTINF:-1',
+			`tvg-id="${escapeM3UAttribute(tvgId)}"`,
+			`tvg-name="${escapeM3UAttribute(tvgName)}"`,
+			`tvg-chno="${chno}"`,
+			tvgLogo ? `tvg-logo="${escapeM3UAttribute(tvgLogo)}"` : '',
+			`group-title="${escapeM3UAttribute(groupTitle)}"`
+		]
+			.filter(Boolean)
+			.join(' ');
+
+		lines.push(`${extinf},${tvgName}`);
+
+		// Proxy URL - media servers will request this
+		lines.push(`${baseUrl}/api/livetv/stream/${item.id}`);
+	}
+
+	return lines.join('\n');
+}
+
+/**
+ * Escape special characters in M3U attribute values
+ */
+function escapeM3UAttribute(value: string): string {
+	return value
+		.replace(/"/g, "'") // Replace double quotes with single
+		.replace(/\n/g, ' ') // Remove newlines
+		.replace(/\r/g, ''); // Remove carriage returns
+}
+
+export const GET: RequestHandler = async ({ request, url }) => {
 	try {
 		const baseUrl = await getBaseUrlAsync(request);
-		const generator = getPlaylistGenerator();
+		const categoryId = url.searchParams.get('category');
 
-		const playlist = await generator.generatePlaylist({
-			baseUrl,
-			includeGroupTitles: true,
-			includeChannelNumbers: true,
-			includeLogo: true
+		// Get user's lineup ordered by position
+		let lineup = await channelLineupService.getLineup();
+
+		// Filter by category if specified
+		if (categoryId) {
+			lineup = lineup.filter((item) => item.categoryId === categoryId);
+		}
+
+		if (lineup.length === 0) {
+			logger.debug('[Playlist] No channels in lineup');
+			return new Response('#EXTM3U\n# No channels in lineup', {
+				status: 200,
+				headers: {
+					'Content-Type': 'audio/x-mpegurl',
+					'Content-Disposition': 'inline; filename="cinephage-livetv.m3u"',
+					'Access-Control-Allow-Origin': '*'
+				}
+			});
+		}
+
+		// Build M3U playlist
+		const m3u = buildM3UPlaylist(lineup, baseUrl);
+
+		logger.debug('[Playlist] Generated M3U playlist', {
+			channels: lineup.length,
+			categoryFilter: categoryId || 'none'
 		});
 
-		logger.debug('[LiveTV] Generated playlist', {
-			baseUrl,
-			lineCount: playlist.split('\n').length
-		});
-
-		return new Response(playlist, {
+		return new Response(m3u, {
 			status: 200,
 			headers: {
-				'Content-Type': M3U_CONTENT_TYPE,
-				'Content-Disposition': 'attachment; filename="playlist.m3u"',
+				'Content-Type': 'audio/x-mpegurl',
+				'Content-Disposition': 'inline; filename="cinephage-livetv.m3u"',
+				'Cache-Control': 'no-cache',
 				'Access-Control-Allow-Origin': '*',
-				'Cache-Control': 'no-cache, no-store, must-revalidate'
+				'Access-Control-Allow-Methods': 'GET, OPTIONS',
+				'Access-Control-Allow-Headers': 'Content-Type'
 			}
 		});
 	} catch (error) {
-		const message = error instanceof Error ? error.message : 'Unknown error';
-		logger.error('[LiveTV] Failed to generate playlist', { error: message });
-
-		return new Response(`#EXTM3U\n# Error: ${message}`, {
-			status: 500,
-			headers: {
-				'Content-Type': M3U_CONTENT_TYPE,
-				'Cache-Control': 'no-cache'
+		logger.error('[Playlist] Failed to generate playlist', error);
+		return new Response(
+			JSON.stringify({
+				error: error instanceof Error ? error.message : 'Failed to generate playlist'
+			}),
+			{
+				status: 500,
+				headers: { 'Content-Type': 'application/json' }
 			}
-		});
+		);
 	}
+};
+
+export const OPTIONS: RequestHandler = async () => {
+	return new Response(null, {
+		status: 200,
+		headers: {
+			'Access-Control-Allow-Origin': '*',
+			'Access-Control-Allow-Methods': 'GET, OPTIONS',
+			'Access-Control-Allow-Headers': 'Content-Type'
+		}
+	});
 };

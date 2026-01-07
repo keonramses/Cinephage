@@ -10,6 +10,7 @@
 		ChevronRight,
 		Languages,
 		Film,
+		Monitor,
 		X
 	} from 'lucide-svelte';
 	import type { PageData } from './$types';
@@ -99,6 +100,20 @@
 					label: 'Default',
 					value: data.languageProfiles.hasDefault ? 'Set' : 'Not Set',
 					status: data.languageProfiles.hasDefault ? 'success' : 'warning'
+				}
+			]
+		},
+		{
+			title: 'Media Servers',
+			description: 'Configure Jellyfin and Emby for library notifications',
+			href: '/settings/integrations/media-browsers',
+			icon: Monitor,
+			stats: [
+				{ label: 'Total', value: data.mediaBrowsers.total },
+				{
+					label: 'Enabled',
+					value: data.mediaBrowsers.enabled,
+					status: data.mediaBrowsers.enabled > 0 ? 'success' : 'warning'
 				}
 			]
 		}

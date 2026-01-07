@@ -1,36 +1,35 @@
 /**
- * POST /api/livetv/lineup/remove - Remove items from the lineup
+ * Bulk Remove from Lineup API
+ *
+ * POST /api/livetv/lineup/remove - Remove multiple items from lineup
  */
 
 import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
-import { getChannelLineupService } from '$lib/server/livetv/lineup';
-import { removeFromLineupSchema } from '$lib/validation/schemas';
+import { channelLineupService } from '$lib/server/livetv/lineup';
+import { ValidationError } from '$lib/errors';
+import type { RemoveFromLineupRequest } from '$lib/types/livetv';
 
-/**
- * POST /api/livetv/lineup/remove
- * Remove items from the lineup by their IDs.
- */
 export const POST: RequestHandler = async ({ request }) => {
-	let data: unknown;
 	try {
-		data = await request.json();
-	} catch {
-		return json({ error: 'Invalid JSON body' }, { status: 400 });
-	}
+		const body = (await request.json()) as RemoveFromLineupRequest;
 
-	const result = removeFromLineupSchema.safeParse(data);
-	if (!result.success) {
-		return json({ error: 'Validation failed', details: result.error.flatten() }, { status: 400 });
-	}
+		if (!body.itemIds || !Array.isArray(body.itemIds)) {
+			throw new ValidationError('itemIds array is required');
+		}
 
-	const service = getChannelLineupService();
+		if (body.itemIds.length === 0) {
+			return json({ removed: 0 });
+		}
 
-	try {
-		const removed = await service.removeFromLineup(result.data.itemIds);
-		return json({ success: true, removed });
+		const removed = await channelLineupService.bulkRemoveFromLineup(body.itemIds);
+
+		return json({ removed });
 	} catch (error) {
-		const message = error instanceof Error ? error.message : 'Unknown error';
-		return json({ error: message }, { status: 500 });
+		if (error instanceof ValidationError) {
+			return json({ error: error.message }, { status: 400 });
+		}
+		console.error('[API] Failed to remove from lineup:', error);
+		return json({ error: 'Failed to remove from lineup' }, { status: 500 });
 	}
 };

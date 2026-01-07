@@ -23,10 +23,7 @@
 		FileSignature,
 		List,
 		Radio,
-		LayoutGrid,
-		Calendar,
-		Users,
-		Rss
+		Calendar
 	} from 'lucide-svelte';
 
 	let { children } = $props();
@@ -42,18 +39,16 @@
 				{ href: '/tv', label: 'TV Shows', icon: Tv }
 			]
 		},
+		{ href: '/queue', label: 'Queue', icon: Download },
 		{
 			label: 'Live TV',
 			icon: Radio,
 			children: [
-				{ href: '/livetv/channels', label: 'Channels', icon: Radio },
-				{ href: '/livetv/categories', label: 'Categories', icon: LayoutGrid },
-				{ href: '/livetv/guide', label: 'Guide', icon: Calendar },
-				{ href: '/livetv/epg', label: 'EPG Sources', icon: Rss },
-				{ href: '/livetv/accounts', label: 'Accounts', icon: Users }
+				{ href: '/livetv/channels', label: 'Channels', icon: Tv },
+				{ href: '/livetv/epg', label: 'EPG', icon: Calendar },
+				{ href: '/livetv/accounts', label: 'Accounts', icon: User }
 			]
 		},
-		{ href: '/queue', label: 'Queue', icon: Download },
 		{ href: '/smartlists', label: 'Smart Lists', icon: List },
 		{
 			label: 'Settings',

@@ -93,6 +93,11 @@ export const POST: RequestHandler = async ({ request }) => {
 		// ============================================================
 		// UPGRADE VALIDATION - Check if release is acceptable
 		// ============================================================
+		// Manual grabs bypass upgrade validation - user made a conscious choice
+		if (data.isAutomatic !== true) {
+			data.force = data.force ?? true;
+		}
+
 		// Parse quality from release title for decision making
 		const parsedQuality = parser.parse(data.title);
 
