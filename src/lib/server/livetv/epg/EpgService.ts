@@ -30,6 +30,32 @@ const DEFAULT_LOOKAHEAD_HOURS = 24;
 
 export class EpgService {
 	/**
+	 * Update account EPG tracking columns after sync
+	 */
+	private updateAccountEpgStatus(
+		accountId: string,
+		status: {
+			success: boolean;
+			programCount?: number;
+			hasEpg?: boolean;
+			error?: string;
+		}
+	): void {
+		const now = new Date().toISOString();
+
+		db.update(stalkerAccounts)
+			.set({
+				lastEpgSyncAt: now,
+				lastEpgSyncError: status.success ? null : (status.error ?? null),
+				...(status.programCount !== undefined && { epgProgramCount: status.programCount }),
+				...(status.hasEpg !== undefined && { hasEpg: status.hasEpg }),
+				updatedAt: now
+			})
+			.where(eq(stalkerAccounts.id, accountId))
+			.run();
+	}
+
+	/**
 	 * Sync EPG data for a single account
 	 */
 	async syncAccount(accountId: string): Promise<EpgSyncResult> {
@@ -96,6 +122,14 @@ export class EpgService {
 					accountId,
 					name: account.name
 				});
+
+				// Update account status - portal has no EPG data
+				this.updateAccountEpgStatus(accountId, {
+					success: true,
+					programCount: 0,
+					hasEpg: false
+				});
+
 				return {
 					success: true,
 					accountId,
@@ -129,6 +163,14 @@ export class EpgService {
 				duration: Date.now() - startTime
 			});
 
+			// Update account status - successful sync with EPG data
+			const totalPrograms = result.programsAdded + result.programsUpdated;
+			this.updateAccountEpgStatus(accountId, {
+				success: true,
+				programCount: totalPrograms > 0 ? this.getAccountProgramCount(accountId) : 0,
+				hasEpg: true
+			});
+
 			return {
 				success: true,
 				accountId,
@@ -141,6 +183,12 @@ export class EpgService {
 			logger.error('[EpgService] EPG sync failed', {
 				accountId,
 				name: account.name,
+				error: message
+			});
+
+			// Update account status - sync failed
+			this.updateAccountEpgStatus(accountId, {
+				success: false,
 				error: message
 			});
 
@@ -502,6 +550,18 @@ export class EpgService {
 			map.set(row.accountId, row.count);
 		}
 		return map;
+	}
+
+	/**
+	 * Get program count for a specific account
+	 */
+	private getAccountProgramCount(accountId: string): number {
+		const result = db
+			.select({ count: sql<number>`count(*)` })
+			.from(epgPrograms)
+			.where(eq(epgPrograms.accountId, accountId))
+			.get();
+		return result?.count ?? 0;
 	}
 
 	/**

@@ -790,7 +790,8 @@ export class SABnzbdClient implements IDownloadClient {
 			contentPath: outputPath,
 			category: item.category,
 			completedOn: item.completed ? new Date(item.completed * 1000) : undefined,
-			canBeRemoved: isCompleted
+			canBeRemoved: isCompleted,
+			errorMessage: item.fail_message || undefined
 		};
 	}
 

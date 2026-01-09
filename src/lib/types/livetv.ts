@@ -486,6 +486,7 @@ export interface EpgSyncResult {
  */
 export interface EpgStatus {
 	isEnabled: boolean;
+	isSyncing: boolean;
 	syncIntervalHours: number;
 	retentionHours: number;
 	lastSyncAt: string | null;
@@ -494,8 +495,9 @@ export interface EpgStatus {
 	accounts: Array<{
 		id: string;
 		name: string;
-		lastSyncAt: string | null;
+		lastEpgSyncAt: string | null;
 		programCount: number;
+		hasEpg: boolean | null; // null = unknown, true = has EPG, false = portal has no EPG
 		error?: string;
 	}>;
 }

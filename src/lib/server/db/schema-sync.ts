@@ -46,8 +46,9 @@ import { logger } from '$lib/logging';
  * Version 29: Clean break migration - drops all orphaned Live TV tables from intermediate rewrites
  * Version 30: Add device parameters to stalker_accounts for proper Stalker protocol support
  * Version 31: Add portal scanner tables (stalker_portals, portal_scan_results, portal_scan_history)
+ * Version 32: Add EPG tracking columns to stalker_accounts for visibility and sync status
  */
-export const CURRENT_SCHEMA_VERSION = 31;
+export const CURRENT_SCHEMA_VERSION = 32;
 
 /**
  * All table definitions with CREATE TABLE IF NOT EXISTS
@@ -2524,6 +2525,27 @@ const SCHEMA_UPDATES: Record<number, (sqlite: Database.Database) => void> = {
 		}
 
 		logger.info('[SchemaSync] Added portal scanner tables');
+	},
+
+	// Version 32: Add EPG tracking columns to stalker_accounts for visibility and sync status
+	32: (sqlite) => {
+		// Add EPG tracking columns to stalker_accounts
+		if (!columnExists(sqlite, 'stalker_accounts', 'last_epg_sync_at')) {
+			sqlite.prepare(`ALTER TABLE "stalker_accounts" ADD COLUMN "last_epg_sync_at" text`).run();
+		}
+		if (!columnExists(sqlite, 'stalker_accounts', 'last_epg_sync_error')) {
+			sqlite.prepare(`ALTER TABLE "stalker_accounts" ADD COLUMN "last_epg_sync_error" text`).run();
+		}
+		if (!columnExists(sqlite, 'stalker_accounts', 'epg_program_count')) {
+			sqlite
+				.prepare(`ALTER TABLE "stalker_accounts" ADD COLUMN "epg_program_count" integer DEFAULT 0`)
+				.run();
+		}
+		if (!columnExists(sqlite, 'stalker_accounts', 'has_epg')) {
+			sqlite.prepare(`ALTER TABLE "stalker_accounts" ADD COLUMN "has_epg" integer`).run();
+		}
+
+		logger.info('[SchemaSync] Added EPG tracking columns to stalker_accounts');
 	}
 };
 

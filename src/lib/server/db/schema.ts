@@ -2319,12 +2319,18 @@ export const stalkerAccounts = sqliteTable(
 		lastTestSuccess: integer('last_test_success', { mode: 'boolean' }),
 		lastTestError: text('last_test_error'),
 
-		// Sync tracking
+		// Sync tracking (channel sync)
 		lastSyncAt: text('last_sync_at'),
 		lastSyncError: text('last_sync_error'),
 		syncStatus: text('sync_status')
 			.$type<'never' | 'syncing' | 'success' | 'failed'>()
 			.default('never'),
+
+		// EPG tracking (separate from channel sync)
+		lastEpgSyncAt: text('last_epg_sync_at'),
+		lastEpgSyncError: text('last_epg_sync_error'),
+		epgProgramCount: integer('epg_program_count').default(0),
+		hasEpg: integer('has_epg', { mode: 'boolean' }), // null=unknown, true/false after first sync
 
 		// Timestamps
 		createdAt: text('created_at').$defaultFn(() => new Date().toISOString()),

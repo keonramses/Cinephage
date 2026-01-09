@@ -1023,6 +1023,11 @@ export class DownloadMonitorService extends EventEmitter implements BackgroundSe
 					updates.completedAt = now;
 				}
 			}
+
+			// Capture error message when download fails
+			if (newStatus === 'failed' && download.errorMessage) {
+				updates.errorMessage = download.errorMessage;
+			}
 		}
 
 		// Only update if something changed

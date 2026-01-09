@@ -6,7 +6,7 @@
 
 import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
-import { getEpgService } from '$lib/server/livetv/epg';
+import { getEpgService, getEpgScheduler } from '$lib/server/livetv/epg';
 import { db } from '$lib/server/db';
 import { stalkerAccounts } from '$lib/server/db/schema';
 import { eq } from 'drizzle-orm';
@@ -14,20 +14,23 @@ import { eq } from 'drizzle-orm';
 export const GET: RequestHandler = async () => {
 	try {
 		const epgService = getEpgService();
+		const epgScheduler = getEpgScheduler();
+
+		// Get scheduler status for sync info
+		const schedulerStatus = epgScheduler.getStatus();
 
 		// Get total program count
 		const totalPrograms = epgService.getProgramCount();
 
-		// Get program count by account
-		const programsByAccount = epgService.getProgramCountByAccount();
-
-		// Get all enabled accounts
+		// Get all enabled accounts with EPG tracking columns
 		const accounts = db
 			.select({
 				id: stalkerAccounts.id,
 				name: stalkerAccounts.name,
-				lastSyncAt: stalkerAccounts.lastSyncAt,
-				lastSyncError: stalkerAccounts.lastSyncError
+				lastEpgSyncAt: stalkerAccounts.lastEpgSyncAt,
+				lastEpgSyncError: stalkerAccounts.lastEpgSyncError,
+				epgProgramCount: stalkerAccounts.epgProgramCount,
+				hasEpg: stalkerAccounts.hasEpg
 			})
 			.from(stalkerAccounts)
 			.where(eq(stalkerAccounts.enabled, true))
@@ -37,17 +40,19 @@ export const GET: RequestHandler = async () => {
 		const accountStatuses = accounts.map((account) => ({
 			id: account.id,
 			name: account.name,
-			lastSyncAt: account.lastSyncAt,
-			programCount: programsByAccount.get(account.id) ?? 0,
-			error: account.lastSyncError ?? undefined
+			lastEpgSyncAt: account.lastEpgSyncAt ?? null,
+			programCount: account.epgProgramCount ?? 0,
+			hasEpg: account.hasEpg ?? null,
+			error: account.lastEpgSyncError ?? undefined
 		}));
 
 		return json({
 			isEnabled: true,
-			syncIntervalHours: 6, // Default
-			retentionHours: 48, // Default
-			lastSyncAt: null, // Would need to track this separately
-			nextSyncAt: null, // Would need scheduler to calculate this
+			isSyncing: schedulerStatus.isSyncing,
+			syncIntervalHours: schedulerStatus.syncIntervalHours,
+			retentionHours: schedulerStatus.retentionHours,
+			lastSyncAt: schedulerStatus.lastSyncAt,
+			nextSyncAt: schedulerStatus.nextSyncAt,
 			totalPrograms,
 			accounts: accountStatuses
 		});

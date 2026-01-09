@@ -8,60 +8,90 @@ Cinephage includes experimental IPTV support with Stalker portal integration, po
 
 ## Overview
 
-Live TV support includes:
+Cinephage supports live TV through Stalker/Ministra portal integration. You have two options:
 
-- Stalker/Ministra portal integration
-- Portal scanner for discovering accounts
-- Electronic Program Guide (EPG) sync
-- Channel lineup management
-- M3U playlist generation
-- Category organization
+- **Bring your own account** — If you already have a Stalker portal account from an IPTV provider, add it directly with your portal URL and MAC address
+- **Discover accounts** — Use the built-in portal scanner to discover working accounts by scanning MAC addresses against portals
+
+Once you have an account set up, you get:
+
+- Channel sync from the portal
+- Electronic Program Guide (EPG) support
+- Channel lineup organization
+- M3U playlist generation for external players
+- Category management
 
 ---
 
-## Stalker Portal Support
+## Adding Your Own Account
 
-Cinephage connects to Stalker/Ministra IPTV portals.
+If you already have an IPTV subscription with a Stalker portal provider, you can add your account directly.
 
 ### What Are Stalker Portals?
 
-Stalker (also known as Ministra) is an IPTV middleware system. Many IPTV providers use Stalker-compatible portals to deliver live TV streams.
+Stalker (also known as Ministra) is an IPTV middleware system used by many IPTV providers to deliver live TV streams. Your provider gives you a portal URL and MAC address to access their service.
 
-### Adding a Portal
+### Adding Your Account
 
 1. Navigate to **Live TV > Accounts**
 2. Click **Add Account**
-3. Enter portal details:
+3. Enter your provider's details:
 
-| Setting         | Description                   |
-| --------------- | ----------------------------- |
-| **Name**        | Display name for this account |
-| **Portal URL**  | Full portal URL               |
-| **MAC Address** | Your assigned MAC address     |
+| Setting         | Description                           |
+| --------------- | ------------------------------------- |
+| **Name**        | Display name for this account         |
+| **Portal URL**  | Portal URL from your IPTV provider    |
+| **MAC Address** | MAC address assigned by your provider |
 
-### MAC Address
+4. Click **Test** to verify the connection
+5. Save the account
 
-Your IPTV provider assigns a MAC address for your account. This is used to authenticate with the portal.
+### After Adding
+
+Once your account is added, click **Sync Channels** to fetch the channel list from your provider. Cinephage will import all available channels and categories.
 
 ---
 
-## Portal Scanner
+## Discovering Accounts
 
-Cinephage includes a portal scanner that can discover Stalker accounts.
+If you don't have an existing IPTV account, Cinephage can discover working accounts on Stalker portals by scanning MAC addresses.
 
 ### How It Works
 
+The scanner tests MAC addresses against a portal to find valid credentials. When a valid MAC is found, the scanner retrieves account details including channel count, categories, and expiration date.
+
+### Scan Types
+
+| Type           | Description                                                                            |
+| -------------- | -------------------------------------------------------------------------------------- |
+| **Random**     | Generates random MAC addresses using known STB manufacturer prefixes (MAG boxes, etc.) |
+| **Sequential** | Tests a specific range of MAC addresses in order                                       |
+| **Import**     | Tests a list of MAC addresses you provide                                              |
+
+### Scanning Process
+
 1. Navigate to **Live TV > Scanner**
-2. Enter a portal URL to scan
-3. The scanner searches for valid account credentials
-4. Discovered accounts can be added directly
+2. Select or create a portal to scan
+3. Choose scan type and configure options:
+   - **Random**: Select MAC prefix and number of addresses to test
+   - **Sequential**: Define start and end MAC addresses
+   - **Import**: Paste a list of MAC addresses to test
+4. Start the scan - progress displays in real-time
+5. Review discovered accounts (shows channel count, expiry, status)
+6. Approve accounts you want to use
+7. Approved accounts sync channels automatically
 
-### Scanner Features
+### Scan Results
 
-- Automatic MAC address discovery
-- Credential validation
-- Batch scanning support
-- Results can be saved as accounts
+Discovered accounts show:
+
+- MAC address
+- Channel count
+- Category count
+- Account expiration date
+- Account status (active, expired, etc.)
+
+You can approve individual accounts or bulk approve multiple results. Ignored results are hidden from the list.
 
 ---
 

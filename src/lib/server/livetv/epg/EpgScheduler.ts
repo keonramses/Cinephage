@@ -27,8 +27,10 @@ const SCHEDULER_POLL_INTERVAL_MS = 60 * 1000; // 1 minute
 
 /**
  * Grace period after startup before any automated tasks run (in milliseconds)
+ * Reduced to 30 seconds to allow EPG data to appear sooner for users.
+ * Can be overridden via EPG_STARTUP_GRACE_MS environment variable.
  */
-const STARTUP_GRACE_PERIOD_MS = 5 * 60 * 1000; // 5 minutes
+const STARTUP_GRACE_PERIOD_MS = parseInt(process.env.EPG_STARTUP_GRACE_MS || '30000', 10); // Default 30 seconds
 
 /**
  * Settings keys
@@ -131,12 +133,15 @@ export class EpgScheduler extends EventEmitter implements BackgroundService {
 	 * Check for due tasks and execute them
 	 */
 	private async checkDueTasks(): Promise<void> {
-		// Don't run anything during grace period
-		if (this.startupTime) {
-			const elapsed = Date.now() - this.startupTime.getTime();
-			if (elapsed < STARTUP_GRACE_PERIOD_MS) {
-				return;
-			}
+		// Check if we're still in grace period
+		const inGracePeriod =
+			this.startupTime && Date.now() - this.startupTime.getTime() < STARTUP_GRACE_PERIOD_MS;
+
+		// Allow first-ever sync even during grace period (for better first-run experience)
+		const neverSynced = !this.getSetting(SETTINGS_KEYS.lastSyncAt);
+
+		if (inGracePeriod && !neverSynced) {
+			return;
 		}
 
 		// Check sync task
@@ -144,8 +149,8 @@ export class EpgScheduler extends EventEmitter implements BackgroundService {
 			this.runSync();
 		}
 
-		// Check cleanup task
-		if (!this.isCleaningUp && this.isCleanupDue()) {
+		// Check cleanup task (only after grace period)
+		if (!inGracePeriod && !this.isCleaningUp && this.isCleanupDue()) {
 			this.runCleanup();
 		}
 	}

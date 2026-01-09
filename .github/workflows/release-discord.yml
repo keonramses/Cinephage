@@ -13,10 +13,10 @@ jobs:
         uses: SethCohen/github-releases-to-discord@v1.15.1
         with:
           webhook_url: ${{ secrets.DISCORD_WEBHOOK }}
-          color: "2067276"
-          username: "Cinephage Releases"
-          avatar_url: "https://raw.githubusercontent.com/MoldyTaint/Cinephage/main/static/logo.png"
-          content: "<@&1449935793958293585>"
-          footer_title: "Cinephage"
-          footer_icon_url: "https://raw.githubusercontent.com/MoldyTaint/Cinephage/main/static/logo.png"
+          color: '2067276'
+          username: 'Cinephage Releases'
+          avatar_url: 'https://raw.githubusercontent.com/MoldyTaint/Cinephage/main/static/logo.png'
+          content: '<@&1449935793958293585>'
+          footer_title: 'Cinephage'
+          footer_icon_url: 'https://raw.githubusercontent.com/MoldyTaint/Cinephage/main/static/logo.png'
           footer_timestamp: true

@@ -19,3 +19,6 @@ export { default as ChannelEditModal } from './ChannelEditModal.svelte';
 export { default as ChannelCategoryManagerModal } from './ChannelCategoryManagerModal.svelte';
 export { default as ChannelBulkActionBar } from './ChannelBulkActionBar.svelte';
 export { default as ChannelBrowserModal } from './ChannelBrowserModal.svelte';
+
+// EPG status
+export { default as EpgStatusCard } from './EpgStatusCard.svelte';

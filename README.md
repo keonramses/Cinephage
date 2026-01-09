@@ -35,33 +35,33 @@ Cinephage takes a unified approach to media management. Movies, TV shows, indexe
 
 ## At a Glance
 
-|                            |                                                       |
-| -------------------------- | ----------------------------------------------------- |
-| **7 built-in indexers**    | + Newznab support for usenet indexers                 |
-| **8 subtitle providers**   | 80+ languages with auto-download                      |
-| **10 streaming providers** | Built-in streaming indexer + circuit breaker failover |
-| **3 download clients**     | qBittorrent, SABnzbd, NZBGet                          |
-| **Live TV / IPTV**         | Stalker portal integration with account discovery     |
-| **7 monitoring tasks**     | Automated searches, upgrades, new episodes            |
-| **1 database**             | Everything unified, zero fragmentation                |
+|                            |                                                                 |
+| -------------------------- | --------------------------------------------------------------- |
+| **7 built-in indexers**    | + Newznab support for usenet indexers                           |
+| **8 subtitle providers**   | 80+ languages with auto-download                                |
+| **10 streaming providers** | Built-in streaming indexer + circuit breaker failover           |
+| **3 download clients**     | qBittorrent, SABnzbd, NZBGet                                    |
+| **Live TV / IPTV**         | Stalker portals: bring your own account or discover via scanner |
+| **7 monitoring tasks**     | Automated searches, upgrades, new episodes                      |
+| **1 database**             | Everything unified, zero fragmentation                          |
 
 ---
 
 ## Status
 
-| Feature            | Status       | Notes                                               |
-| ------------------ | ------------ | --------------------------------------------------- |
-| Content Discovery  | Stable       | TMDB integration, trending, search                  |
-| Library Management | Stable       | File watching, scanning, TMDB matching              |
-| Quality Scoring    | Stable       | 4 built-in profiles + custom profile creation       |
-| Download Clients   | Stable       | qBittorrent, SABnzbd, NZBGet                        |
-| Indexers           | Stable       | 7 built-in + Newznab for usenet                     |
-| Subtitles          | Stable       | 8 providers, 80+ languages                          |
-| Streaming          | Stable       | 10 providers with circuit breaker failover          |
-| Smart Lists        | Stable       | Dynamic TMDB queries with auto-add to library       |
-| Monitoring         | Experimental | Automated searches, upgrades, new episode detection |
-| Notifications      | Stable       | Jellyfin/Emby library update integration            |
-| Live TV/IPTV       | Experimental | Stalker portal with scanner, EPG (limited support)  |
+| Feature            | Status       | Notes                                                     |
+| ------------------ | ------------ | --------------------------------------------------------- |
+| Content Discovery  | Stable       | TMDB integration, trending, search                        |
+| Library Management | Stable       | File watching, scanning, TMDB matching                    |
+| Quality Scoring    | Stable       | 4 built-in profiles + custom profile creation             |
+| Download Clients   | Stable       | qBittorrent, SABnzbd, NZBGet                              |
+| Indexers           | Stable       | 7 built-in + Newznab for usenet                           |
+| Subtitles          | Stable       | 8 providers, 80+ languages                                |
+| Streaming          | Stable       | 10 providers with circuit breaker failover                |
+| Smart Lists        | Stable       | Dynamic TMDB queries with auto-add to library             |
+| Monitoring         | Experimental | Automated searches, upgrades, new episode detection       |
+| Notifications      | Stable       | Jellyfin/Emby library update integration                  |
+| Live TV/IPTV       | Experimental | Stalker portals: bring your own or discover accounts, EPG |
 
 ---
 
@@ -163,7 +163,7 @@ See [Setup Wizard](docs/getting-started/setup-wizard.md) for detailed configurat
 - **Monitoring** — 7 automated tasks for missing content, quality upgrades, and new episodes
 - **Smart Lists** — Dynamic TMDB queries (trending, genres, ratings) with auto-add to library
 - **Notifications** — Jellyfin/Emby library update integration
-- **Live TV** — Stalker portal integration with portal scanner, EPG, and channel management (experimental, limited support)
+- **Live TV** — Stalker portal support: bring your own account or discover accounts via portal scanner, plus EPG and channel management (experimental, limited support)
 
 See [Documentation](docs/INDEX.md) for full details.
 

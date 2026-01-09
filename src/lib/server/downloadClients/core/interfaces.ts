@@ -69,6 +69,8 @@ export interface DownloadInfo {
 	seedingTimeLimit?: number;
 	/** Whether the torrent is paused and has met seeding requirements (can be removed) */
 	canBeRemoved?: boolean;
+	/** Error message from download client when status is 'error' */
+	errorMessage?: string;
 }
 
 /**

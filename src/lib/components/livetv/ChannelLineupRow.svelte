@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { GripVertical, Pencil, Trash2, Tv, Loader2 } from 'lucide-svelte';
+	import { GripVertical, Pencil, Trash2, Tv, Loader2, Info } from 'lucide-svelte';
 	import type {
 		ChannelLineupItemWithDetails,
 		EpgProgram,
@@ -261,7 +261,12 @@
 				</div>
 			</div>
 		{:else}
-			<span class="text-sm text-base-content/40">-</span>
+			<div class="tooltip tooltip-left" data-tip="No program data. Check EPG status above.">
+				<span class="flex items-center gap-1 text-sm text-base-content/40">
+					<Info class="h-3 w-3" />
+					No EPG
+				</span>
+			</div>
 		{/if}
 	</td>
 

@@ -33,6 +33,7 @@ logs/
 # Claude Code local settings
 .claude/
 CLAUDE.md
+.mcp.json
 
 # Backup files
 *.bak
