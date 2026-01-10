@@ -10,7 +10,8 @@
 		X,
 		Copy,
 		Check,
-		Archive
+		Archive,
+		Link
 	} from 'lucide-svelte';
 	import type {
 		ChannelLineupItemWithDetails,
@@ -30,6 +31,7 @@
 		onSave: (id: string, data: UpdateChannelRequest) => void;
 		onDelete?: () => void;
 		onOpenBackupBrowser?: (lineupItemId: string, excludeChannelId: string) => void;
+		onOpenEpgSourcePicker?: (channelId: string) => void;
 	}
 
 	let {
@@ -41,7 +43,8 @@
 		onClose,
 		onSave,
 		onDelete,
-		onOpenBackupBrowser
+		onOpenBackupBrowser,
+		onOpenEpgSourcePicker
 	}: Props = $props();
 
 	// Form state
@@ -50,6 +53,7 @@
 	let customLogo = $state('');
 	let categoryId = $state<string | null>(null);
 	let epgId = $state('');
+	let epgSourceChannelId = $state<string | null>(null);
 
 	// Backup links state
 	let backups = $state<ChannelBackupLink[]>([]);
@@ -186,6 +190,7 @@
 			customLogo = channel.customLogo || '';
 			categoryId = channel.categoryId;
 			epgId = channel.epgId || '';
+			epgSourceChannelId = channel.epgSourceChannelId;
 			backupError = null;
 			copiedCmd = false;
 			loadBackups();
@@ -197,6 +202,11 @@
 		loadBackups();
 	}
 
+	// Expose function for parent to set EPG source after picker selection
+	export function setEpgSourceChannelId(channelId: string | null) {
+		epgSourceChannelId = channelId;
+	}
+
 	function handleSubmit() {
 		if (!channel || saving || !isValid) return;
 
@@ -205,10 +215,15 @@
 			customName: customName.trim() || null,
 			customLogo: customLogo.trim() || null,
 			categoryId,
-			epgId: epgId.trim() || null
+			epgId: epgId.trim() || null,
+			epgSourceChannelId
 		};
 
 		onSave(channel.id, data);
+	}
+
+	function clearEpgSource() {
+		epgSourceChannelId = null;
 	}
 
 	function handleKeydown(e: KeyboardEvent) {
@@ -403,6 +418,78 @@
 								<span class="text-sm text-base-content/60">No logo available</span>
 							{/if}
 						</div>
+					</div>
+				</div>
+			</div>
+
+			<!-- EPG Source Override Section -->
+			<div class="mt-6 space-y-4">
+				<SectionHeader title="EPG Source" />
+
+				<div class="form-control">
+					<label class="label">
+						<span class="label-text font-medium">Override EPG Source</span>
+					</label>
+
+					{#if epgSourceChannelId && channel.epgSourceChannel}
+						<div class="flex items-center gap-3 rounded-lg bg-base-200 px-3 py-2">
+							{#if channel.epgSourceChannel.logo}
+								<img
+									src={channel.epgSourceChannel.logo}
+									alt=""
+									class="h-10 w-10 rounded bg-base-300 object-contain"
+								/>
+							{:else}
+								<div class="flex h-10 w-10 items-center justify-center rounded bg-base-300">
+									<Tv class="h-5 w-5 text-base-content/30" />
+								</div>
+							{/if}
+							<div class="min-w-0 flex-1">
+								<div class="truncate font-medium">{channel.epgSourceChannel.name}</div>
+								<div class="text-xs text-base-content/50">{channel.epgSourceAccountName}</div>
+							</div>
+							<button
+								type="button"
+								class="btn text-error btn-ghost btn-sm"
+								onclick={clearEpgSource}
+								title="Remove EPG source override"
+							>
+								<X class="h-4 w-4" />
+							</button>
+						</div>
+					{:else if epgSourceChannelId}
+						<!-- EPG source set but channel details not loaded yet -->
+						<div class="flex items-center gap-3 rounded-lg bg-base-200 px-3 py-2">
+							<div class="flex h-10 w-10 items-center justify-center rounded bg-base-300">
+								<Link class="h-5 w-5 text-base-content/30" />
+							</div>
+							<div class="flex-1">
+								<div class="text-sm text-base-content/60">EPG source selected</div>
+							</div>
+							<button
+								type="button"
+								class="btn text-error btn-ghost btn-sm"
+								onclick={clearEpgSource}
+								title="Remove EPG source override"
+							>
+								<X class="h-4 w-4" />
+							</button>
+						</div>
+					{:else}
+						<button
+							type="button"
+							class="btn gap-2 btn-outline btn-sm"
+							onclick={() => onOpenEpgSourcePicker?.(channel.channelId)}
+						>
+							<Link class="h-4 w-4" />
+							Select EPG Source
+						</button>
+					{/if}
+
+					<div class="label">
+						<span class="label-text-alt text-base-content/60">
+							Use EPG data from a different channel (e.g., same channel on another account)
+						</span>
 					</div>
 				</div>
 			</div>

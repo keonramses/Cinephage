@@ -2,14 +2,11 @@
  * YencDecoder - Decodes yEnc encoded Usenet article bodies.
  *
  * yEnc is the standard encoding for binary content on Usenet.
- * It uses a simple byte-by-byte encoding to avoid problematic characters.
+ * Uses a simple byte-by-byte encoding to avoid problematic characters.
  */
 
 import type { YencHeader, YencTrailer, YencDecodeResult } from './types';
 
-/**
- * yEnc special characters.
- */
 const YENC_ESCAPE = 0x3d; // '='
 const YENC_OFFSET = 42;
 const YENC_NEWLINE = 0x0a; // '\n'
@@ -26,8 +23,6 @@ function parseKeyValue(params: string, key: string): string | null {
 
 /**
  * Parse yEnc header line.
- * Format: =ybegin line=128 size=12345 name=filename.ext
- * For multipart: =ybegin part=1 total=5 line=128 size=12345 name=filename.ext
  */
 function parseHeader(line: string): YencHeader | null {
 	if (!line.startsWith('=ybegin ')) {
@@ -37,7 +32,6 @@ function parseHeader(line: string): YencHeader | null {
 	const params = line.slice(8);
 	const header: Partial<YencHeader> = {};
 
-	// Parse known keys
 	const lineVal = parseKeyValue(params, 'line');
 	if (lineVal) header.line = parseInt(lineVal, 10);
 
@@ -50,7 +44,6 @@ function parseHeader(line: string): YencHeader | null {
 	const totalVal = parseKeyValue(params, 'total');
 	if (totalVal) header.total = parseInt(totalVal, 10);
 
-	// Name is special - it's the last param and can contain spaces
 	const nameIdx = params.indexOf('name=');
 	if (nameIdx !== -1) {
 		header.name = params.slice(nameIdx + 5).trim();
@@ -61,7 +54,6 @@ function parseHeader(line: string): YencHeader | null {
 
 /**
  * Parse yEnc part header line (for multipart).
- * Format: =ypart begin=1 end=12345
  */
 function parsePartHeader(line: string): { begin: number; end: number } | null {
 	if (!line.startsWith('=ypart ')) {
@@ -82,8 +74,6 @@ function parsePartHeader(line: string): { begin: number; end: number } | null {
 
 /**
  * Parse yEnc trailer line.
- * Format: =yend size=12345
- * Or: =yend size=12345 part=1 pcrc32=ABCD1234
  */
 function parseTrailer(line: string): YencTrailer | null {
 	if (!line.startsWith('=yend ')) {
@@ -116,10 +106,42 @@ function parseTrailer(line: string): YencTrailer | null {
 }
 
 /**
+ * Decode a single yEnc encoded line.
+ */
+function decodeLine(line: string): Buffer {
+	const output: number[] = [];
+	const bytes = Buffer.from(line, 'binary');
+
+	let i = 0;
+	while (i < bytes.length) {
+		let byte = bytes[i];
+
+		if (byte === YENC_NEWLINE || byte === YENC_CR) {
+			i++;
+			continue;
+		}
+
+		if (byte === YENC_ESCAPE && i + 1 < bytes.length) {
+			i++;
+			byte = bytes[i];
+			byte = (byte - 64 - YENC_OFFSET) & 0xff;
+		} else {
+			byte = (byte - YENC_OFFSET) & 0xff;
+		}
+
+		output.push(byte);
+		i++;
+	}
+
+	return Buffer.from(output);
+}
+
+/**
  * Decode yEnc encoded data.
  *
  * @param data - Raw article body buffer (including yEnc headers)
  * @returns Decoded result with header, trailer, and binary data
+ * @throws Error if header or trailer not found
  */
 export function decodeYenc(data: Buffer): YencDecodeResult {
 	const lines = data.toString('binary').split('\r\n');
@@ -129,7 +151,7 @@ export function decodeYenc(data: Buffer): YencDecodeResult {
 	let dataStartLine = 0;
 	let dataEndLine = lines.length;
 
-	// Find header
+	// Find header (look in first 10 lines)
 	for (let i = 0; i < Math.min(10, lines.length); i++) {
 		header = parseHeader(lines[i]);
 		if (header) {
@@ -149,10 +171,10 @@ export function decodeYenc(data: Buffer): YencDecodeResult {
 	}
 
 	if (!header) {
-		throw new Error('No yEnc header found');
+		throw new Error('No yEnc header found in article body');
 	}
 
-	// Find trailer (search from end)
+	// Find trailer (search from end, last 5 lines)
 	for (let i = lines.length - 1; i >= Math.max(0, lines.length - 5); i--) {
 		trailer = parseTrailer(lines[i]);
 		if (trailer) {
@@ -162,7 +184,7 @@ export function decodeYenc(data: Buffer): YencDecodeResult {
 	}
 
 	if (!trailer) {
-		throw new Error('No yEnc trailer found');
+		throw new Error('No yEnc trailer found in article body');
 	}
 
 	// Decode the data lines
@@ -183,39 +205,6 @@ export function decodeYenc(data: Buffer): YencDecodeResult {
 		trailer,
 		data: Buffer.concat(decodedChunks)
 	};
-}
-
-/**
- * Decode a single yEnc encoded line.
- */
-function decodeLine(line: string): Buffer {
-	const output: number[] = [];
-	const bytes = Buffer.from(line, 'binary');
-
-	let i = 0;
-	while (i < bytes.length) {
-		let byte = bytes[i];
-
-		// Skip line endings
-		if (byte === YENC_NEWLINE || byte === YENC_CR) {
-			i++;
-			continue;
-		}
-
-		// Handle escape sequence
-		if (byte === YENC_ESCAPE && i + 1 < bytes.length) {
-			i++;
-			byte = bytes[i];
-			byte = (byte - 64 - YENC_OFFSET) & 0xff;
-		} else {
-			byte = (byte - YENC_OFFSET) & 0xff;
-		}
-
-		output.push(byte);
-		i++;
-	}
-
-	return Buffer.from(output);
 }
 
 /**

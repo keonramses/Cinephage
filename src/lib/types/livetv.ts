@@ -303,6 +303,7 @@ export interface ChannelLineupItem {
 	customName: string | null;
 	customLogo: string | null;
 	epgId: string | null;
+	epgSourceChannelId: string | null;
 	categoryId: string | null;
 	addedAt: string;
 	updatedAt: string;
@@ -321,6 +322,9 @@ export interface ChannelLineupItemWithDetails extends ChannelLineupItem {
 	// Computed display values
 	displayName: string;
 	displayLogo: string | null;
+	// EPG source override (when using another channel's EPG)
+	epgSourceChannel: CachedChannel | null;
+	epgSourceAccountName: string | null;
 }
 
 // ============================================================================
@@ -377,6 +381,7 @@ export interface UpdateChannelRequest {
 	customName?: string | null;
 	customLogo?: string | null;
 	epgId?: string | null;
+	epgSourceChannelId?: string | null;
 	categoryId?: string | null;
 }
 

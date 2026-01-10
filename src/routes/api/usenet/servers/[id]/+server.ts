@@ -7,7 +7,7 @@
 import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
 import { getNntpServerService } from '$lib/server/streaming/nzb/NntpServerService';
-import { getNntpClientManager } from '$lib/server/streaming/nzb';
+import { getNntpManager } from '$lib/server/streaming/usenet';
 import { nntpServerUpdateSchema } from '$lib/validation/schemas';
 
 /**
@@ -56,7 +56,7 @@ export const PUT: RequestHandler = async ({ params, request }) => {
 		return json({ error: 'Server not found' }, { status: 404 });
 	}
 
-	await getNntpClientManager().reload();
+	await getNntpManager().reload();
 	return json({ success: true, server: updated });
 };
 
@@ -72,6 +72,6 @@ export const DELETE: RequestHandler = async ({ params }) => {
 		return json({ error: 'Server not found' }, { status: 404 });
 	}
 
-	await getNntpClientManager().reload();
+	await getNntpManager().reload();
 	return json({ success: true });
 };

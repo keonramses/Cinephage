@@ -1,18 +1,18 @@
 /**
- * NZB Streaming module exports.
+ * NZB module exports.
+ *
+ * NOTE: The streaming functionality has been moved to the usenet module.
+ * This module now only contains:
+ * - NzbMountManager: Mount state persistence
+ * - NntpServerService: NNTP server configuration CRUD
+ * - NntpTestUtils: Connection testing utilities
  */
 
-export * from './constants';
-export * from './NntpServerService';
-export * from './NzbParser';
-export * from './nntp';
-export * from './streams';
-export * from './rar';
+// Mount management (still needed for state persistence)
 export * from './NzbMountManager';
-export * from './NzbStreamService';
-export { getStreamabilityChecker } from './StreamabilityChecker';
-export {
-	getExtractionCoordinator,
-	type ExtractionProgressCallback,
-	type ExtractionResult
-} from './ExtractionCoordinator';
+
+// Server configuration
+export * from './NntpServerService';
+
+// Connection testing
+export { testNntpConnection, type NntpTestResult } from './NntpTestUtils';

@@ -1,42 +1,53 @@
 /**
- * NzbSeekableStream - Streamable interface for NZB content.
+ * UsenetSeekableStream - Readable stream with Range request support.
  *
- * Provides a readable stream that supports HTTP Range requests for seeking.
- * Fetches segments on-demand from NNTP and decodes yEnc data.
+ * Key features:
+ * - HTTP Range request support for seeking
+ * - Backpressure-aware streaming
+ * - Progress reporting
+ * - Clean resource cleanup
  */
 
 import { Readable, type ReadableOptions } from 'node:stream';
 import { logger } from '$lib/logging';
-import type { NntpClientManager } from '../nntp/NntpClientManager';
-import type { NzbFile } from '../NzbParser';
-import { SegmentInterpolator } from './SegmentInterpolator';
-import { PrefetchBuffer } from './PrefetchBuffer';
-import type { ByteRange, StreamState } from './types';
+import type { NntpManager } from './NntpManager';
+import { SegmentStore } from './SegmentStore';
+import { AdaptivePrefetcher } from './AdaptivePrefetcher';
+import type { ByteRange, NzbFile } from './types';
 
 /**
- * Options for creating an NzbSeekableStream.
+ * Stream state.
  */
-export interface NzbSeekableStreamOptions {
-	/** The NZB file to stream */
+interface StreamState {
+	currentSegmentIndex: number;
+	positionInSegment: number;
+	bytesStreamed: number;
+	endByte: number;
+	ended: boolean;
+}
+
+/**
+ * Options for creating a UsenetSeekableStream.
+ */
+export interface UsenetSeekableStreamOptions {
 	file: NzbFile;
-	/** NNTP client manager for fetching articles */
-	clientManager: NntpClientManager;
-	/** Optional byte range for partial content */
+	nntpManager: NntpManager;
 	range?: ByteRange;
-	/** Number of segments to prefetch ahead */
-	prefetchCount?: number;
-	/** Progress callback */
 	onProgress?: (bytesStreamed: number, totalBytes: number) => void;
 }
 
 /**
- * NzbSeekableStream streams NZB content with seeking support.
+ * High water mark for backpressure (16MB).
  */
-export class NzbSeekableStream extends Readable {
-	private interpolator: SegmentInterpolator;
-	private prefetch: PrefetchBuffer;
-	private clientManager: NntpClientManager;
+const HIGH_WATER_MARK = 16 * 1024 * 1024;
+
+/**
+ * UsenetSeekableStream streams usenet content with seeking support.
+ */
+export class UsenetSeekableStream extends Readable {
 	private file: NzbFile;
+	private store: SegmentStore;
+	private prefetcher: AdaptivePrefetcher;
 	private state: StreamState;
 	private range: ByteRange | null;
 	private onProgress?: (bytesStreamed: number, totalBytes: number) => void;
@@ -44,28 +55,25 @@ export class NzbSeekableStream extends Readable {
 	private currentSegmentData: Buffer | null = null;
 	private _isDestroyed = false;
 
-	constructor(options: NzbSeekableStreamOptions, readableOptions?: ReadableOptions) {
-		super(readableOptions);
+	constructor(options: UsenetSeekableStreamOptions, readableOptions?: ReadableOptions) {
+		super({ highWaterMark: HIGH_WATER_MARK, ...readableOptions });
 
 		this.file = options.file;
-		this.clientManager = options.clientManager;
 		this.range = options.range ?? null;
 		this.onProgress = options.onProgress;
-		this.interpolator = new SegmentInterpolator(options.file);
 
-		// Get first group for NNTP commands
-		const group = options.file.groups[0] || 'alt.binaries';
+		// Create segment store
+		this.store = new SegmentStore(options.file.segments);
 
-		this.prefetch = new PrefetchBuffer(options.clientManager, options.file.segments, group, {
-			prefetchCount: options.prefetchCount ?? 5
-		});
+		// Create adaptive prefetcher
+		this.prefetcher = new AdaptivePrefetcher(options.nntpManager, this.store);
 
 		// Initialize state based on range
 		this.state = this.initializeState();
 
-		logger.debug('[NzbSeekableStream] Created stream', {
+		logger.debug('[UsenetSeekableStream] Created', {
 			file: this.file.name,
-			totalSize: this.interpolator.totalSize,
+			totalSize: this.store.totalSize,
 			segments: this.file.segments.length,
 			range: this.range
 		});
@@ -75,17 +83,19 @@ export class NzbSeekableStream extends Readable {
 	 * Initialize stream state based on range.
 	 */
 	private initializeState(): StreamState {
-		const totalSize = this.interpolator.totalSize;
+		const totalSize = this.store.totalSize;
 
 		if (this.range) {
 			const startByte = this.range.start;
-			const endByte =
-				this.range.end === -1 ? totalSize - 1 : Math.min(this.range.end, totalSize - 1);
+			const endByte = this.range.end === -1 ? totalSize - 1 : Math.min(this.range.end, totalSize - 1);
 
-			const startLoc = this.interpolator.findSegmentForOffset(startByte);
+			const startLoc = this.store.findSegmentForOffset(startByte);
 			if (!startLoc) {
 				throw new Error(`Invalid range start: ${startByte}`);
 			}
+
+			// Notify prefetcher of initial position (like a seek)
+			this.prefetcher.onSeek(startLoc.segmentIndex);
 
 			return {
 				currentSegmentIndex: startLoc.segmentIndex,
@@ -112,17 +122,17 @@ export class NzbSeekableStream extends Readable {
 	get contentLength(): number {
 		if (this.range) {
 			const start = this.range.start;
-			const end = this.range.end === -1 ? this.interpolator.totalSize - 1 : this.range.end;
+			const end = this.range.end === -1 ? this.store.totalSize - 1 : this.range.end;
 			return end - start + 1;
 		}
-		return this.interpolator.totalSize;
+		return this.store.totalSize;
 	}
 
 	/**
 	 * Get total file size.
 	 */
 	get totalSize(): number {
-		return this.interpolator.totalSize;
+		return this.store.totalSize;
 	}
 
 	/**
@@ -137,9 +147,28 @@ export class NzbSeekableStream extends Readable {
 	 */
 	get endByte(): number {
 		if (this.range) {
-			return this.range.end === -1 ? this.interpolator.totalSize - 1 : this.range.end;
+			return this.range.end === -1 ? this.store.totalSize - 1 : this.range.end;
 		}
-		return this.interpolator.totalSize - 1;
+		return this.store.totalSize - 1;
+	}
+
+	/**
+	 * Get stream statistics.
+	 */
+	get stats(): {
+		bytesStreamed: number;
+		currentSegment: number;
+		totalSegments: number;
+		cacheStats: { cached: number; maxSize: number };
+		prefetchStats: { pattern: string; windowSize: number; pending: number; paused: boolean };
+	} {
+		return {
+			bytesStreamed: this.state.bytesStreamed,
+			currentSegment: this.state.currentSegmentIndex,
+			totalSegments: this.file.segments.length,
+			cacheStats: this.store.cacheStats,
+			prefetchStats: this.prefetcher.stats
+		};
 	}
 
 	/**
@@ -148,6 +177,13 @@ export class NzbSeekableStream extends Readable {
 	override _read(_size: number): void {
 		if (this.reading || this.state.ended || this._isDestroyed) {
 			return;
+		}
+
+		// Check backpressure
+		if (this.readableLength > HIGH_WATER_MARK) {
+			this.prefetcher.pause();
+		} else {
+			this.prefetcher.resume();
 		}
 
 		this.reading = true;
@@ -178,12 +214,8 @@ export class NzbSeekableStream extends Readable {
 						return;
 					}
 
-					this.currentSegmentData = await this.prefetch.getSegment(this.state.currentSegmentIndex);
-
-					// Update interpolator with actual size
-					this.interpolator.updateDecodedSize(
-						this.state.currentSegmentIndex,
-						this.currentSegmentData.length
+					this.currentSegmentData = await this.prefetcher.getSegment(
+						this.state.currentSegmentIndex
 					);
 				}
 
@@ -224,12 +256,14 @@ export class NzbSeekableStream extends Readable {
 				// Push chunk
 				const canContinue = this.push(chunk);
 				if (!canContinue) {
+					// Backpressure - pause and wait for _read to be called again
+					this.prefetcher.pause();
 					this.reading = false;
 					return;
 				}
 			}
 		} catch (error) {
-			logger.error('[NzbSeekableStream] Stream error', {
+			logger.error('[UsenetSeekableStream] Stream error', {
 				file: this.file.name,
 				segment: this.state.currentSegmentIndex,
 				error: error instanceof Error ? error.message : 'Unknown error'
@@ -244,7 +278,7 @@ export class NzbSeekableStream extends Readable {
 	 * Calculate current byte position in the file.
 	 */
 	private calculateCurrentBytePosition(): number {
-		const segmentOffset = this.interpolator.getSegmentOffset(this.state.currentSegmentIndex);
+		const segmentOffset = this.store.getSegmentOffset(this.state.currentSegmentIndex);
 		return segmentOffset + this.state.positionInSegment;
 	}
 
@@ -253,10 +287,11 @@ export class NzbSeekableStream extends Readable {
 	 */
 	override _destroy(error: Error | null, callback: (error: Error | null) => void): void {
 		this._isDestroyed = true;
-		this.prefetch.clear();
+		this.prefetcher.clear();
+		this.store.clearCache();
 		this.currentSegmentData = null;
 
-		logger.debug('[NzbSeekableStream] Stream destroyed', {
+		logger.debug('[UsenetSeekableStream] Stream destroyed', {
 			file: this.file.name,
 			bytesStreamed: this.state.bytesStreamed,
 			error: error?.message
@@ -264,75 +299,4 @@ export class NzbSeekableStream extends Readable {
 
 		callback(error);
 	}
-
-	/**
-	 * Get stream statistics.
-	 */
-	get stats(): {
-		bytesStreamed: number;
-		currentSegment: number;
-		totalSegments: number;
-		cacheStats: { cached: number; pending: number; maxSize: number };
-	} {
-		return {
-			bytesStreamed: this.state.bytesStreamed,
-			currentSegment: this.state.currentSegmentIndex,
-			totalSegments: this.file.segments.length,
-			cacheStats: this.prefetch.stats
-		};
-	}
-}
-
-/**
- * Parse HTTP Range header.
- * Returns null if header is invalid or missing.
- */
-export function parseRangeHeader(header: string | null, totalSize: number): ByteRange | null {
-	if (!header) {
-		return null;
-	}
-
-	// Format: "bytes=start-end" or "bytes=start-" or "bytes=-suffix"
-	const match = header.match(/^bytes=(\d*)-(\d*)$/);
-	if (!match) {
-		return null;
-	}
-
-	const [, startStr, endStr] = match;
-
-	if (startStr === '' && endStr === '') {
-		return null;
-	}
-
-	if (startStr === '') {
-		// Suffix range: bytes=-500 means last 500 bytes
-		const suffix = parseInt(endStr, 10);
-		if (isNaN(suffix) || suffix <= 0) {
-			return null;
-		}
-		return {
-			start: Math.max(0, totalSize - suffix),
-			end: totalSize - 1
-		};
-	}
-
-	const start = parseInt(startStr, 10);
-	if (isNaN(start) || start < 0 || start >= totalSize) {
-		return null;
-	}
-
-	if (endStr === '') {
-		// Open-ended: bytes=500-
-		return { start, end: -1 };
-	}
-
-	const end = parseInt(endStr, 10);
-	if (isNaN(end) || end < start) {
-		return null;
-	}
-
-	return {
-		start,
-		end: Math.min(end, totalSize - 1)
-	};
 }

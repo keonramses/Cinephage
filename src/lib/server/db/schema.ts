@@ -2573,6 +2573,10 @@ export const channelLineupItems = sqliteTable(
 		customName: text('custom_name'),
 		customLogo: text('custom_logo'),
 		epgId: text('epg_id'), // XMLTV EPG ID for Jellyfin/Plex matching
+		// EPG source override - use EPG data from a different channel
+		epgSourceChannelId: text('epg_source_channel_id').references(() => stalkerChannels.id, {
+			onDelete: 'set null'
+		}),
 		// User-created category (separate from portal category)
 		categoryId: text('category_id').references(() => channelCategories.id, {
 			onDelete: 'set null'

@@ -17,7 +17,8 @@ import { ReleaseParser } from '$lib/server/indexers/parser/ReleaseParser.js';
 import { getDownloadResolutionService } from './DownloadResolutionService.js';
 import { getNzbValidationService } from './nzb/index.js';
 import { strmService, StrmService, getStreamingBaseUrl } from '$lib/server/streaming/index.js';
-import { getNzbMountManager, isMediaFile } from '$lib/server/streaming/nzb/index.js';
+import { getNzbMountManager } from '$lib/server/streaming/nzb/index.js';
+import { isMediaFile } from '$lib/server/streaming/usenet';
 import { fileExists } from '$lib/server/downloadClients/import/index.js';
 import { mediaInfoService } from '$lib/server/library/media-info.js';
 import { getIndexerManager } from '$lib/server/indexers/IndexerManager.js';
@@ -106,12 +107,15 @@ class ReleaseGrabService {
 
 			if (!hasMatchingCategory) {
 				const actualContentType = getCategoryContentType(release.categories[0]);
-				logger.error('[ReleaseGrab] BLOCKED: Release category mismatch - potential wrong content type', {
-					title: release.title,
-					expectedType: mediaType,
-					actualContentType,
-					categories: release.categories
-				});
+				logger.error(
+					'[ReleaseGrab] BLOCKED: Release category mismatch - potential wrong content type',
+					{
+						title: release.title,
+						expectedType: mediaType,
+						actualContentType,
+						categories: release.categories
+					}
+				);
 				return {
 					success: false,
 					error: `Category mismatch: ${actualContentType} release cannot be grabbed for ${mediaType}`

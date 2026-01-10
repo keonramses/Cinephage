@@ -9,7 +9,8 @@ import type { GrabRequest, GrabResponse } from '$lib/types/queue';
 import { getDownloadResolutionService, releaseDecisionService } from '$lib/server/downloads';
 import type { DownloadInfo } from '$lib/server/downloadClients/core/interfaces';
 import { strmService, StrmService, getStreamingBaseUrl } from '$lib/server/streaming';
-import { getNzbMountManager, getNzbStreamService } from '$lib/server/streaming/nzb';
+import { getNzbMountManager } from '$lib/server/streaming/nzb';
+import { getUsenetStreamService } from '$lib/server/streaming/usenet';
 import { mediaInfoService } from '$lib/server/library/media-info';
 import { db } from '$lib/server/db';
 import {
@@ -1159,7 +1160,7 @@ async function handleNzbStreamingGrab(data: GrabRequest): Promise<Response> {
 		});
 
 		// Check if content is streamable or requires extraction
-		const streamService = getNzbStreamService();
+		const streamService = getUsenetStreamService();
 		const streamability = await streamService.checkStreamability(mount.id);
 
 		// If extraction is required, return early with mount info
@@ -1169,7 +1170,7 @@ async function handleNzbStreamingGrab(data: GrabRequest): Promise<Response> {
 				title,
 				mountId: mount.id,
 				archiveType: streamability.archiveType,
-				compressionMethod: streamability.compressionMethod
+				error: streamability.error
 			});
 
 			return json({

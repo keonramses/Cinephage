@@ -8,19 +8,19 @@
 import type { RequestHandler } from './$types';
 import { json } from '@sveltejs/kit';
 import { logger } from '$lib/logging';
-import { getNzbStreamService } from '$lib/server/streaming/nzb';
+import { getUsenetStreamService } from '$lib/server/streaming/usenet';
 import { getNzbMountManager } from '$lib/server/streaming/nzb/NzbMountManager';
 
 export const GET: RequestHandler = async ({ params }) => {
 	const { mountId } = params;
 
-	const streamService = getNzbStreamService();
+	const streamService = getUsenetStreamService();
 	const mountManager = getNzbMountManager();
 
 	// Check if service is ready
 	if (!streamService.isReady()) {
-		logger.warn('[UsenetCheck] NNTP service not ready');
-		return json({ error: 'NNTP service not available' }, { status: 503 });
+		logger.warn('[UsenetCheck] Usenet streaming service not ready');
+		return json({ error: 'Usenet streaming service not available' }, { status: 503 });
 	}
 
 	try {
@@ -32,7 +32,7 @@ export const GET: RequestHandler = async ({ params }) => {
 			await mountManager.updateStatus(mountId, 'requires_extraction', { streamability });
 		} else if (streamability.canStream) {
 			await mountManager.updateStatus(mountId, 'ready', { streamability });
-		} else if (streamability.error) {
+		} else {
 			await mountManager.updateStatus(mountId, 'error', {
 				streamability,
 				errorMessage: streamability.error

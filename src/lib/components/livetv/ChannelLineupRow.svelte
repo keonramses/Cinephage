@@ -31,6 +31,7 @@
 			field: 'channelNumber' | 'customName',
 			value: number | string | null
 		) => Promise<boolean>;
+		onShowSchedule?: (channel: ChannelLineupItemWithDetails) => void;
 	}
 
 	let {
@@ -48,7 +49,8 @@
 		onDragEnd,
 		onEdit,
 		onRemove,
-		onInlineEdit
+		onInlineEdit,
+		onShowSchedule
 	}: Props = $props();
 
 	// Display channel number (custom or position-based)
@@ -245,7 +247,12 @@
 	<!-- Now Playing (EPG) -->
 	<td class="hidden max-w-[300px] lg:table-cell">
 		{#if epgNow?.now}
-			<div class="flex flex-col gap-0.5">
+			<button
+				type="button"
+				class="flex w-full flex-col gap-0.5 rounded px-1 py-0.5 text-left transition-colors hover:bg-base-200"
+				onclick={() => onShowSchedule?.(item)}
+				title="Click to view schedule"
+			>
 				<span class="truncate text-sm font-medium" title={epgNow.now.title}>
 					{epgNow.now.title}
 				</span>
@@ -259,7 +266,7 @@
 						{epgNow.now.remainingMinutes}m left
 					</span>
 				</div>
-			</div>
+			</button>
 		{:else}
 			<div class="tooltip tooltip-left" data-tip="No program data. Check EPG status above.">
 				<span class="flex items-center gap-1 text-sm text-base-content/40">

@@ -526,8 +526,8 @@ export class ResponseParser {
 		const catValue = values['category'] || values['cat'] || values['categoryid'];
 
 		if (!catValue) {
-			// Use default categories from definition
-			return this.getDefaultCategories();
+			// No category extracted - return empty to let filterByCategoryMatch allow it through
+			return [];
 		}
 
 		// Try to parse as category ID

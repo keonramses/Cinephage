@@ -1,13 +1,12 @@
 /**
- * NZB Extraction Module
+ * Extraction module exports.
  *
- * Provides download and extraction capabilities for compressed NZB content.
+ * NOTE: RAR/archive extraction functionality has been removed.
+ * Only the cache manager remains for cleanup of any existing extracted files.
  */
 
-export * from './types';
-export * from './NzbDownloader';
-export * from './ExtractionService';
-export * from './RarExtractor';
-export * from './SevenZipExtractor';
-export * from './ZipExtractor';
-export * from './ExtractionCacheManager';
+export {
+	getExtractionCacheManager,
+	type CacheSettings,
+	type CacheStats
+} from './ExtractionCacheManager';

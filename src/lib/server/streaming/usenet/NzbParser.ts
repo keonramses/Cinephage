@@ -1,68 +1,13 @@
 /**
- * NzbParser - Parses NZB files to extract full segment information for streaming.
+ * NzbParser - Parses NZB files to extract segment information for streaming.
  *
- * Extends beyond validation to provide complete file and segment data
- * needed for direct NNTP streaming.
+ * Extracts complete file and segment data needed for direct NNTP streaming.
  */
 
 import * as cheerio from 'cheerio';
 import { logger } from '$lib/logging';
 import { createHash } from 'crypto';
-import { isMediaFile, isRarFile } from './constants';
-
-/**
- * Segment information from NZB.
- */
-export interface NzbSegment {
-	/** Message ID (without angle brackets) */
-	messageId: string;
-	/** Segment number (1-based) */
-	number: number;
-	/** Segment size in bytes */
-	bytes: number;
-}
-
-/**
- * File information from NZB.
- */
-export interface NzbFile {
-	/** File index (0-based) */
-	index: number;
-	/** Filename from subject */
-	name: string;
-	/** File poster */
-	poster: string;
-	/** Post date (Unix timestamp) */
-	date: number;
-	/** Subject line */
-	subject: string;
-	/** Usenet groups */
-	groups: string[];
-	/** Segments ordered by number */
-	segments: NzbSegment[];
-	/** Total size (sum of segment bytes) */
-	size: number;
-	/** Whether this appears to be a RAR file */
-	isRar: boolean;
-	/** RAR part number if multipart */
-	rarPartNumber?: number;
-}
-
-/**
- * Parsed NZB result.
- */
-export interface ParsedNzb {
-	/** SHA256 hash of NZB content */
-	hash: string;
-	/** All files in the NZB */
-	files: NzbFile[];
-	/** Media files (video/audio) sorted for streaming */
-	mediaFiles: NzbFile[];
-	/** Total size of all files */
-	totalSize: number;
-	/** All unique groups referenced */
-	groups: string[];
-}
+import { isMediaFile, isRarFile, type NzbSegment, type NzbFile, type ParsedNzb } from './types';
 
 /**
  * Extract filename from subject line.
@@ -123,6 +68,10 @@ function extractRarPartNumber(filename: string): number | undefined {
 
 /**
  * Parse an NZB file to extract full segment information.
+ *
+ * @param content - NZB file content (Buffer or string)
+ * @returns Parsed NZB with files and segments
+ * @throws Error if NZB is invalid
  */
 export function parseNzb(content: Buffer | string): ParsedNzb {
 	const xml = typeof content === 'string' ? content : content.toString('utf-8');
@@ -147,12 +96,9 @@ export function parseNzb(content: Buffer | string): ParsedNzb {
 	fileElements.each((index, fileEl) => {
 		const $file = $(fileEl);
 
-		// Get file attributes
 		const poster = $file.attr('poster') || '';
 		const date = parseInt($file.attr('date') || '0', 10);
 		const subject = $file.attr('subject') || '';
-
-		// Extract filename from subject
 		const name = extractFilename(subject);
 
 		// Get groups
@@ -188,8 +134,8 @@ export function parseNzb(content: Buffer | string): ParsedNzb {
 		// Sort segments by number
 		segments.sort((a, b) => a.number - b.number);
 
-		const isRar = isRarFile(name);
-		const rarPartNumber = isRar ? extractRarPartNumber(name) : undefined;
+		const fileIsRar = isRarFile(name);
+		const rarPartNumber = fileIsRar ? extractRarPartNumber(name) : undefined;
 
 		files.push({
 			index,
@@ -200,7 +146,7 @@ export function parseNzb(content: Buffer | string): ParsedNzb {
 			groups,
 			segments,
 			size: fileSize,
-			isRar,
+			isRar: fileIsRar,
 			rarPartNumber
 		});
 
@@ -215,19 +161,11 @@ export function parseNzb(content: Buffer | string): ParsedNzb {
 		f.index = i;
 	});
 
-	// Identify media files for streaming
-	const mediaFiles = files.filter((f) => isMediaFile(f.name) || f.isRar);
+	// Identify media files for streaming (only non-RAR media files now)
+	const mediaFiles = files.filter((f) => isMediaFile(f.name) && !f.isRar);
 
-	// Sort media files: non-RAR first, then RARs by part number
-	mediaFiles.sort((a, b) => {
-		if (a.isRar !== b.isRar) {
-			return a.isRar ? 1 : -1; // Non-RAR first
-		}
-		if (a.isRar && b.isRar) {
-			return (a.rarPartNumber || 0) - (b.rarPartNumber || 0);
-		}
-		return a.name.localeCompare(b.name);
-	});
+	// Sort media files by size (largest first for streaming)
+	mediaFiles.sort((a, b) => b.size - a.size);
 
 	logger.debug('[NzbParser] Parsed NZB', {
 		hash: hash.slice(0, 12),
@@ -244,4 +182,32 @@ export function parseNzb(content: Buffer | string): ParsedNzb {
 		totalSize,
 		groups: Array.from(allGroups)
 	};
+}
+
+/**
+ * Check if NZB contains only RAR files (requires extraction).
+ */
+export function isRarOnlyNzb(parsed: ParsedNzb): boolean {
+	const nonSampleFiles = parsed.files.filter(
+		(f) => !f.name.toLowerCase().includes('sample') && f.size > 10 * 1024 * 1024
+	);
+	return nonSampleFiles.length > 0 && nonSampleFiles.every((f) => f.isRar);
+}
+
+/**
+ * Get the best streamable file from parsed NZB.
+ * Returns null if no streamable file found (RAR-only content).
+ */
+export function getBestStreamableFile(parsed: ParsedNzb): NzbFile | null {
+	// Filter out sample files and small files
+	const candidates = parsed.mediaFiles.filter(
+		(f) => !f.name.toLowerCase().includes('sample') && f.size > 10 * 1024 * 1024
+	);
+
+	if (candidates.length === 0) {
+		return null;
+	}
+
+	// Return largest file
+	return candidates[0];
 }

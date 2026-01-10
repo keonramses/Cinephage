@@ -9,7 +9,7 @@ import { eq, lt, and, sql } from 'drizzle-orm';
 import { db } from '$lib/server/db';
 import { nzbStreamMounts } from '$lib/server/db/schema';
 import { logger } from '$lib/logging';
-import { parseNzb, type NzbFile } from './NzbParser';
+import { parseNzb, type NzbFile } from '$lib/server/streaming/usenet';
 
 /**
  * Mount status values.

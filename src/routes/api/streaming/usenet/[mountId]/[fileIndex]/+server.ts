@@ -8,7 +8,7 @@
 import { Readable } from 'node:stream';
 import type { RequestHandler } from './$types';
 import { logger } from '$lib/logging';
-import { getNzbStreamService } from '$lib/server/streaming/nzb';
+import { getUsenetStreamService } from '$lib/server/streaming/usenet';
 
 export const GET: RequestHandler = async ({ params, request }) => {
 	const { mountId, fileIndex } = params;
@@ -18,12 +18,12 @@ export const GET: RequestHandler = async ({ params, request }) => {
 		return new Response('Invalid file index', { status: 400 });
 	}
 
-	const streamService = getNzbStreamService();
+	const streamService = getUsenetStreamService();
 
 	// Check if service is ready
 	if (!streamService.isReady()) {
-		logger.warn('[UsenetStream] NNTP service not ready');
-		return new Response('NNTP service not available', { status: 503 });
+		logger.warn('[UsenetStream] Usenet streaming service not ready');
+		return new Response('Usenet streaming service not available', { status: 503 });
 	}
 
 	const rangeHeader = request.headers.get('range');
@@ -102,7 +102,7 @@ export const HEAD: RequestHandler = async ({ params }) => {
 		return new Response(null, { status: 400 });
 	}
 
-	const streamService = getNzbStreamService();
+	const streamService = getUsenetStreamService();
 
 	if (!streamService.isReady()) {
 		return new Response(null, { status: 503 });

@@ -16,6 +16,7 @@ import {
 	type StalkerChannelRecord
 } from '$lib/server/db/schema';
 import { eq, asc, inArray, sql, and } from 'drizzle-orm';
+import { alias } from 'drizzle-orm/sqlite-core';
 import { logger } from '$lib/logging';
 import { randomUUID } from 'crypto';
 import type {
@@ -77,7 +78,10 @@ function toLineupItem(
 	accountName: string,
 	channel: StalkerChannelRecord,
 	channelCategoryTitle: string | null,
-	category: ChannelCategoryRecord | null = null
+	category: ChannelCategoryRecord | null = null,
+	epgSourceChannel: StalkerChannelRecord | null = null,
+	epgSourceCategoryTitle: string | null = null,
+	epgSourceAccountName: string | null = null
 ): ChannelLineupItemWithDetails {
 	const channelData = toChannelResponse(channel, channelCategoryTitle);
 
@@ -90,6 +94,7 @@ function toLineupItem(
 		customName: record.customName,
 		customLogo: record.customLogo,
 		epgId: record.epgId,
+		epgSourceChannelId: record.epgSourceChannelId,
 		categoryId: record.categoryId,
 		addedAt: record.addedAt || new Date().toISOString(),
 		updatedAt: record.updatedAt || new Date().toISOString(),
@@ -97,7 +102,11 @@ function toLineupItem(
 		accountName,
 		category: toCategoryResponse(category),
 		displayName: record.customName || channel.name,
-		displayLogo: record.customLogo || channel.logo
+		displayLogo: record.customLogo || channel.logo,
+		epgSourceChannel: epgSourceChannel
+			? toChannelResponse(epgSourceChannel, epgSourceCategoryTitle)
+			: null,
+		epgSourceAccountName
 	};
 }
 
@@ -106,28 +115,41 @@ class ChannelLineupService {
 	 * Get all lineup items ordered by position with joined data
 	 */
 	async getLineup(): Promise<ChannelLineupItemWithDetails[]> {
+		// Create aliases for EPG source channel joins
+		const epgSourceChannels = alias(stalkerChannels, 'epgSourceChannels');
+		const epgSourceAccounts = alias(stalkerAccounts, 'epgSourceAccounts');
+
 		const items = await db
 			.select({
 				item: channelLineupItems,
 				accountName: stalkerAccounts.name,
 				channel: stalkerChannels,
-				category: channelCategories
+				category: channelCategories,
+				epgSourceChannel: epgSourceChannels,
+				epgSourceAccountName: epgSourceAccounts.name
 			})
 			.from(channelLineupItems)
 			.innerJoin(stalkerAccounts, eq(channelLineupItems.accountId, stalkerAccounts.id))
 			.innerJoin(stalkerChannels, eq(channelLineupItems.channelId, stalkerChannels.id))
 			.leftJoin(channelCategories, eq(channelLineupItems.categoryId, channelCategories.id))
+			.leftJoin(epgSourceChannels, eq(channelLineupItems.epgSourceChannelId, epgSourceChannels.id))
+			.leftJoin(epgSourceAccounts, eq(epgSourceChannels.accountId, epgSourceAccounts.id))
 			.orderBy(asc(channelLineupItems.position));
 
-		// Get channel categories for the category title display
-		const channelCategoryIds = [...new Set(items.map((i) => i.channel.categoryId).filter(Boolean))];
+		// Get channel categories for the category title display (primary + EPG source)
+		const allCategoryIds = [
+			...new Set([
+				...items.map((i) => i.channel.categoryId).filter(Boolean),
+				...items.map((i) => i.epgSourceChannel?.categoryId).filter(Boolean)
+			])
+		];
 		const channelCategoriesMap = new Map<string, string>();
 
-		if (channelCategoryIds.length > 0) {
+		if (allCategoryIds.length > 0) {
 			const cats = await db
 				.select({ id: stalkerCategories.id, title: stalkerCategories.title })
 				.from(stalkerCategories)
-				.where(inArray(stalkerCategories.id, channelCategoryIds as string[]));
+				.where(inArray(stalkerCategories.id, allCategoryIds as string[]));
 			for (const cat of cats) {
 				channelCategoriesMap.set(cat.id, cat.title);
 			}
@@ -139,7 +161,12 @@ class ChannelLineupService {
 				row.accountName || 'Unknown Account',
 				row.channel,
 				row.channel.categoryId ? channelCategoriesMap.get(row.channel.categoryId) || null : null,
-				row.category
+				row.category,
+				row.epgSourceChannel,
+				row.epgSourceChannel?.categoryId
+					? channelCategoriesMap.get(row.epgSourceChannel.categoryId) || null
+					: null,
+				row.epgSourceAccountName || null
 			)
 		);
 	}
@@ -148,17 +175,25 @@ class ChannelLineupService {
 	 * Get a single lineup item by ID
 	 */
 	async getChannelById(id: string): Promise<ChannelLineupItemWithDetails | null> {
+		// Create aliases for EPG source channel joins
+		const epgSourceChannels = alias(stalkerChannels, 'epgSourceChannels');
+		const epgSourceAccounts = alias(stalkerAccounts, 'epgSourceAccounts');
+
 		const items = await db
 			.select({
 				item: channelLineupItems,
 				accountName: stalkerAccounts.name,
 				channel: stalkerChannels,
-				category: channelCategories
+				category: channelCategories,
+				epgSourceChannel: epgSourceChannels,
+				epgSourceAccountName: epgSourceAccounts.name
 			})
 			.from(channelLineupItems)
 			.innerJoin(stalkerAccounts, eq(channelLineupItems.accountId, stalkerAccounts.id))
 			.innerJoin(stalkerChannels, eq(channelLineupItems.channelId, stalkerChannels.id))
 			.leftJoin(channelCategories, eq(channelLineupItems.categoryId, channelCategories.id))
+			.leftJoin(epgSourceChannels, eq(channelLineupItems.epgSourceChannelId, epgSourceChannels.id))
+			.leftJoin(epgSourceAccounts, eq(epgSourceChannels.accountId, epgSourceAccounts.id))
 			.where(eq(channelLineupItems.id, id))
 			.limit(1);
 
@@ -166,23 +201,31 @@ class ChannelLineupService {
 
 		const row = items[0];
 
-		// Get channel category title
-		let channelCategoryTitle: string | null = null;
-		if (row.channel.categoryId) {
-			const [cat] = await db
-				.select({ title: stalkerCategories.title })
+		// Get channel category titles (primary + EPG source)
+		const categoryIds = [row.channel.categoryId, row.epgSourceChannel?.categoryId].filter(Boolean);
+		const categoriesMap = new Map<string, string>();
+
+		if (categoryIds.length > 0) {
+			const cats = await db
+				.select({ id: stalkerCategories.id, title: stalkerCategories.title })
 				.from(stalkerCategories)
-				.where(eq(stalkerCategories.id, row.channel.categoryId))
-				.limit(1);
-			channelCategoryTitle = cat?.title || null;
+				.where(inArray(stalkerCategories.id, categoryIds as string[]));
+			for (const cat of cats) {
+				categoriesMap.set(cat.id, cat.title);
+			}
 		}
 
 		return toLineupItem(
 			row.item,
 			row.accountName || 'Unknown Account',
 			row.channel,
-			channelCategoryTitle,
-			row.category
+			row.channel.categoryId ? categoriesMap.get(row.channel.categoryId) || null : null,
+			row.category,
+			row.epgSourceChannel,
+			row.epgSourceChannel?.categoryId
+				? categoriesMap.get(row.epgSourceChannel.categoryId) || null
+				: null,
+			row.epgSourceAccountName || null
 		);
 	}
 
@@ -299,6 +342,7 @@ class ChannelLineupService {
 				customName: update.customName,
 				customLogo: update.customLogo,
 				epgId: update.epgId,
+				epgSourceChannelId: update.epgSourceChannelId,
 				categoryId: update.categoryId,
 				updatedAt: now
 			})

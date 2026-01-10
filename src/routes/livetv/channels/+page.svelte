@@ -7,7 +7,9 @@
 		ChannelCategoryManagerModal,
 		ChannelBulkActionBar,
 		ChannelBrowserModal,
-		EpgStatusCard
+		EpgStatusCard,
+		EpgSourcePickerModal,
+		ChannelScheduleModal
 	} from '$lib/components/livetv';
 	import type {
 		ChannelLineupItemWithDetails,
@@ -63,8 +65,17 @@
 	let exportDropdownOpen = $state(false);
 	let copiedField = $state<'m3u' | 'epg' | null>(null);
 
-	// Edit modal reference for refreshing backups
-	let editModalRef: { refreshBackups: () => void } | undefined = $state(undefined);
+	// Edit modal reference for refreshing backups and setting EPG source
+	let editModalRef:
+		| { refreshBackups: () => void; setEpgSourceChannelId: (id: string | null) => void }
+		| undefined = $state(undefined);
+
+	// EPG source picker modal state
+	let epgSourcePickerOpen = $state(false);
+	let epgSourcePickerExcludeChannelId = $state<string | undefined>(undefined);
+
+	// Schedule modal state
+	let scheduleModalChannel = $state<ChannelLineupItemWithDetails | null>(null);
 
 	// Bulk action state
 	let bulkActionLoading = $state(false);
@@ -388,6 +399,11 @@
 		editModalError = null;
 	}
 
+	// Schedule modal handler
+	function handleShowSchedule(channel: ChannelLineupItemWithDetails) {
+		scheduleModalChannel = channel;
+	}
+
 	async function handleEditDelete() {
 		if (!editingChannel) return;
 		const item = editingChannel;
@@ -576,6 +592,22 @@
 		backupLineupItemId = undefined;
 		backupExcludeChannelId = undefined;
 		browserModalOpen = true;
+	}
+
+	// EPG source picker handlers
+	function openEpgSourcePicker(channelId: string) {
+		epgSourcePickerExcludeChannelId = channelId;
+		epgSourcePickerOpen = true;
+	}
+
+	function closeEpgSourcePicker() {
+		epgSourcePickerOpen = false;
+		epgSourcePickerExcludeChannelId = undefined;
+	}
+
+	function handleEpgSourceSelected(channelId: string, _channel: unknown) {
+		editModalRef?.setEpgSourceChannelId(channelId);
+		closeEpgSourcePicker();
 	}
 
 	// Export functions
@@ -773,6 +805,7 @@
 			onEdit={handleEdit}
 			onRemove={handleRemove}
 			onInlineEdit={handleInlineEdit}
+			onShowSchedule={handleShowSchedule}
 		/>
 	{/if}
 </div>
@@ -789,6 +822,7 @@
 	onSave={handleEditSave}
 	onDelete={handleEditDelete}
 	onOpenBackupBrowser={openBackupBrowser}
+	onOpenEpgSourcePicker={openEpgSourcePicker}
 />
 
 <!-- Category Manager Modal -->
@@ -821,4 +855,19 @@
 	lineupItemId={backupLineupItemId}
 	excludeChannelId={backupExcludeChannelId}
 	onBackupSelected={handleBackupSelected}
+/>
+
+<!-- EPG Source Picker Modal -->
+<EpgSourcePickerModal
+	open={epgSourcePickerOpen}
+	excludeChannelId={epgSourcePickerExcludeChannelId}
+	onClose={closeEpgSourcePicker}
+	onSelect={handleEpgSourceSelected}
+/>
+
+<!-- Channel Schedule Modal -->
+<ChannelScheduleModal
+	open={!!scheduleModalChannel}
+	channel={scheduleModalChannel}
+	onClose={() => (scheduleModalChannel = null)}
 />

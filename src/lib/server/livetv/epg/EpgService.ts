@@ -26,7 +26,7 @@ import type {
 
 const BATCH_SIZE = 1000;
 const DEFAULT_RETENTION_HOURS = 48;
-const DEFAULT_LOOKAHEAD_HOURS = 24;
+const DEFAULT_LOOKAHEAD_HOURS = 72;
 
 export class EpgService {
 	/**

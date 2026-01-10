@@ -1,129 +1,53 @@
 /**
- * API endpoint for triggering NZB extraction.
+ * API endpoint for NZB extraction.
  *
- * POST /api/streaming/usenet/[mountId]/extract
- * - Starts downloading and extracting compressed content
+ * NOTE: RAR extraction via streaming is no longer supported.
+ * Users should use SABnzbd or NZBGet for releases that require extraction.
  *
- * DELETE /api/streaming/usenet/[mountId]/extract
- * - Cancels an ongoing extraction
+ * This endpoint is kept for backwards compatibility but returns an error.
  */
 
-import { json, error } from '@sveltejs/kit';
+import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
-import { getNzbStreamService } from '$lib/server/streaming/nzb/NzbStreamService';
-import { getNzbMountManager } from '$lib/server/streaming/nzb/NzbMountManager';
-import { logger } from '$lib/logging';
+
+const NOT_SUPPORTED_MESSAGE =
+	'RAR extraction is no longer supported. Please use SABnzbd or NZBGet for releases that require extraction, or search for a different release without RAR files.';
 
 /**
- * Start extraction for a mount.
+ * Start extraction for a mount - NOT SUPPORTED.
  */
-export const POST: RequestHandler = async ({ params }) => {
-	const { mountId } = params;
-
-	if (!mountId) {
-		throw error(400, 'Mount ID required');
-	}
-
-	const mountManager = getNzbMountManager();
-	const streamService = getNzbStreamService();
-
-	// Check if mount exists
-	const mount = await mountManager.getMount(mountId);
-	if (!mount) {
-		throw error(404, 'Mount not found');
-	}
-
-	// Check if extraction is already in progress
-	if (streamService.isExtractionInProgress(mountId)) {
-		return json({
-			status: 'in_progress',
-			message: 'Extraction already in progress'
-		});
-	}
-
-	// Check if already extracted
-	if (mount.status === 'ready') {
-		return json({
-			status: 'ready',
-			message: 'Content is already ready for streaming'
-		});
-	}
-
-	logger.info('[API] Starting extraction', { mountId });
-
-	// Start extraction in background (don't await)
-	streamService.startExtraction(mountId).then((result) => {
-		if (result.success) {
-			logger.info('[API] Extraction completed', {
-				mountId,
-				extractedFile: result.extractedFilePath
-			});
-		} else {
-			logger.error('[API] Extraction failed', {
-				mountId,
-				error: result.error
-			});
-		}
-	});
-
-	return json({
-		status: 'started',
-		message: 'Extraction started'
-	});
+export const POST: RequestHandler = async () => {
+	return json(
+		{
+			error: NOT_SUPPORTED_MESSAGE,
+			code: 'EXTRACTION_NOT_SUPPORTED'
+		},
+		{ status: 410 } // 410 Gone - feature has been removed
+	);
 };
 
 /**
- * Cancel extraction for a mount.
+ * Cancel extraction for a mount - NOT SUPPORTED.
  */
-export const DELETE: RequestHandler = async ({ params }) => {
-	const { mountId } = params;
-
-	if (!mountId) {
-		throw error(400, 'Mount ID required');
-	}
-
-	const streamService = getNzbStreamService();
-
-	const cancelled = streamService.cancelExtraction(mountId);
-
-	if (cancelled) {
-		logger.info('[API] Extraction cancelled', { mountId });
-		return json({
-			status: 'cancelled',
-			message: 'Extraction cancelled'
-		});
-	}
-
-	return json({
-		status: 'not_found',
-		message: 'No extraction in progress for this mount'
-	});
+export const DELETE: RequestHandler = async () => {
+	return json(
+		{
+			error: NOT_SUPPORTED_MESSAGE,
+			code: 'EXTRACTION_NOT_SUPPORTED'
+		},
+		{ status: 410 }
+	);
 };
 
 /**
- * Get extraction status for a mount.
+ * Get extraction status for a mount - NOT SUPPORTED.
  */
-export const GET: RequestHandler = async ({ params }) => {
-	const { mountId } = params;
-
-	if (!mountId) {
-		throw error(400, 'Mount ID required');
-	}
-
-	const mountManager = getNzbMountManager();
-	const streamService = getNzbStreamService();
-
-	const mount = await mountManager.getMount(mountId);
-	if (!mount) {
-		throw error(404, 'Mount not found');
-	}
-
-	const isExtracting = streamService.isExtractionInProgress(mountId);
-
-	return json({
-		mountId,
-		status: mount.status,
-		isExtracting,
-		requiresExtraction: mount.status === 'requires_extraction'
-	});
+export const GET: RequestHandler = async () => {
+	return json(
+		{
+			error: NOT_SUPPORTED_MESSAGE,
+			code: 'EXTRACTION_NOT_SUPPORTED'
+		},
+		{ status: 410 }
+	);
 };

@@ -20,7 +20,7 @@ import { initializeDatabase } from '$lib/server/db';
 import { getBrowserSolver } from '$lib/server/indexers/http/browser';
 import { getServiceManager } from '$lib/server/services/service-manager.js';
 import { initPersistentStreamCache } from '$lib/server/streaming/cache';
-import { getNntpClientManager } from '$lib/server/streaming/nzb';
+import { getNntpManager } from '$lib/server/streaming/usenet';
 import { getExtractionCacheManager } from '$lib/server/streaming/nzb/extraction/ExtractionCacheManager';
 import { getMediaBrowserNotifier } from '$lib/server/notifications/mediabrowser';
 import { getEpgScheduler } from '$lib/server/livetv/epg';
@@ -58,7 +58,7 @@ let downloadMonitorInitialized = false;
 let monitoringInitialized = false;
 let externalIdServiceInitialized = false;
 let browserSolverInitialized = false;
-let nntpClientManagerInitialized = false;
+let nntpManagerInitialized = false;
 let dataRepairServiceInitialized = false;
 let mediaBrowserNotifierInitialized = false;
 let epgSchedulerInitialized = false;
@@ -170,19 +170,19 @@ async function initializeBrowserSolver() {
 	}
 }
 
-async function initializeNntpClientManager() {
-	if (nntpClientManagerInitialized) return;
+async function initializeNntpManager() {
+	if (nntpManagerInitialized) return;
 
 	try {
-		// Start the NNTP client manager (for direct NZB streaming)
-		const nntpClientManager = getNntpClientManager();
-		nntpClientManager.start();
+		// Start the NNTP manager (for direct usenet streaming)
+		const nntpManager = getNntpManager();
+		nntpManager.start();
 
-		nntpClientManagerInitialized = true;
-		logger.info('NNTP client manager started for NZB streaming');
+		nntpManagerInitialized = true;
+		logger.info('NNTP manager started for usenet streaming');
 	} catch (error) {
-		// Non-fatal - application continues without NZB streaming
-		logger.error('Failed to start NNTP client manager (NZB streaming disabled)', error);
+		// Non-fatal - application continues without usenet streaming
+		logger.error('Failed to start NNTP manager (usenet streaming disabled)', error);
 	}
 }
 
@@ -278,7 +278,7 @@ setImmediate(async () => {
 		serviceManager.register(getDownloadMonitor());
 		serviceManager.register(getMonitoringScheduler());
 		serviceManager.register(getExternalIdService());
-		serviceManager.register(getNntpClientManager());
+		serviceManager.register(getNntpManager());
 		serviceManager.register(getExtractionCacheManager());
 		serviceManager.register(getMediaBrowserNotifier());
 		serviceManager.register(getEpgScheduler());
@@ -301,7 +301,7 @@ setImmediate(async () => {
 		setTimeout(() => {
 			initializeMonitoring().catch((e) => logger.error('Monitoring init failed', e));
 			initializeExternalIdService().catch((e) => logger.error('External ID init failed', e));
-			initializeNntpClientManager().catch((e) => logger.error('NNTP client init failed', e));
+			initializeNntpManager().catch((e) => logger.error('NNTP manager init failed', e));
 			initializeExtractionCacheManager().catch((e) =>
 				logger.error('Extraction cache init failed', e)
 			);

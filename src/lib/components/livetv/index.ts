@@ -20,5 +20,7 @@ export { default as ChannelCategoryManagerModal } from './ChannelCategoryManager
 export { default as ChannelBulkActionBar } from './ChannelBulkActionBar.svelte';
 export { default as ChannelBrowserModal } from './ChannelBrowserModal.svelte';
 
-// EPG status
+// EPG
 export { default as EpgStatusCard } from './EpgStatusCard.svelte';
+export { default as EpgSourcePickerModal } from './EpgSourcePickerModal.svelte';
+export { default as ChannelScheduleModal } from './ChannelScheduleModal.svelte';

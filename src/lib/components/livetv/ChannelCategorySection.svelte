@@ -38,6 +38,7 @@
 			field: 'channelNumber' | 'customName',
 			value: number | string | null
 		) => Promise<boolean>;
+		onShowSchedule?: (channel: ChannelLineupItemWithDetails) => void;
 	}
 
 	let {
@@ -60,7 +61,8 @@
 		onDragEnd,
 		onEdit,
 		onRemove,
-		onInlineEdit
+		onInlineEdit,
+		onShowSchedule
 	}: Props = $props();
 
 	// Derived: Check if all channels in this category are selected
@@ -209,6 +211,7 @@
 							onEdit={() => onEdit(channel)}
 							onRemove={() => onRemove(channel)}
 							{onInlineEdit}
+							{onShowSchedule}
 						/>
 					{/each}
 				</tbody>

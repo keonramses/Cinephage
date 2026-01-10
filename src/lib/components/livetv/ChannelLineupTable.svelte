@@ -39,6 +39,7 @@
 			field: 'channelNumber' | 'customName',
 			value: number | string | null
 		) => Promise<boolean>;
+		onShowSchedule?: (channel: ChannelLineupItemWithDetails) => void;
 	}
 
 	let {
@@ -63,7 +64,8 @@
 		onDragEnd,
 		onEdit,
 		onRemove,
-		onInlineEdit
+		onInlineEdit,
+		onShowSchedule
 	}: Props = $props();
 
 	// Get uncategorized channels
@@ -95,6 +97,7 @@
 			{onEdit}
 			{onRemove}
 			{onInlineEdit}
+			{onShowSchedule}
 		/>
 	{/each}
 
@@ -121,6 +124,7 @@
 			{onEdit}
 			{onRemove}
 			{onInlineEdit}
+			{onShowSchedule}
 		/>
 	{/if}
 </div>

@@ -47,8 +47,9 @@ import { logger } from '$lib/logging';
  * Version 30: Add device parameters to stalker_accounts for proper Stalker protocol support
  * Version 31: Add portal scanner tables (stalker_portals, portal_scan_results, portal_scan_history)
  * Version 32: Add EPG tracking columns to stalker_accounts for visibility and sync status
+ * Version 33: Add EPG source override column to channel_lineup_items
  */
-export const CURRENT_SCHEMA_VERSION = 32;
+export const CURRENT_SCHEMA_VERSION = 33;
 
 /**
  * All table definitions with CREATE TABLE IF NOT EXISTS
@@ -904,6 +905,7 @@ const TABLE_DEFINITIONS: string[] = [
 		"custom_name" text,
 		"custom_logo" text,
 		"epg_id" text,
+		"epg_source_channel_id" text REFERENCES "stalker_channels"("id") ON DELETE SET NULL,
 		"category_id" text REFERENCES "channel_categories"("id") ON DELETE SET NULL,
 		"added_at" text,
 		"updated_at" text
@@ -2546,6 +2548,18 @@ const SCHEMA_UPDATES: Record<number, (sqlite: Database.Database) => void> = {
 		}
 
 		logger.info('[SchemaSync] Added EPG tracking columns to stalker_accounts');
+	},
+
+	// Version 33: Add EPG source override column to channel_lineup_items
+	33: (sqlite) => {
+		if (!columnExists(sqlite, 'channel_lineup_items', 'epg_source_channel_id')) {
+			sqlite
+				.prepare(
+					`ALTER TABLE "channel_lineup_items" ADD COLUMN "epg_source_channel_id" text REFERENCES "stalker_channels"("id") ON DELETE SET NULL`
+				)
+				.run();
+			logger.info('[SchemaSync] Added epg_source_channel_id column to channel_lineup_items');
+		}
 	}
 };
 

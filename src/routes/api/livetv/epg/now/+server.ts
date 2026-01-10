@@ -2,6 +2,9 @@
  * EPG Now/Next API
  *
  * GET /api/livetv/epg/now - Get current and next program for all lineup channels
+ *
+ * Supports EPG source overrides - when a channel has epgSourceChannelId set,
+ * EPG data is fetched from that channel instead of the primary channel.
  */
 
 import { json } from '@sveltejs/kit';
@@ -19,24 +22,37 @@ export const GET: RequestHandler = async () => {
 	try {
 		const epgService = getEpgService();
 
-		// Get lineup channel IDs
-		const lineupChannelIds = await channelLineupService.getLineupChannelIds();
-		const channelIds = Array.from(lineupChannelIds);
+		// Get full lineup to access EPG source overrides
+		const lineup = await channelLineupService.getLineup();
 
-		if (channelIds.length === 0) {
+		if (lineup.length === 0) {
 			return json({ channels: {} });
 		}
 
-		// Get now/next for all lineup channels
-		const nowNextMap = epgService.getNowAndNext(channelIds);
+		// Build mapping: original channel ID -> EPG source channel ID
+		// If epgSourceChannelId is set, use that; otherwise use the primary channelId
+		const epgSourceMap = new Map<string, string>();
+		for (const item of lineup) {
+			const epgChannelId = item.epgSourceChannelId ?? item.channelId;
+			epgSourceMap.set(item.channelId, epgChannelId);
+		}
 
-		// Convert map to object for JSON
+		// Get unique EPG source channel IDs
+		const epgSourceIds = [...new Set(epgSourceMap.values())];
+
+		// Get now/next for all EPG source channels
+		const nowNextMap = epgService.getNowAndNext(epgSourceIds);
+
+		// Map results back to original channel IDs
 		const channels: Record<string, NowNextEntry> = {};
 
-		for (const [channelId, data] of nowNextMap) {
-			channels[channelId] = {
-				now: data.now,
-				next: data.next
+		for (const item of lineup) {
+			const epgChannelId = epgSourceMap.get(item.channelId)!;
+			const epgData = nowNextMap.get(epgChannelId);
+
+			channels[item.channelId] = {
+				now: epgData?.now ?? null,
+				next: epgData?.next ?? null
 			};
 		}
 
