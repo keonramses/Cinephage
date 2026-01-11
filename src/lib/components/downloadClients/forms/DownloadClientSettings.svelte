@@ -42,7 +42,7 @@
 		urlBase = $bindable(),
 		urlBaseLabel = 'URL Base',
 		urlBaseDescription = 'Path prefix added after host and port.',
-		urlBasePlaceholder = '/sabnzbd'
+		urlBasePlaceholder = 'sabnzbd'
 	}: Props = $props();
 
 	const urlBaseToggleId = 'url-base-toggle';
