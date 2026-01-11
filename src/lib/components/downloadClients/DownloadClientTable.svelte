@@ -75,7 +75,9 @@
 								{#if client.type === 'nntp-server'}
 									{client.useSsl ? 'nntps' : 'nntp'}://{client.host}:{client.port}
 								{:else}
-									{client.useSsl ? 'https' : 'http'}://{client.host}:{client.port}
+									{client.useSsl ? 'https' : 'http'}://{client.host}:{client.port}{client.urlBase
+										? `/${client.urlBase}`
+										: ''}
 								{/if}
 							</div>
 						</td>

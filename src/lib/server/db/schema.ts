@@ -401,6 +401,7 @@ export const downloadClients = sqliteTable('download_clients', {
 	useSsl: integer('use_ssl', { mode: 'boolean' }).default(false),
 	username: text('username'),
 	password: text('password'),
+	urlBase: text('url_base'),
 
 	// Category settings (separate for movie/tv)
 	movieCategory: text('movie_category').default('movies'),

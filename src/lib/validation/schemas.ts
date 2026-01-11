@@ -360,6 +360,7 @@ export const downloadClientCreateSchema = z.object({
 	host: z.string().min(1, 'Host is required'),
 	port: z.number().int().min(1, 'Port must be at least 1').max(65535, 'Port must be at most 65535'),
 	useSsl: z.boolean().default(false),
+	urlBase: z.string().max(200).optional().nullable(),
 	username: z.string().optional().nullable(),
 	password: z.string().optional().nullable(),
 
@@ -402,6 +403,7 @@ export const downloadClientTestSchema = z.object({
 	host: z.string().min(1, 'Host is required'),
 	port: z.number().int().min(1).max(65535),
 	useSsl: z.boolean().default(false),
+	urlBase: z.string().max(200).optional().nullable(),
 	username: z.string().optional().nullable(),
 	password: z.string().optional().nullable()
 });

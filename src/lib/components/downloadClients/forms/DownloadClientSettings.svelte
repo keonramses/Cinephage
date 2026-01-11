@@ -4,22 +4,28 @@
 	import type { DownloadClientDefinition } from '$lib/types/downloadClient';
 
 	interface Props {
-		definition: DownloadClientDefinition | null | undefined;
-		movieCategory: string;
-		tvCategory: string;
-		recentPriority: 'normal' | 'high' | 'force';
-		olderPriority: 'normal' | 'high' | 'force';
-		initialState: 'start' | 'pause' | 'force';
-		downloadPathLocal: string;
-		downloadPathRemote: string;
-		tempPathLocal: string;
-		tempPathRemote: string;
-		isSabnzbd: boolean;
-		onBrowse: (field: 'downloadPathLocal' | 'tempPathLocal') => void;
+		definition?: DownloadClientDefinition | null;
+		movieCategory?: string;
+		tvCategory?: string;
+		recentPriority?: 'normal' | 'high' | 'force';
+		olderPriority?: 'normal' | 'high' | 'force';
+		initialState?: 'start' | 'pause' | 'force';
+		downloadPathLocal?: string;
+		downloadPathRemote?: string;
+		tempPathLocal?: string;
+		tempPathRemote?: string;
+		isSabnzbd?: boolean;
+		onBrowse?: (field: 'downloadPathLocal' | 'tempPathLocal') => void;
+		mode?: 'connection' | 'settings';
+		urlBaseEnabled?: boolean;
+		urlBase?: string;
+		urlBaseLabel?: string;
+		urlBaseDescription?: string;
+		urlBasePlaceholder?: string;
 	}
 
 	let {
-		definition,
+		definition = undefined,
 		movieCategory = $bindable(),
 		tvCategory = $bindable(),
 		recentPriority = $bindable(),
@@ -29,11 +35,58 @@
 		downloadPathRemote = $bindable(),
 		tempPathLocal = $bindable(),
 		tempPathRemote = $bindable(),
-		isSabnzbd,
-		onBrowse
+		isSabnzbd = false,
+		onBrowse = () => {},
+		mode = 'settings',
+		urlBaseEnabled = $bindable(),
+		urlBase = $bindable(),
+		urlBaseLabel = 'URL Base',
+		urlBaseDescription = 'Path prefix added after host and port.',
+		urlBasePlaceholder = '/sabnzbd'
 	}: Props = $props();
+
+	const urlBaseToggleId = 'url-base-toggle';
+	const urlBaseInputId = 'url-base-input';
+
+	function handleUrlBaseToggle() {
+		if (!urlBaseEnabled) {
+			urlBase = '';
+		}
+	}
 </script>
 
+{#if mode === 'connection'}
+	<div class="form-control">
+		<label class="label cursor-pointer gap-2 py-1" for={urlBaseToggleId}>
+			<input
+				id={urlBaseToggleId}
+				type="checkbox"
+				class="checkbox checkbox-sm"
+				bind:checked={urlBaseEnabled}
+				onchange={handleUrlBaseToggle}
+			/>
+			<span class="label-text text-sm">Use URL Base</span>
+		</label>
+
+		{#if urlBaseEnabled}
+			<div class="mt-1">
+				<label class="label py-1" for={urlBaseInputId}>
+					<span class="label-text">{urlBaseLabel}</span>
+				</label>
+				<input
+					id={urlBaseInputId}
+					type="text"
+					class="input-bordered input input-sm"
+					bind:value={urlBase}
+					placeholder={urlBasePlaceholder}
+				/>
+				<div class="label py-1">
+					<span class="label-text-alt text-xs text-base-content/60">{urlBaseDescription}</span>
+				</div>
+			</div>
+		{/if}
+	</div>
+{:else}
 <!-- Categories (if supported) -->
 {#if definition?.supportsCategories}
 	<SectionHeader title="Categories" />
@@ -210,4 +263,5 @@
 			</div>
 		</div>
 	</div>
+{/if}
 {/if}

@@ -42,6 +42,7 @@ export interface DownloadClient {
 	host: string;
 	port: number;
 	useSsl: boolean;
+	urlBase?: string | null;
 	username?: string | null;
 	// Note: password not returned to frontend for security
 	hasPassword: boolean;
@@ -81,6 +82,7 @@ export interface DownloadClientFormData {
 	host: string;
 	port: number;
 	useSsl: boolean;
+	urlBase: string | null;
 	username: string | null;
 	password: string | null;
 	movieCategory: string;
@@ -208,6 +210,7 @@ export interface UnifiedClientItem {
 	host: string;
 	port: number;
 	useSsl: boolean | null;
+	urlBase?: string | null;
 	enabled: boolean | null;
 	username?: string | null;
 	hasPassword?: boolean;

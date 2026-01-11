@@ -13,6 +13,8 @@ export interface DownloadClientConfig {
 	host: string;
 	port: number;
 	useSsl: boolean;
+	/** Optional URL base path (e.g., "/sabnzbd") */
+	urlBase?: string | null;
 	username?: string | null;
 	password?: string | null;
 	/** Client implementation type (e.g., 'qbittorrent', 'sabnzbd') */

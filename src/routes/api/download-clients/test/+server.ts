@@ -35,6 +35,7 @@ export const POST: RequestHandler = async ({ request }) => {
 			host: validated.host,
 			port: validated.port,
 			useSsl: validated.useSsl,
+			urlBase: validated.urlBase,
 			username: validated.username,
 			password: validated.password,
 			implementation: validated.implementation,

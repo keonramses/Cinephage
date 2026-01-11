@@ -32,7 +32,10 @@ export class NZBGetClient implements IDownloadClient {
 			host = host.split('@').pop() || host;
 		}
 
-		return `${protocol}://${host}:${this.config.port}/jsonrpc`;
+		const base = `${protocol}://${host}:${this.config.port}`;
+		const urlBase = this.config.urlBase?.trim().replace(/^\/+|\/+$/g, '');
+		const baseWithPath = urlBase ? `${base}/${urlBase}` : base;
+		return `${baseWithPath}/jsonrpc`;
 	}
 
 	// eslint-disable-next-line @typescript-eslint/no-explicit-any

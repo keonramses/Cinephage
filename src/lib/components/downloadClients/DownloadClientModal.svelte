@@ -75,6 +75,8 @@
 	let host = $state('localhost');
 	let port = $state(8080);
 	let useSsl = $state(false);
+	let urlBase = $state('');
+	let urlBaseEnabled = $state(false);
 	let username = $state('');
 	let password = $state('');
 
@@ -118,6 +120,28 @@
 	);
 	// Check if this is an NNTP server
 	const isNntpServer = $derived(implementation === 'nntp');
+	const urlBasePlaceholder = $derived(
+		(() => {
+			switch (selectedDefinition?.id) {
+				case 'sabnzbd':
+					return 'sabnzbd';
+				case 'nzbget':
+					return 'nzbget';
+				case 'qbittorrent':
+					return 'qbittorrent';
+				case 'transmission':
+					return 'transmission';
+				case 'deluge':
+					return 'deluge';
+				case 'rtorrent':
+					return 'rutorrent';
+				case 'aria2':
+					return 'jsonrpc';
+				default:
+					return '';
+			}
+		})()
+	);
 
 	// Reset form when modal opens or client changes
 	$effect(() => {
@@ -130,6 +154,9 @@
 			host = client?.host ?? 'localhost';
 			port = client?.port ?? (isNntpEdit ? 563 : 8080);
 			useSsl = client?.useSsl ?? (isNntpEdit ? true : false);
+			const clientUrlBase = (client as DownloadClient | undefined)?.urlBase ?? '';
+			urlBase = clientUrlBase;
+			urlBaseEnabled = !!clientUrlBase;
 			username = client?.username ?? '';
 			password = '';
 
@@ -180,6 +207,7 @@
 	}
 
 	function getFormData(): DownloadClientFormData | NntpServerFormData {
+		const normalizedUrlBase = urlBase.trim().replace(/^\/+|\/+$/g, '');
 		if (isNntpServer) {
 			const data: NntpServerFormData = {
 				name,
@@ -206,6 +234,7 @@
 			host,
 			port,
 			useSsl,
+			urlBase: urlBaseEnabled ? (normalizedUrlBase || null) : null,
 			username: username || null,
 			password: password || null,
 			movieCategory,
@@ -393,6 +422,15 @@
 									/>
 								</div>
 							</div>
+
+							{#if !isNntpServer}
+								<DownloadClientSettings
+									mode="connection"
+									bind:urlBaseEnabled
+									bind:urlBase
+									urlBasePlaceholder={urlBasePlaceholder}
+								/>
+							{/if}
 
 							{#if usesApiKey}
 								<!-- API Key auth for SABnzbd -->

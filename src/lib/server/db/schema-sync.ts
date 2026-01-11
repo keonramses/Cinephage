@@ -48,8 +48,9 @@ import { logger } from '$lib/logging';
  * Version 31: Add portal scanner tables (stalker_portals, portal_scan_results, portal_scan_history)
  * Version 32: Add EPG tracking columns to stalker_accounts for visibility and sync status
  * Version 33: Add EPG source override column to channel_lineup_items
+ * Version 34: Add url_base column to download_clients
  */
-export const CURRENT_SCHEMA_VERSION = 33;
+export const CURRENT_SCHEMA_VERSION = 34;
 
 /**
  * All table definitions with CREATE TABLE IF NOT EXISTS
@@ -145,6 +146,7 @@ const TABLE_DEFINITIONS: string[] = [
 		"use_ssl" integer DEFAULT false,
 		"username" text,
 		"password" text,
+		"url_base" text,
 		"movie_category" text DEFAULT 'movies',
 		"tv_category" text DEFAULT 'tv',
 		"recent_priority" text DEFAULT 'normal',
@@ -2560,6 +2562,14 @@ const SCHEMA_UPDATES: Record<number, (sqlite: Database.Database) => void> = {
 				)
 				.run();
 			logger.info('[SchemaSync] Added epg_source_channel_id column to channel_lineup_items');
+		}
+	},
+
+	// Version 34: Add url_base column to download_clients
+	34: (sqlite) => {
+		if (!columnExists(sqlite, 'download_clients', 'url_base')) {
+			sqlite.prepare(`ALTER TABLE "download_clients" ADD COLUMN "url_base" text`).run();
+			logger.info('[SchemaSync] Added url_base column to download_clients');
 		}
 	}
 };

@@ -47,6 +47,7 @@ export interface DownloadClientInput {
 	host: string;
 	port: number;
 	useSsl?: boolean;
+	urlBase?: string | null;
 	username?: string | null;
 	password?: string | null;
 	movieCategory?: string;
@@ -123,6 +124,7 @@ export class DownloadClientManager {
 			host: input.host,
 			port: input.port,
 			useSsl: input.useSsl ?? false,
+			urlBase: input.urlBase ?? null,
 			username: input.username,
 			password: input.password,
 			movieCategory: input.movieCategory ?? 'movies',
@@ -170,6 +172,7 @@ export class DownloadClientManager {
 		if (updates.host !== undefined) updateData.host = updates.host;
 		if (updates.port !== undefined) updateData.port = updates.port;
 		if (updates.useSsl !== undefined) updateData.useSsl = updates.useSsl;
+		if (updates.urlBase !== undefined) updateData.urlBase = updates.urlBase;
 		if (updates.username !== undefined) updateData.username = updates.username;
 		// Only update password if explicitly provided with a non-empty value
 		// (null or empty string means "keep existing password")
@@ -252,6 +255,7 @@ export class DownloadClientManager {
 			host: clientConfig.host,
 			port: clientConfig.port,
 			useSsl: clientConfig.useSsl,
+			urlBase: clientConfig.urlBase ?? null,
 			username: clientConfig.username,
 			password: clientConfig.password,
 			implementation: clientConfig.implementation,
@@ -276,6 +280,7 @@ export class DownloadClientManager {
 			host: config.host,
 			port: config.port,
 			useSsl: config.useSsl,
+			urlBase: config.urlBase ?? null,
 			username: config.username,
 			password: config.password,
 			implementation: config.implementation,
@@ -383,6 +388,7 @@ export class DownloadClientManager {
 			host: row.host,
 			port: row.port,
 			useSsl: !!row.useSsl,
+			urlBase: row.urlBase ?? null,
 			username: row.username,
 			hasPassword: !!row.password,
 			movieCategory: row.movieCategory ?? 'movies',

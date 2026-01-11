@@ -125,7 +125,9 @@ export class QBittorrentClient implements IDownloadClient {
 	 */
 	private get baseUrl(): string {
 		const protocol = this.config.useSsl ? 'https' : 'http';
-		return `${protocol}://${this.config.host}:${this.config.port}`;
+		const base = `${protocol}://${this.config.host}:${this.config.port}`;
+		const urlBase = this.config.urlBase?.trim().replace(/^\/+|\/+$/g, '');
+		return urlBase ? `${base}/${urlBase}` : base;
 	}
 
 	/**

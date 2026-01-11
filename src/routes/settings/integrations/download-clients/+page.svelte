@@ -108,6 +108,7 @@
 						host: dcFormData.host,
 						port: dcFormData.port,
 						useSsl: dcFormData.useSsl,
+						urlBase: dcFormData.urlBase,
 						username: dcFormData.username || null,
 						password: dcFormData.password || null
 					})
