@@ -11,6 +11,7 @@ import type { IndexerCapabilities } from './definition';
 import type { SearchCriteria } from './search';
 import type { ReleaseResult } from './release';
 import type { IndexerConfig } from './config';
+import type { ProtocolSettings } from '$lib/server/db/schema';
 
 // =============================================================================
 // INDEXER INTERFACE
@@ -34,6 +35,8 @@ export interface IIndexer {
 	readonly capabilities: IndexerCapabilities;
 	/** Base URL for this indexer instance */
 	readonly baseUrl: string;
+	/** Protocol-specific settings (torrent/usenet/streaming settings) */
+	readonly protocolSettings?: ProtocolSettings;
 
 	// Search capability toggles
 	/** Whether automatic search is enabled */

@@ -76,7 +76,7 @@ export class UnifiedIndexer implements IIndexer {
 
 	private readonly record: IndexerRecord;
 	private readonly settings: Record<string, string | boolean | number>;
-	private readonly protocolSettings?: ProtocolSettings;
+	private readonly _protocolSettings?: ProtocolSettings;
 	private readonly definition: YamlDefinition;
 	private readonly templateEngine: TemplateEngine;
 	private readonly filterEngine: FilterEngine;
@@ -94,12 +94,17 @@ export class UnifiedIndexer implements IIndexer {
 	private cookies: Record<string, string> = {};
 	private isLoggedIn = false;
 
+	/** Public getter for protocol-specific settings */
+	get protocolSettings(): ProtocolSettings | undefined {
+		return this._protocolSettings;
+	}
+
 	constructor(config: UnifiedIndexerConfig) {
 		const { record, settings, protocolSettings, definition, rateLimit, liveCapabilities } = config;
 
 		this.record = record;
 		this.settings = settings;
-		this.protocolSettings = protocolSettings;
+		this._protocolSettings = protocolSettings;
 		this.definition = definition;
 		this.id = record.id;
 		this.name = record.name;
@@ -592,7 +597,7 @@ export class UnifiedIndexer implements IIndexer {
 
 		// Handle torrent magnet preference
 		if (this.protocol === 'torrent') {
-			const torrentSettings = this.protocolSettings as { preferMagnetUrl?: boolean } | undefined;
+			const torrentSettings = this._protocolSettings as { preferMagnetUrl?: boolean } | undefined;
 			if (torrentSettings?.preferMagnetUrl && release.magnetUrl) {
 				return release.magnetUrl;
 			}

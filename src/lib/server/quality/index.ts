@@ -19,7 +19,8 @@ export {
 	ReleaseEnricher,
 	releaseEnricher,
 	type EnrichmentOptions,
-	type EnrichmentResult
+	type EnrichmentResult,
+	type IndexerConfigForEnrichment
 } from './ReleaseEnricher.js';
 
 // Re-export scoring engine types for convenience

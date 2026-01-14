@@ -32,7 +32,7 @@ import { ReleaseRanker } from './ReleaseRanker';
 import { ReleaseCache } from './ReleaseCache';
 import { parseRelease } from '../parser';
 import { CloudflareProtectedError } from '../http/CloudflareDetection';
-import { releaseEnricher, type EnrichmentOptions } from '../../quality';
+import { releaseEnricher, type EnrichmentOptions, type IndexerConfigForEnrichment } from '../../quality';
 import { logger } from '$lib/logging';
 import { tmdb } from '$lib/server/tmdb';
 
@@ -336,6 +336,17 @@ export class SearchOrchestrator {
 			seasonEpisodeCount = await this.getSeasonEpisodeCount(enrichedCriteria);
 		}
 
+		// Build indexer config map for protocol-specific rejection (seeder minimums, dead torrents, etc.)
+		const indexerConfigs = new Map<string, IndexerConfigForEnrichment>();
+		for (const indexer of eligibleIndexers) {
+			indexerConfigs.set(indexer.id, {
+				id: indexer.id,
+				name: indexer.name,
+				protocol: indexer.protocol,
+				protocolSettings: indexer.protocolSettings
+			});
+		}
+
 		const enrichmentOpts: EnrichmentOptions = {
 			scoringProfileId: opts.enrichment?.scoringProfileId,
 			matchToTmdb: opts.enrichment?.matchToTmdb ?? false,
@@ -344,7 +355,8 @@ export class SearchOrchestrator {
 			minScore: opts.enrichment?.minScore,
 			useEnhancedScoring: opts.enrichment?.useEnhancedScoring,
 			mediaType,
-			seasonEpisodeCount
+			seasonEpisodeCount,
+			indexerConfigs
 		};
 
 		const enrichResult = await releaseEnricher.enrich(filtered, enrichmentOpts);

@@ -8,7 +8,7 @@
  * 4. Filter rejected releases
  */
 
-import type { ReleaseResult, EnhancedReleaseResult } from '../indexers/types';
+import type { ReleaseResult, EnhancedReleaseResult, IndexerProtocol } from '../indexers/types';
 import { parseRelease } from '../indexers/parser/index.js';
 import { qualityFilter, QualityFilter, type EnhancedQualityResult } from './QualityFilter.js';
 import { tmdbMatcher, TmdbMatcher, type TmdbHint } from './TmdbMatcher.js';
@@ -16,6 +16,18 @@ import type { QualityPreset, ScoreComponents } from './types.js';
 import type { ScoringProfile, SizeValidationContext, PackPreference } from '../scoring/index.js';
 import { calculatePackBonus } from '../scoring/types.js';
 import { logger } from '$lib/logging';
+import { getProtocolHandler, type ProtocolContext } from '../indexers/protocols';
+import type { ProtocolSettings } from '$lib/server/db/schema';
+
+/**
+ * Indexer configuration for protocol-specific rejection
+ */
+export interface IndexerConfigForEnrichment {
+	id: string;
+	name: string;
+	protocol: IndexerProtocol;
+	protocolSettings?: ProtocolSettings;
+}
 
 /**
  * Options for enrichment
@@ -44,6 +56,9 @@ export interface EnrichmentOptions {
 
 	/** Episode count for the target season (used for season pack size validation) */
 	seasonEpisodeCount?: number;
+
+	/** Indexer configs for protocol-specific rejection (seeder minimums, dead torrents, etc.) */
+	indexerConfigs?: Map<string, IndexerConfigForEnrichment>;
 }
 
 /**
@@ -198,6 +213,32 @@ export class ReleaseEnricher {
 		const allowedProtocols = profile?.allowedProtocols ?? ['torrent', 'usenet'];
 		const protocolAllowed = allowedProtocols.includes(release.protocol);
 
+		// Check protocol-specific rejection (seeder minimums, dead torrents, etc.)
+		let protocolRejectionReason: string | undefined;
+		if (options.indexerConfigs) {
+			const indexerConfig = options.indexerConfigs.get(release.indexerId);
+			if (indexerConfig?.protocolSettings) {
+				const handler = getProtocolHandler(release.protocol);
+				// Cast to ProtocolContext settings type (db schema uses null, protocol types use undefined)
+				const context: ProtocolContext = {
+					indexerId: indexerConfig.id,
+					indexerName: indexerConfig.name,
+					baseUrl: '',
+					settings: indexerConfig.protocolSettings as ProtocolContext['settings']
+				};
+				// Create a minimal enhanced result for the protocol handler check
+				const tempEnhanced: EnhancedReleaseResult = {
+					...release,
+					parsed,
+					quality,
+					totalScore,
+					scoreComponents: components,
+					rejected: false
+				};
+				protocolRejectionReason = handler.shouldReject(tempEnhanced, context);
+			}
+		}
+
 		// Build enhanced result
 		const enhanced: EnhancedReleaseResult = {
 			...release,
@@ -205,7 +246,7 @@ export class ReleaseEnricher {
 			quality,
 			totalScore,
 			scoreComponents: components,
-			rejected: !quality.accepted || !protocolAllowed,
+			rejected: !quality.accepted || !protocolAllowed || !!protocolRejectionReason,
 			rejectionReason: !quality.accepted
 				? quality.scoringResult?.sizeRejectionReason ||
 					(quality.scoringResult?.isBanned
@@ -213,7 +254,7 @@ export class ReleaseEnricher {
 						: 'Quality requirements not met')
 				: !protocolAllowed
 					? `Protocol '${release.protocol}' not allowed for profile '${profile?.name || 'default'}' (allowed: ${allowedProtocols.join(', ')})`
-					: undefined
+					: protocolRejectionReason
 		};
 
 		// Add scoring result and matched formats if available
