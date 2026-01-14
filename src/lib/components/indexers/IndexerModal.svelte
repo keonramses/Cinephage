@@ -50,6 +50,7 @@
 	let seedTime = $state<number | ''>('');
 	let packSeedTime = $state<number | ''>('');
 	let preferMagnetUrl = $state(false);
+	let rejectDeadTorrents = $state(true);
 
 	// Test state
 	let testing = $state(false);
@@ -137,6 +138,7 @@
 			seedTime = indexer?.seedTime ?? '';
 			packSeedTime = indexer?.packSeedTime ?? '';
 			preferMagnetUrl = indexer?.preferMagnetUrl ?? false;
+			rejectDeadTorrents = indexer?.rejectDeadTorrents ?? true;
 
 			urlTouched = false;
 			testResult = null;
@@ -177,7 +179,8 @@
 			seedRatio: seedRatio || null,
 			seedTime: seedTime === '' ? null : seedTime,
 			packSeedTime: packSeedTime === '' ? null : packSeedTime,
-			preferMagnetUrl
+			preferMagnetUrl,
+			rejectDeadTorrents
 		};
 	}
 
@@ -333,6 +336,7 @@
 						{seedTime}
 						{packSeedTime}
 						{preferMagnetUrl}
+						{rejectDeadTorrents}
 						{isTorrent}
 						{isStreaming}
 						hasAuthSettings={hasAuthSettings ?? false}
@@ -350,6 +354,7 @@
 						onSeedTimeChange={(v) => (seedTime = v)}
 						onPackSeedTimeChange={(v) => (packSeedTime = v)}
 						onPreferMagnetUrlChange={(v) => (preferMagnetUrl = v)}
+						onRejectDeadTorrentsChange={(v) => (rejectDeadTorrents = v)}
 					/>
 				{/if}
 

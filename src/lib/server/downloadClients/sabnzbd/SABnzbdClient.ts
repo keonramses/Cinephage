@@ -169,8 +169,9 @@ export class SABnzbdClient implements IDownloadClient {
 		// Must be longer than base (contains subfolder)
 		if (normalizedStorage.length <= normalizedBase.length) return false;
 
-		// Must start with base path
-		if (!normalizedStorage.startsWith(normalizedBase)) return false;
+		// Must start with base path + path separator
+		// This prevents sibling paths like /downloads_backup matching /downloads
+		if (!normalizedStorage.startsWith(normalizedBase + '/')) return false;
 
 		return true;
 	}
@@ -882,12 +883,12 @@ export class SABnzbdClient implements IDownloadClient {
 			name: item.name,
 			hash: item.nzo_id,
 			progress: this.estimateHistoryProgress(item.status, isCompleted),
-			// If SABnzbd says 'Completed' but storage path is invalid, keep as 'downloading'
-			// to prevent premature import attempts
+			// If SABnzbd says 'Completed' but storage path is invalid, mark as 'postprocessing'
+			// This indicates download is done but files aren't ready yet (extraction, moving, etc.)
 			status: isCompleted
 				? 'completed'
 				: item.status === 'Completed'
-					? 'downloading'
+					? 'postprocessing'
 					: this.mapStatus(item.status, 0),
 			size: item.bytes,
 			downloadSpeed: 0,

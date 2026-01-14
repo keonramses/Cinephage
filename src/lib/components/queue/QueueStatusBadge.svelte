@@ -32,6 +32,7 @@
 		stalled: { label: 'Stalled', variant: 'badge-warning', icon: AlertTriangle },
 		paused: { label: 'Paused', variant: 'badge-warning', icon: Pause },
 		completed: { label: 'Completed', variant: 'badge-success', icon: CheckCircle2 },
+		postprocessing: { label: 'Post-processing', variant: 'badge-info', icon: Loader2 },
 		importing: { label: 'Importing', variant: 'badge-info', icon: Loader2 },
 		imported: { label: 'Imported', variant: 'badge-success', icon: CheckCircle2 },
 		failed: { label: 'Failed', variant: 'badge-error', icon: AlertCircle },

@@ -32,7 +32,11 @@ import { ReleaseRanker } from './ReleaseRanker';
 import { ReleaseCache } from './ReleaseCache';
 import { parseRelease } from '../parser';
 import { CloudflareProtectedError } from '../http/CloudflareDetection';
-import { releaseEnricher, type EnrichmentOptions, type IndexerConfigForEnrichment } from '../../quality';
+import {
+	releaseEnricher,
+	type EnrichmentOptions,
+	type IndexerConfigForEnrichment
+} from '../../quality';
 import { logger } from '$lib/logging';
 import { tmdb } from '$lib/server/tmdb';
 

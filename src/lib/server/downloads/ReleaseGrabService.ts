@@ -15,7 +15,7 @@ import { getDownloadClientManager } from '$lib/server/downloadClients/DownloadCl
 import { downloadMonitor } from '$lib/server/downloadClients/monitoring/index.js';
 import { ReleaseParser } from '$lib/server/indexers/parser/ReleaseParser.js';
 import { getDownloadResolutionService } from './DownloadResolutionService.js';
-import { getNzbValidationService } from './nzb/index.js';
+import { getNzbValidationService, checkNzbAvailability } from './nzb/index.js';
 import { strmService, StrmService, getStreamingBaseUrl } from '$lib/server/streaming/index.js';
 import { getNzbMountManager } from '$lib/server/streaming/nzb/index.js';
 import { isMediaFile } from '$lib/server/streaming/usenet';
@@ -394,6 +394,33 @@ class ReleaseGrabService {
 							fileCount: validation.fileCount,
 							totalSize: validation.totalSize
 						});
+
+						// Check article availability on NNTP servers before sending to client
+						const availability = await checkNzbAvailability(nzbContent);
+						if (availability.skipped) {
+							// NNTP not available - log warning but continue
+							logger.warn('[ReleaseGrab] NZB availability check skipped - NNTP unavailable', {
+								title: release.title,
+								reason: availability.reason
+							});
+						} else if (!availability.available) {
+							logger.warn('[ReleaseGrab] NZB availability check failed', {
+								title: release.title,
+								completionPercentage: availability.completionPercentage,
+								checkedSegments: availability.checkedSegments,
+								missingSegments: availability.missingSegments
+							});
+							return {
+								success: false,
+								error: `Release unavailable on usenet: ${availability.completionPercentage}% of articles found. Release may be incomplete or DMCA'd.`
+							};
+						} else {
+							logger.debug('[ReleaseGrab] NZB availability check passed', {
+								title: release.title,
+								completionPercentage: availability.completionPercentage,
+								checkedSegments: availability.checkedSegments
+							});
+						}
 					} else {
 						logger.error('[ReleaseGrab] Failed to fetch NZB', {
 							title: release.title,

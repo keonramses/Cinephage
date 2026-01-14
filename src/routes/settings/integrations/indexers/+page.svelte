@@ -222,7 +222,8 @@
 					seedRatio: formData.seedRatio,
 					seedTime: formData.seedTime,
 					packSeedTime: formData.packSeedTime,
-					preferMagnetUrl: formData.preferMagnetUrl
+					preferMagnetUrl: formData.preferMagnetUrl,
+					rejectDeadTorrents: formData.rejectDeadTorrents
 				})
 			);
 

@@ -64,7 +64,8 @@ export const PUT: RequestHandler = async ({ params, request }) => {
 			seedRatio: validated.seedRatio,
 			seedTime: validated.seedTime,
 			packSeedTime: validated.packSeedTime,
-			preferMagnetUrl: validated.preferMagnetUrl
+			preferMagnetUrl: validated.preferMagnetUrl,
+			rejectDeadTorrents: validated.rejectDeadTorrents
 		});
 
 		// If streaming indexer's baseUrl changed, trigger bulk .strm file update

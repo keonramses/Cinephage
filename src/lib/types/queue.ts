@@ -11,6 +11,7 @@ export type QueueStatus =
 	| 'stalled' // Download stalled (no seeders/peers available)
 	| 'paused' // Download paused
 	| 'completed' // Download finished, waiting for import
+	| 'postprocessing' // Download finished, post-processing in progress (usenet extraction/repair)
 	| 'importing' // Import in progress
 	| 'imported' // Successfully imported to library
 	| 'failed' // Failed (download or import)
@@ -271,6 +272,7 @@ export interface QueueStats {
 	seedingCount: number;
 	pausedCount: number;
 	completedCount: number;
+	postprocessingCount: number;
 	importingCount: number;
 	failedCount: number;
 	totalSizeBytes: number;

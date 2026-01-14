@@ -73,8 +73,6 @@ function mapTorrentStatus(
 	switch (state) {
 		case 'downloading':
 		case 'forcedDL':
-		case 'metaDL':
-		case 'forcedMetaDL':
 			return 'downloading';
 
 		case 'uploading':
@@ -97,7 +95,9 @@ function mapTorrentStatus(
 			return 'queued';
 
 		case 'stalledDL':
-			return 'stalled'; // Stalled - no seeders available
+		case 'metaDL': // Magnet stuck fetching metadata - effectively stalled
+		case 'forcedMetaDL':
+			return 'stalled';
 
 		case 'error':
 		case 'missingFiles':

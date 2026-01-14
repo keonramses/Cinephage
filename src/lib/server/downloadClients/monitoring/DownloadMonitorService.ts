@@ -46,9 +46,9 @@ const IMPORT_RETRY_DELAY_MS = 30_000; // 30 seconds between retries
  * Grace period for completed items during queue-to-history transition.
  * SABnzbd needs extra time for post-processing (extracting large archives,
  * moving files, running scripts) before items appear in history.
- * Increased from 60s to 120s to handle large archive extractions.
+ * Increased to 5 minutes to handle large archive extractions reliably.
  */
-const COMPLETED_GRACE_PERIOD_MS = 120_000; // 2 minutes
+const COMPLETED_GRACE_PERIOD_MS = 300_000; // 5 minutes
 
 /**
  * Terminal statuses that shouldn't be updated
@@ -98,12 +98,16 @@ function rowToQueueItem(row: typeof downloadQueue.$inferSelect): QueueItem {
 }
 
 /**
- * Map download client status to queue status
+ * Map download client status to queue status.
+ * Validates progress is in valid range and logs unknown statuses.
  */
 function mapDownloadStatusToQueueStatus(
 	downloadStatus: DownloadInfo['status'],
 	progress: number
 ): QueueStatus {
+	// Validate and clamp progress to 0-1 range
+	const safeProgress = Number.isFinite(progress) ? Math.max(0, Math.min(1, progress)) : 0;
+
 	switch (downloadStatus) {
 		case 'downloading':
 			return 'downloading';
@@ -112,14 +116,21 @@ function mapDownloadStatusToQueueStatus(
 		case 'paused':
 			return 'paused';
 		case 'seeding':
-			return progress >= 1 ? 'seeding' : 'downloading';
+			return safeProgress >= 1 ? 'seeding' : 'downloading';
 		case 'completed':
 			return 'completed';
+		case 'postprocessing':
+			return 'postprocessing';
 		case 'queued':
 			return 'queued';
 		case 'error':
 			return 'failed';
 		default:
+			// Log unknown status for debugging
+			logger.warn('Unknown download status encountered, defaulting to queued', {
+				downloadStatus,
+				progress: safeProgress
+			});
 			return 'queued';
 	}
 }
@@ -971,9 +982,11 @@ export class DownloadMonitorService extends EventEmitter implements BackgroundSe
 				// Note: qBittorrent goes downloading -> seeding (never 'completed')
 				// SABnzbd reports 100% during post-processing but status stays 'downloading'
 				// until it moves to history with 'Completed' status
+				// Also handle paused downloads at 100% - they should still trigger import
 				const justFinishedDownloading =
 					download.status === 'completed' ||
-					(download.status === 'seeding' && download.progress >= 1);
+					(download.status === 'seeding' && download.progress >= 1) ||
+					(download.status === 'paused' && download.progress >= 1);
 
 				if (wasDownloadingOrQueued && justFinishedDownloading) {
 					const updatedItem = await this.getQueueItem(queueItem.id);
@@ -1030,6 +1043,9 @@ export class DownloadMonitorService extends EventEmitter implements BackgroundSe
 		const oldProgress = parseFloat(queueItem.progress || '0');
 		const progressChanged = Math.abs(download.progress - oldProgress) > 0.001;
 		const statusChanged = queueItem.status !== newStatus;
+		const newClientDownloadPath = download.contentPath || download.savePath;
+		const pathChanged =
+			queueItem.clientDownloadPath !== newClientDownloadPath || queueItem.outputPath !== outputPath;
 
 		// Build update object
 		const updates: Partial<typeof downloadQueue.$inferInsert> = {
@@ -1039,7 +1055,7 @@ export class DownloadMonitorService extends EventEmitter implements BackgroundSe
 			uploadSpeed: download.uploadSpeed,
 			eta: download.eta,
 			ratio: download.ratio?.toString() || '0',
-			clientDownloadPath: download.savePath,
+			clientDownloadPath: newClientDownloadPath,
 			outputPath
 		};
 
@@ -1066,7 +1082,7 @@ export class DownloadMonitorService extends EventEmitter implements BackgroundSe
 		}
 
 		// Only update if something changed
-		if (statusChanged || progressChanged) {
+		if (statusChanged || progressChanged || pathChanged) {
 			await db.update(downloadQueue).set(updates).where(eq(downloadQueue.id, queueItem.id));
 
 			// Emit update event
@@ -1377,6 +1393,7 @@ export class DownloadMonitorService extends EventEmitter implements BackgroundSe
 			seedingCount: 0,
 			pausedCount: 0,
 			completedCount: 0,
+			postprocessingCount: 0,
 			importingCount: 0,
 			failedCount: 0,
 			totalSizeBytes: 0,
@@ -1407,6 +1424,9 @@ export class DownloadMonitorService extends EventEmitter implements BackgroundSe
 					break;
 				case 'completed':
 					stats.completedCount++;
+					break;
+				case 'postprocessing':
+					stats.postprocessingCount++;
 					break;
 				case 'importing':
 					stats.importingCount++;

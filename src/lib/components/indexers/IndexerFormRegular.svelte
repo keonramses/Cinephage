@@ -18,6 +18,7 @@
 		seedTime: number | '';
 		packSeedTime: number | '';
 		preferMagnetUrl: boolean;
+		rejectDeadTorrents: boolean;
 		isTorrent: boolean;
 		isStreaming: boolean;
 		hasAuthSettings: boolean;
@@ -35,6 +36,7 @@
 		onSeedTimeChange: (value: number | '') => void;
 		onPackSeedTimeChange: (value: number | '') => void;
 		onPreferMagnetUrlChange: (value: boolean) => void;
+		onRejectDeadTorrentsChange: (value: boolean) => void;
 	}
 
 	let {
@@ -52,6 +54,7 @@
 		seedTime,
 		packSeedTime,
 		preferMagnetUrl,
+		rejectDeadTorrents,
 		isTorrent,
 		isStreaming,
 		hasAuthSettings,
@@ -68,7 +71,8 @@
 		onSeedRatioChange,
 		onSeedTimeChange,
 		onPackSeedTimeChange,
-		onPreferMagnetUrlChange
+		onPreferMagnetUrlChange,
+		onRejectDeadTorrentsChange
 	}: Props = $props();
 
 	const alternateUrls = $derived(definitionUrls.filter((u) => u !== url));
@@ -284,6 +288,12 @@
 				checked={preferMagnetUrl}
 				label="Prefer Magnet URLs"
 				onchange={() => onPreferMagnetUrlChange(!preferMagnetUrl)}
+			/>
+			<ToggleSetting
+				checked={rejectDeadTorrents}
+				label="Reject Dead Torrents"
+				description="Skip releases with 0 seeders"
+				onchange={() => onRejectDeadTorrentsChange(!rejectDeadTorrents)}
 			/>
 		{/if}
 

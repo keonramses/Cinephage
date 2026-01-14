@@ -5,6 +5,7 @@
 		seedTime: number | '';
 		packSeedTime: number | '';
 		preferMagnetUrl: boolean;
+		rejectDeadTorrents: boolean;
 	}
 
 	let {
@@ -12,7 +13,8 @@
 		seedRatio = $bindable(),
 		seedTime = $bindable(),
 		packSeedTime = $bindable(),
-		preferMagnetUrl = $bindable()
+		preferMagnetUrl = $bindable(),
+		rejectDeadTorrents = $bindable()
 	}: Props = $props();
 </script>
 
@@ -77,4 +79,10 @@
 <label class="label cursor-pointer justify-start gap-2">
 	<input type="checkbox" class="checkbox checkbox-sm" bind:checked={preferMagnetUrl} />
 	<span class="label-text">Prefer Magnet URLs</span>
+</label>
+
+<label class="label cursor-pointer justify-start gap-2">
+	<input type="checkbox" class="checkbox checkbox-sm" bind:checked={rejectDeadTorrents} />
+	<span class="label-text">Reject Dead Torrents</span>
+	<span class="label-text-alt text-base-content/50">(0 seeders)</span>
 </label>

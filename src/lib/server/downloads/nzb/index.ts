@@ -7,3 +7,9 @@ export {
 	getNzbValidationService,
 	type NzbValidationResult
 } from './NzbValidationService';
+
+export {
+	checkNzbAvailability,
+	type AvailabilityResult,
+	type AvailabilityCheckOptions
+} from './NzbAvailabilityChecker';

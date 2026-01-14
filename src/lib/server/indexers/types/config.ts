@@ -71,6 +71,8 @@ export interface IndexerConfig {
 	packSeedTime?: number | null;
 	/** @deprecated Use torrentSettings.preferMagnetUrl */
 	preferMagnetUrl?: boolean;
+	/** @deprecated Use torrentSettings.rejectDeadTorrents */
+	rejectDeadTorrents?: boolean;
 }
 
 /**
