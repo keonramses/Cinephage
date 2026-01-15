@@ -349,7 +349,9 @@
 		</div>
 
 		<!-- Right side metadata -->
-		<div class="hidden w-64 shrink-0 rounded-lg bg-base-100/30 p-4 backdrop-blur-sm md:block lg:w-80 lg:p-5">
+		<div
+			class="hidden w-64 shrink-0 rounded-lg bg-base-100/30 p-4 backdrop-blur-sm md:block lg:w-80 lg:p-5"
+		>
 			<div class="grid grid-cols-2 gap-x-4 gap-y-2 lg:gap-x-6 lg:gap-y-3">
 				<div>
 					<div class="text-sm text-base-content/50">Status</div>

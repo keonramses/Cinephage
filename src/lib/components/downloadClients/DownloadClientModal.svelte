@@ -301,293 +301,289 @@
 	<!-- Header -->
 	<div class="mb-6 flex items-center justify-between">
 		<h3 id="download-client-modal-title" class="text-xl font-bold">{modalTitle}</h3>
-				<button class="btn btn-circle btn-ghost btn-sm" onclick={onClose}>
-					<X class="h-4 w-4" />
+		<button class="btn btn-circle btn-ghost btn-sm" onclick={onClose}>
+			<X class="h-4 w-4" />
+		</button>
+	</div>
+
+	<!-- Client Type Selection (only in add mode when not selected) -->
+	{#if mode === 'add' && !implementation}
+		<div class="space-y-4">
+			<p class="text-base-content/70">Select the type of download client you want to add:</p>
+
+			<div class="grid grid-cols-1 gap-2 sm:grid-cols-2 sm:gap-3">
+				{#each clientDefinitions as def (def.id)}
+					<button
+						type="button"
+						class="card cursor-pointer border-2 border-transparent bg-base-200 text-left transition-all hover:border-primary hover:bg-primary/10"
+						onclick={() => handleImplementationChange(def.id)}
+					>
+						<div class="card-body p-4">
+							<div class="flex items-start justify-between gap-2">
+								<div class="flex-1">
+									<div class="flex items-center gap-2">
+										<h3 class="font-semibold">{def.name}</h3>
+										<span
+											class="badge badge-sm {def.protocol === 'usenet'
+												? 'badge-secondary'
+												: 'badge-primary'}"
+										>
+											{def.protocol}
+										</span>
+									</div>
+									<p class="mt-1 text-sm text-base-content/60">{def.description}</p>
+								</div>
+								<div class="badge badge-outline badge-sm">:{def.defaultPort}</div>
+							</div>
+						</div>
+					</button>
+				{/each}
+			</div>
+		</div>
+
+		<div class="modal-action">
+			<button class="btn btn-ghost" onclick={onClose}>Cancel</button>
+		</div>
+	{:else}
+		<!-- Selected client header (in add mode) -->
+		{#if mode === 'add' && selectedDefinition}
+			<div class="mb-6 flex items-center justify-between rounded-lg bg-base-200 px-4 py-3">
+				<div class="flex items-center gap-3">
+					<div class="font-semibold">{selectedDefinition.name}</div>
+					<div class="badge badge-ghost badge-sm">Port {selectedDefinition.defaultPort}</div>
+				</div>
+				<button type="button" class="btn btn-ghost btn-sm" onclick={() => (implementation = '')}>
+					Change Type
 				</button>
 			</div>
+		{/if}
 
-			<!-- Client Type Selection (only in add mode when not selected) -->
-			{#if mode === 'add' && !implementation}
+		<!-- Folder Browser Overlay -->
+		{#if showFolderBrowser}
+			<div class="mb-6">
+				<FolderBrowser
+					value={(browsingField === 'tempPathLocal' ? tempPathLocal : downloadPathLocal) || '/'}
+					onSelect={handleFolderSelect}
+					onCancel={() => (showFolderBrowser = false)}
+				/>
+			</div>
+		{:else}
+			<!-- Main Form - Responsive Two Column Layout -->
+			<div class="grid grid-cols-1 gap-4 sm:grid-cols-2 sm:gap-6">
+				<!-- Left Column: Connection -->
 				<div class="space-y-4">
-					<p class="text-base-content/70">Select the type of download client you want to add:</p>
+					<SectionHeader title="Connection" />
 
-					<div class="grid grid-cols-1 gap-2 sm:grid-cols-2 sm:gap-3">
-						{#each clientDefinitions as def (def.id)}
-							<button
-								type="button"
-								class="card cursor-pointer border-2 border-transparent bg-base-200 text-left transition-all hover:border-primary hover:bg-primary/10"
-								onclick={() => handleImplementationChange(def.id)}
-							>
-								<div class="card-body p-4">
-									<div class="flex items-start justify-between gap-2">
-										<div class="flex-1">
-											<div class="flex items-center gap-2">
-												<h3 class="font-semibold">{def.name}</h3>
-												<span
-													class="badge badge-sm {def.protocol === 'usenet'
-														? 'badge-secondary'
-														: 'badge-primary'}"
-												>
-													{def.protocol}
-												</span>
-											</div>
-											<p class="mt-1 text-sm text-base-content/60">{def.description}</p>
-										</div>
-										<div class="badge badge-outline badge-sm">:{def.defaultPort}</div>
-									</div>
-								</div>
-							</button>
-						{/each}
-					</div>
-				</div>
-
-				<div class="modal-action">
-					<button class="btn btn-ghost" onclick={onClose}>Cancel</button>
-				</div>
-			{:else}
-				<!-- Selected client header (in add mode) -->
-				{#if mode === 'add' && selectedDefinition}
-					<div class="mb-6 flex items-center justify-between rounded-lg bg-base-200 px-4 py-3">
-						<div class="flex items-center gap-3">
-							<div class="font-semibold">{selectedDefinition.name}</div>
-							<div class="badge badge-ghost badge-sm">Port {selectedDefinition.defaultPort}</div>
-						</div>
-						<button
-							type="button"
-							class="btn btn-ghost btn-sm"
-							onclick={() => (implementation = '')}
-						>
-							Change Type
-						</button>
-					</div>
-				{/if}
-
-				<!-- Folder Browser Overlay -->
-				{#if showFolderBrowser}
-					<div class="mb-6">
-						<FolderBrowser
-							value={(browsingField === 'tempPathLocal' ? tempPathLocal : downloadPathLocal) || '/'}
-							onSelect={handleFolderSelect}
-							onCancel={() => (showFolderBrowser = false)}
+					<div class="form-control">
+						<label class="label py-1" for="name">
+							<span class="label-text">Name</span>
+						</label>
+						<input
+							id="name"
+							type="text"
+							class="input-bordered input input-sm"
+							bind:value={name}
+							placeholder={selectedDefinition?.name ?? 'My Download Client'}
 						/>
 					</div>
-				{:else}
-					<!-- Main Form - Responsive Two Column Layout -->
-					<div class="grid grid-cols-1 gap-4 sm:grid-cols-2 sm:gap-6">
-						<!-- Left Column: Connection -->
-						<div class="space-y-4">
-							<SectionHeader title="Connection" />
 
-							<div class="form-control">
-								<label class="label py-1" for="name">
-									<span class="label-text">Name</span>
-								</label>
-								<input
-									id="name"
-									type="text"
-									class="input-bordered input input-sm"
-									bind:value={name}
-									placeholder={selectedDefinition?.name ?? 'My Download Client'}
-								/>
-							</div>
-
-							<div class="grid grid-cols-1 gap-2 sm:grid-cols-2 sm:gap-3">
-								<div class="form-control">
-									<label class="label py-1" for="host">
-										<span class="label-text">Host</span>
-									</label>
-									<input
-										id="host"
-										type="text"
-										class="input-bordered input input-sm"
-										bind:value={host}
-										placeholder="localhost"
-									/>
-								</div>
-
-								<div class="form-control">
-									<label class="label py-1" for="port">
-										<span class="label-text">Port</span>
-									</label>
-									<input
-										id="port"
-										type="number"
-										class="input-bordered input input-sm"
-										bind:value={port}
-										min="1"
-										max="65535"
-									/>
-								</div>
-							</div>
-
-							{#if !isNntpServer}
-								<DownloadClientSettings
-									mode="connection"
-									bind:urlBaseEnabled
-									bind:urlBase
-									{urlBasePlaceholder}
-									showMountMode={isNzbMount}
-									bind:mountMode
-								/>
-							{/if}
-
-							{#if usesApiKey}
-								<!-- API Key auth for SABnzbd -->
-								<div class="form-control">
-									<label class="label py-1" for="password">
-										<span class="label-text">
-											API Key
-											{#if mode === 'edit' && hasPassword}
-												<span class="text-xs opacity-50">(blank to keep)</span>
-											{/if}
-										</span>
-									</label>
-									<input
-										id="password"
-										type="password"
-										class="input-bordered input input-sm"
-										bind:value={password}
-										placeholder={mode === 'edit' && hasPassword
-											? '********'
-											: 'Find in SABnzbd Config > General'}
-									/>
-									<div class="label py-1">
-										<span class="label-text-alt text-xs">
-											Found in SABnzbd Config &gt; General &gt; API Key
-										</span>
-									</div>
-								</div>
-							{:else}
-								<!-- Username/password auth for torrent clients and NZBGet -->
-								<div class="grid grid-cols-1 gap-2 sm:grid-cols-2 sm:gap-3">
-									<div class="form-control">
-										<label class="label py-1" for="username">
-											<span class="label-text">Username</span>
-										</label>
-										<input
-											id="username"
-											type="text"
-											class="input-bordered input input-sm"
-											bind:value={username}
-											placeholder="admin"
-										/>
-									</div>
-
-									<div class="form-control">
-										<label class="label py-1" for="password">
-											<span class="label-text">
-												Password
-												{#if mode === 'edit' && hasPassword}
-													<span class="text-xs opacity-50">(blank to keep)</span>
-												{/if}
-											</span>
-										</label>
-										<input
-											id="password"
-											type="password"
-											class="input-bordered input input-sm"
-											bind:value={password}
-											placeholder={mode === 'edit' && hasPassword ? '********' : ''}
-										/>
-									</div>
-								</div>
-							{/if}
-
-							<div class="flex gap-4">
-								<label class="label cursor-pointer gap-2">
-									<input
-										type="checkbox"
-										class="checkbox checkbox-sm"
-										bind:checked={useSsl}
-										onchange={handleSslChange}
-									/>
-									<span class="label-text">Use SSL</span>
-								</label>
-
-								<label class="label cursor-pointer gap-2">
-									<input type="checkbox" class="checkbox checkbox-sm" bind:checked={enabled} />
-									<span class="label-text">Enabled</span>
-								</label>
-							</div>
+					<div class="grid grid-cols-1 gap-2 sm:grid-cols-2 sm:gap-3">
+						<div class="form-control">
+							<label class="label py-1" for="host">
+								<span class="label-text">Host</span>
+							</label>
+							<input
+								id="host"
+								type="text"
+								class="input-bordered input input-sm"
+								bind:value={host}
+								placeholder="localhost"
+							/>
 						</div>
 
-						<!-- Right Column: Settings -->
-						<div class="space-y-4">
-							{#if isNntpServer}
-								<NntpServerSettings bind:maxConnections bind:priority />
-							{:else}
-								<DownloadClientSettings
-									definition={selectedDefinition}
-									bind:movieCategory
-									bind:tvCategory
-									bind:recentPriority
-									bind:olderPriority
-									bind:initialState
-									bind:downloadPathLocal
-									bind:downloadPathRemote
-									bind:tempPathLocal
-									bind:tempPathRemote
-									isSabnzbd={usesApiKey}
-									{isNzbMount}
-									onBrowse={openFolderBrowser}
-								/>
-							{/if}
+						<div class="form-control">
+							<label class="label py-1" for="port">
+								<span class="label-text">Port</span>
+							</label>
+							<input
+								id="port"
+								type="number"
+								class="input-bordered input input-sm"
+								bind:value={port}
+								min="1"
+								max="65535"
+							/>
 						</div>
 					</div>
 
-					<!-- Save Error -->
-					{#if error}
-						<div class="mt-6 alert alert-error">
-							<XCircle class="h-5 w-5" />
-							<div>
-								<div class="font-medium">Failed to save</div>
-								<div class="text-sm opacity-80">{error}</div>
+					{#if !isNntpServer}
+						<DownloadClientSettings
+							mode="connection"
+							bind:urlBaseEnabled
+							bind:urlBase
+							{urlBasePlaceholder}
+							showMountMode={isNzbMount}
+							bind:mountMode
+						/>
+					{/if}
+
+					{#if usesApiKey}
+						<!-- API Key auth for SABnzbd -->
+						<div class="form-control">
+							<label class="label py-1" for="password">
+								<span class="label-text">
+									API Key
+									{#if mode === 'edit' && hasPassword}
+										<span class="text-xs opacity-50">(blank to keep)</span>
+									{/if}
+								</span>
+							</label>
+							<input
+								id="password"
+								type="password"
+								class="input-bordered input input-sm"
+								bind:value={password}
+								placeholder={mode === 'edit' && hasPassword
+									? '********'
+									: 'Find in SABnzbd Config > General'}
+							/>
+							<div class="label py-1">
+								<span class="label-text-alt text-xs">
+									Found in SABnzbd Config &gt; General &gt; API Key
+								</span>
+							</div>
+						</div>
+					{:else}
+						<!-- Username/password auth for torrent clients and NZBGet -->
+						<div class="grid grid-cols-1 gap-2 sm:grid-cols-2 sm:gap-3">
+							<div class="form-control">
+								<label class="label py-1" for="username">
+									<span class="label-text">Username</span>
+								</label>
+								<input
+									id="username"
+									type="text"
+									class="input-bordered input input-sm"
+									bind:value={username}
+									placeholder="admin"
+								/>
+							</div>
+
+							<div class="form-control">
+								<label class="label py-1" for="password">
+									<span class="label-text">
+										Password
+										{#if mode === 'edit' && hasPassword}
+											<span class="text-xs opacity-50">(blank to keep)</span>
+										{/if}
+									</span>
+								</label>
+								<input
+									id="password"
+									type="password"
+									class="input-bordered input input-sm"
+									bind:value={password}
+									placeholder={mode === 'edit' && hasPassword ? '********' : ''}
+								/>
 							</div>
 						</div>
 					{/if}
 
-					<!-- Test Result -->
-					<TestResult
-						result={testResult}
-						successDetails={testResult?.greeting
-							? `Server greeting: ${testResult.greeting}`
-							: testResult?.details
-								? `Version: ${testResult.details.version} (API ${testResult.details.apiVersion})${testResult.details.savePath ? ` | Save Path: ${testResult.details.savePath}` : ''}`
-								: undefined}
-					/>
-				{/if}
+					<div class="flex gap-4">
+						<label class="label cursor-pointer gap-2">
+							<input
+								type="checkbox"
+								class="checkbox checkbox-sm"
+								bind:checked={useSsl}
+								onchange={handleSslChange}
+							/>
+							<span class="label-text">Use SSL</span>
+						</label>
 
-				<!-- Actions -->
-				{#if !showFolderBrowser}
-					<div class="modal-action">
-						{#if mode === 'edit' && onDelete}
-							<button class="btn mr-auto btn-outline btn-error" onclick={onDelete}>Delete</button>
-						{/if}
-
-						<button
-							class="btn btn-ghost"
-							onclick={handleTest}
-							disabled={testing || saving || !host || !name || !implementation}
-						>
-							{#if testing}
-								<Loader2 class="h-4 w-4 animate-spin" />
-							{/if}
-							Test
-						</button>
-
-						<button class="btn btn-ghost" onclick={onClose}>Cancel</button>
-
-						<button
-							class="btn btn-primary"
-							onclick={handleSave}
-							disabled={saving || !host || !name || !implementation}
-						>
-							{#if saving}
-								<Loader2 class="h-4 w-4 animate-spin" />
-							{/if}
-							Save
-						</button>
+						<label class="label cursor-pointer gap-2">
+							<input type="checkbox" class="checkbox checkbox-sm" bind:checked={enabled} />
+							<span class="label-text">Enabled</span>
+						</label>
 					</div>
-				{/if}
+				</div>
+
+				<!-- Right Column: Settings -->
+				<div class="space-y-4">
+					{#if isNntpServer}
+						<NntpServerSettings bind:maxConnections bind:priority />
+					{:else}
+						<DownloadClientSettings
+							definition={selectedDefinition}
+							bind:movieCategory
+							bind:tvCategory
+							bind:recentPriority
+							bind:olderPriority
+							bind:initialState
+							bind:downloadPathLocal
+							bind:downloadPathRemote
+							bind:tempPathLocal
+							bind:tempPathRemote
+							isSabnzbd={usesApiKey}
+							{isNzbMount}
+							onBrowse={openFolderBrowser}
+						/>
+					{/if}
+				</div>
+			</div>
+
+			<!-- Save Error -->
+			{#if error}
+				<div class="mt-6 alert alert-error">
+					<XCircle class="h-5 w-5" />
+					<div>
+						<div class="font-medium">Failed to save</div>
+						<div class="text-sm opacity-80">{error}</div>
+					</div>
+				</div>
 			{/if}
+
+			<!-- Test Result -->
+			<TestResult
+				result={testResult}
+				successDetails={testResult?.greeting
+					? `Server greeting: ${testResult.greeting}`
+					: testResult?.details
+						? `Version: ${testResult.details.version} (API ${testResult.details.apiVersion})${testResult.details.savePath ? ` | Save Path: ${testResult.details.savePath}` : ''}`
+						: undefined}
+			/>
+		{/if}
+
+		<!-- Actions -->
+		{#if !showFolderBrowser}
+			<div class="modal-action">
+				{#if mode === 'edit' && onDelete}
+					<button class="btn mr-auto btn-outline btn-error" onclick={onDelete}>Delete</button>
+				{/if}
+
+				<button
+					class="btn btn-ghost"
+					onclick={handleTest}
+					disabled={testing || saving || !host || !name || !implementation}
+				>
+					{#if testing}
+						<Loader2 class="h-4 w-4 animate-spin" />
+					{/if}
+					Test
+				</button>
+
+				<button class="btn btn-ghost" onclick={onClose}>Cancel</button>
+
+				<button
+					class="btn btn-primary"
+					onclick={handleSave}
+					disabled={saving || !host || !name || !implementation}
+				>
+					{#if saving}
+						<Loader2 class="h-4 w-4 animate-spin" />
+					{/if}
+					Save
+				</button>
+			</div>
+		{/if}
+	{/if}
 </ModalWrapper>

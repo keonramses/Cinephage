@@ -136,10 +136,9 @@
 	function handleSave() {
 		onSave(getFormData());
 	}
-
 </script>
 
-<ModalWrapper {open} onClose={onClose} maxWidth="2xl" labelledBy="nntp-server-modal-title">
+<ModalWrapper {open} {onClose} maxWidth="2xl" labelledBy="nntp-server-modal-title">
 	<!-- Header -->
 	<div class="mb-6 flex items-center justify-between">
 		<h3 id="nntp-server-modal-title" class="text-xl font-bold">{modalTitle}</h3>
@@ -148,192 +147,190 @@
 		</button>
 	</div>
 
-			<!-- Main Form - Responsive Two Column Layout -->
-			<div class="grid grid-cols-1 gap-4 sm:grid-cols-2 sm:gap-6">
-				<!-- Left Column: Connection -->
-				<div class="space-y-4">
-					<SectionHeader title="Connection" />
+	<!-- Main Form - Responsive Two Column Layout -->
+	<div class="grid grid-cols-1 gap-4 sm:grid-cols-2 sm:gap-6">
+		<!-- Left Column: Connection -->
+		<div class="space-y-4">
+			<SectionHeader title="Connection" />
 
-					<div class="form-control">
-						<label class="label py-1" for="name">
-							<span class="label-text">Name</span>
-						</label>
-						<input
-							id="name"
-							type="text"
-							class="input-bordered input input-sm"
-							bind:value={name}
-							placeholder="My Usenet Server"
-						/>
-					</div>
+			<div class="form-control">
+				<label class="label py-1" for="name">
+					<span class="label-text">Name</span>
+				</label>
+				<input
+					id="name"
+					type="text"
+					class="input-bordered input input-sm"
+					bind:value={name}
+					placeholder="My Usenet Server"
+				/>
+			</div>
 
-					<div class="grid grid-cols-2 gap-2 sm:gap-3">
-						<div class="form-control">
-							<label class="label py-1" for="host">
-								<span class="label-text">Host</span>
-							</label>
-							<input
-								id="host"
-								type="text"
-								class="input-bordered input input-sm"
-								bind:value={host}
-								placeholder="news.example.com"
-							/>
-						</div>
-
-						<div class="form-control">
-							<label class="label py-1" for="port">
-								<span class="label-text">Port</span>
-							</label>
-							<input
-								id="port"
-								type="number"
-								class="input-bordered input input-sm"
-								bind:value={port}
-								min="1"
-								max="65535"
-							/>
-						</div>
-					</div>
-
-					<div class="grid grid-cols-2 gap-2 sm:gap-3">
-						<div class="form-control">
-							<label class="label py-1" for="username">
-								<span class="label-text">Username</span>
-							</label>
-							<input
-								id="username"
-								type="text"
-								class="input-bordered input input-sm"
-								bind:value={username}
-								placeholder="(optional)"
-							/>
-						</div>
-
-						<div class="form-control">
-							<label class="label py-1" for="password">
-								<span class="label-text">
-									Password
-									{#if mode === 'edit' && hasPassword}
-										<span class="text-xs opacity-50">(blank to keep)</span>
-									{/if}
-								</span>
-							</label>
-							<input
-								id="password"
-								type="password"
-								class="input-bordered input input-sm"
-								bind:value={password}
-								placeholder={mode === 'edit' && hasPassword ? '********' : '(optional)'}
-							/>
-						</div>
-					</div>
-
-					<div class="flex gap-4">
-						<label class="label cursor-pointer gap-2">
-							<input
-								type="checkbox"
-								class="checkbox checkbox-sm"
-								bind:checked={useSsl}
-								onchange={handleSslChange}
-							/>
-							<span class="label-text">Use SSL</span>
-						</label>
-
-						<label class="label cursor-pointer gap-2">
-							<input type="checkbox" class="checkbox checkbox-sm" bind:checked={enabled} />
-							<span class="label-text">Enabled</span>
-						</label>
-					</div>
+			<div class="grid grid-cols-2 gap-2 sm:gap-3">
+				<div class="form-control">
+					<label class="label py-1" for="host">
+						<span class="label-text">Host</span>
+					</label>
+					<input
+						id="host"
+						type="text"
+						class="input-bordered input input-sm"
+						bind:value={host}
+						placeholder="news.example.com"
+					/>
 				</div>
 
-				<!-- Right Column: Settings -->
-				<div class="space-y-4">
-					<SectionHeader title="Settings" />
-
-					<div class="form-control">
-						<label class="label py-1" for="maxConnections">
-							<span class="label-text">Max Connections</span>
-						</label>
-						<input
-							id="maxConnections"
-							type="number"
-							class="input-bordered input input-sm"
-							bind:value={maxConnections}
-							min="1"
-							max="50"
-						/>
-						<div class="label py-1">
-							<span class="label-text-alt text-xs">
-								Check your usenet provider for connection limits (usually 10-50)
-							</span>
-						</div>
-					</div>
-
-					<div class="form-control">
-						<label class="label py-1" for="priority">
-							<span class="label-text">Priority</span>
-						</label>
-						<input
-							id="priority"
-							type="number"
-							class="input-bordered input input-sm"
-							bind:value={priority}
-							min="0"
-							max="99"
-						/>
-						<div class="label py-1">
-							<span class="label-text-alt text-xs">
-								Lower values = higher priority. Use for server failover.
-							</span>
-						</div>
-					</div>
+				<div class="form-control">
+					<label class="label py-1" for="port">
+						<span class="label-text">Port</span>
+					</label>
+					<input
+						id="port"
+						type="number"
+						class="input-bordered input input-sm"
+						bind:value={port}
+						min="1"
+						max="65535"
+					/>
 				</div>
 			</div>
 
-			<!-- Save Error -->
-			{#if error}
-				<div class="mt-6 alert alert-error">
-					<XCircle class="h-5 w-5" />
-					<div>
-						<div class="font-medium">Failed to save</div>
-						<div class="text-sm opacity-80">{error}</div>
-					</div>
+			<div class="grid grid-cols-2 gap-2 sm:gap-3">
+				<div class="form-control">
+					<label class="label py-1" for="username">
+						<span class="label-text">Username</span>
+					</label>
+					<input
+						id="username"
+						type="text"
+						class="input-bordered input input-sm"
+						bind:value={username}
+						placeholder="(optional)"
+					/>
 				</div>
+
+				<div class="form-control">
+					<label class="label py-1" for="password">
+						<span class="label-text">
+							Password
+							{#if mode === 'edit' && hasPassword}
+								<span class="text-xs opacity-50">(blank to keep)</span>
+							{/if}
+						</span>
+					</label>
+					<input
+						id="password"
+						type="password"
+						class="input-bordered input input-sm"
+						bind:value={password}
+						placeholder={mode === 'edit' && hasPassword ? '********' : '(optional)'}
+					/>
+				</div>
+			</div>
+
+			<div class="flex gap-4">
+				<label class="label cursor-pointer gap-2">
+					<input
+						type="checkbox"
+						class="checkbox checkbox-sm"
+						bind:checked={useSsl}
+						onchange={handleSslChange}
+					/>
+					<span class="label-text">Use SSL</span>
+				</label>
+
+				<label class="label cursor-pointer gap-2">
+					<input type="checkbox" class="checkbox checkbox-sm" bind:checked={enabled} />
+					<span class="label-text">Enabled</span>
+				</label>
+			</div>
+		</div>
+
+		<!-- Right Column: Settings -->
+		<div class="space-y-4">
+			<SectionHeader title="Settings" />
+
+			<div class="form-control">
+				<label class="label py-1" for="maxConnections">
+					<span class="label-text">Max Connections</span>
+				</label>
+				<input
+					id="maxConnections"
+					type="number"
+					class="input-bordered input input-sm"
+					bind:value={maxConnections}
+					min="1"
+					max="50"
+				/>
+				<div class="label py-1">
+					<span class="label-text-alt text-xs">
+						Check your usenet provider for connection limits (usually 10-50)
+					</span>
+				</div>
+			</div>
+
+			<div class="form-control">
+				<label class="label py-1" for="priority">
+					<span class="label-text">Priority</span>
+				</label>
+				<input
+					id="priority"
+					type="number"
+					class="input-bordered input input-sm"
+					bind:value={priority}
+					min="0"
+					max="99"
+				/>
+				<div class="label py-1">
+					<span class="label-text-alt text-xs">
+						Lower values = higher priority. Use for server failover.
+					</span>
+				</div>
+			</div>
+		</div>
+	</div>
+
+	<!-- Save Error -->
+	{#if error}
+		<div class="mt-6 alert alert-error">
+			<XCircle class="h-5 w-5" />
+			<div>
+				<div class="font-medium">Failed to save</div>
+				<div class="text-sm opacity-80">{error}</div>
+			</div>
+		</div>
+	{/if}
+
+	<!-- Test Result -->
+	<TestResult
+		result={testResult}
+		successDetails={testResult?.greeting ? `Server greeting: ${testResult.greeting}` : undefined}
+	/>
+
+	<!-- Actions -->
+	<div class="modal-action">
+		{#if mode === 'edit' && onDelete}
+			<button class="btn mr-auto btn-outline btn-error" onclick={onDelete}>Delete</button>
+		{/if}
+
+		<button
+			class="btn btn-ghost"
+			onclick={handleTest}
+			disabled={testing || saving || !host || !name}
+		>
+			{#if testing}
+				<Loader2 class="h-4 w-4 animate-spin" />
 			{/if}
+			Test
+		</button>
 
-			<!-- Test Result -->
-			<TestResult
-				result={testResult}
-				successDetails={testResult?.greeting
-					? `Server greeting: ${testResult.greeting}`
-					: undefined}
-			/>
+		<button class="btn btn-ghost" onclick={onClose}>Cancel</button>
 
-			<!-- Actions -->
-			<div class="modal-action">
-				{#if mode === 'edit' && onDelete}
-					<button class="btn mr-auto btn-outline btn-error" onclick={onDelete}>Delete</button>
-				{/if}
-
-				<button
-					class="btn btn-ghost"
-					onclick={handleTest}
-					disabled={testing || saving || !host || !name}
-				>
-					{#if testing}
-						<Loader2 class="h-4 w-4 animate-spin" />
-					{/if}
-					Test
-				</button>
-
-				<button class="btn btn-ghost" onclick={onClose}>Cancel</button>
-
-				<button class="btn btn-primary" onclick={handleSave} disabled={saving || !host || !name}>
-					{#if saving}
-						<Loader2 class="h-4 w-4 animate-spin" />
-					{/if}
-					Save
-				</button>
-			</div>
+		<button class="btn btn-primary" onclick={handleSave} disabled={saving || !host || !name}>
+			{#if saving}
+				<Loader2 class="h-4 w-4 animate-spin" />
+			{/if}
+			Save
+		</button>
+	</div>
 </ModalWrapper>

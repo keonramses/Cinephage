@@ -198,190 +198,185 @@
 	function handleSave() {
 		onSave(getFormData());
 	}
-
 </script>
 
 <ModalWrapper {open} {onClose} maxWidth="3xl" labelledBy="indexer-modal-title">
 	<!-- Header -->
 	<div class="mb-6 flex items-center justify-between">
 		<h3 id="indexer-modal-title" class="text-xl font-bold">{modalTitle}</h3>
-				<button class="btn btn-circle btn-ghost btn-sm" onclick={onClose}>
-					<X class="h-4 w-4" />
+		<button class="btn btn-circle btn-ghost btn-sm" onclick={onClose}>
+			<X class="h-4 w-4" />
+		</button>
+	</div>
+
+	<!-- Definition Selection (only in add mode when not selected) -->
+	{#if mode === 'add' && !selectedDefinitionId}
+		<IndexerDefinitionPicker {definitions} onSelect={handleDefinitionSelect} onCancel={onClose} />
+	{:else}
+		<!-- Selected definition header (in add mode) -->
+		{#if mode === 'add' && selectedDefinition}
+			<div class="mb-6 flex items-center justify-between rounded-lg bg-base-200 px-4 py-3">
+				<div class="flex items-center gap-3">
+					<div
+						class="rounded-lg p-2 {isStreaming
+							? 'bg-info/10'
+							: selectedDefinition.type === 'public'
+								? 'bg-success/10'
+								: 'bg-warning/10'}"
+					>
+						{#if isStreaming}
+							<Zap class="h-5 w-5 text-info" />
+						{:else if selectedDefinition.type === 'public'}
+							<Globe class="h-5 w-5 text-success" />
+						{:else}
+							<Lock class="h-5 w-5 text-warning" />
+						{/if}
+					</div>
+					<div>
+						<div class="flex items-center gap-2">
+							<span class="font-semibold">{selectedDefinition.name}</span>
+							<span class="badge badge-ghost badge-sm">{selectedDefinition.protocol}</span>
+						</div>
+						{#if selectedDefinition.description}
+							<div class="text-sm text-base-content/60">{selectedDefinition.description}</div>
+						{/if}
+					</div>
+				</div>
+				<button
+					type="button"
+					class="btn btn-ghost btn-sm"
+					onclick={() => (selectedDefinitionId = '')}
+				>
+					Change
 				</button>
 			</div>
+		{/if}
 
-			<!-- Definition Selection (only in add mode when not selected) -->
-			{#if mode === 'add' && !selectedDefinitionId}
-				<IndexerDefinitionPicker
-					{definitions}
-					onSelect={handleDefinitionSelect}
-					onCancel={onClose}
-				/>
-			{:else}
-				<!-- Selected definition header (in add mode) -->
-				{#if mode === 'add' && selectedDefinition}
-					<div class="mb-6 flex items-center justify-between rounded-lg bg-base-200 px-4 py-3">
-						<div class="flex items-center gap-3">
-							<div
-								class="rounded-lg p-2 {isStreaming
-									? 'bg-info/10'
-									: selectedDefinition.type === 'public'
-										? 'bg-success/10'
-										: 'bg-warning/10'}"
-							>
-								{#if isStreaming}
-									<Zap class="h-5 w-5 text-info" />
-								{:else if selectedDefinition.type === 'public'}
-									<Globe class="h-5 w-5 text-success" />
-								{:else}
-									<Lock class="h-5 w-5 text-warning" />
-								{/if}
-							</div>
-							<div>
-								<div class="flex items-center gap-2">
-									<span class="font-semibold">{selectedDefinition.name}</span>
-									<span class="badge badge-ghost badge-sm">{selectedDefinition.protocol}</span>
-								</div>
-								{#if selectedDefinition.description}
-									<div class="text-sm text-base-content/60">{selectedDefinition.description}</div>
-								{/if}
-							</div>
-						</div>
-						<button
-							type="button"
-							class="btn btn-ghost btn-sm"
-							onclick={() => (selectedDefinitionId = '')}
-						>
-							Change
-						</button>
+		<!-- Internal indexer header (edit mode for auto-managed indexers) -->
+		{#if isInternalIndexer && indexer}
+			<div class="mb-6 flex items-center justify-between rounded-lg bg-info/10 px-4 py-3">
+				<div class="flex items-center gap-3">
+					<div class="rounded-lg bg-info/20 p-2">
+						<Zap class="h-5 w-5 text-info" />
 					</div>
-				{/if}
-
-				<!-- Internal indexer header (edit mode for auto-managed indexers) -->
-				{#if isInternalIndexer && indexer}
-					<div class="mb-6 flex items-center justify-between rounded-lg bg-info/10 px-4 py-3">
-						<div class="flex items-center gap-3">
-							<div class="rounded-lg bg-info/20 p-2">
-								<Zap class="h-5 w-5 text-info" />
-							</div>
-							<div>
-								<div class="flex items-center gap-2">
-									<span class="font-semibold">{indexer.name}</span>
-									<span class="badge badge-sm badge-info">Internal</span>
-									<span class="badge badge-ghost badge-sm">{indexer.protocol}</span>
-								</div>
-								<div class="text-sm text-base-content/60">
-									This is a built-in indexer that is automatically managed.
-								</div>
-							</div>
+					<div>
+						<div class="flex items-center gap-2">
+							<span class="font-semibold">{indexer.name}</span>
+							<span class="badge badge-sm badge-info">Internal</span>
+							<span class="badge badge-ghost badge-sm">{indexer.protocol}</span>
+						</div>
+						<div class="text-sm text-base-content/60">
+							This is a built-in indexer that is automatically managed.
 						</div>
 					</div>
-				{/if}
-
-				<!-- Form Content -->
-				{#if isInternalIndexer && indexer}
-					<IndexerFormInternal
-						{indexer}
-						{url}
-						urlError={urlError()}
-						{priority}
-						{enabled}
-						{enableAutomaticSearch}
-						{enableInteractiveSearch}
-						{isStreaming}
-						onUrlChange={(v) => (url = v)}
-						onUrlBlur={() => (urlTouched = true)}
-						onPriorityChange={(v) => (priority = v)}
-						onEnabledChange={(v) => (enabled = v)}
-						onAutomaticSearchChange={(v) => (enableAutomaticSearch = v)}
-						onInteractiveSearchChange={(v) => (enableInteractiveSearch = v)}
-					/>
-				{:else if isStreaming && selectedDefinition}
-					<IndexerFormStreaming
-						definition={selectedDefinition}
-						{name}
-						{priority}
-						{enabled}
-						{settings}
-						{enableAutomaticSearch}
-						{enableInteractiveSearch}
-						onNameChange={(v) => (name = v)}
-						onPriorityChange={(v) => (priority = v)}
-						onEnabledChange={(v) => (enabled = v)}
-						onSettingsChange={(k, v) => (settings[k] = v)}
-						onAutomaticSearchChange={(v) => (enableAutomaticSearch = v)}
-						onInteractiveSearchChange={(v) => (enableInteractiveSearch = v)}
-					/>
-				{:else}
-					<IndexerFormRegular
-						definition={selectedDefinition ?? null}
-						{name}
-						{url}
-						urlError={urlError()}
-						{priority}
-						{enabled}
-						{settings}
-						{enableAutomaticSearch}
-						{enableInteractiveSearch}
-						{minimumSeeders}
-						{seedRatio}
-						{seedTime}
-						{packSeedTime}
-						{preferMagnetUrl}
-						{rejectDeadTorrents}
-						{isTorrent}
-						{isStreaming}
-						hasAuthSettings={hasAuthSettings ?? false}
-						{definitionUrls}
-						onNameChange={(v) => (name = v)}
-						onUrlChange={(v) => (url = v)}
-						onUrlBlur={() => (urlTouched = true)}
-						onPriorityChange={(v) => (priority = v)}
-						onEnabledChange={(v) => (enabled = v)}
-						onSettingsChange={(s) => (settings = s)}
-						onAutomaticSearchChange={(v) => (enableAutomaticSearch = v)}
-						onInteractiveSearchChange={(v) => (enableInteractiveSearch = v)}
-						onMinimumSeedersChange={(v) => (minimumSeeders = v)}
-						onSeedRatioChange={(v) => (seedRatio = v)}
-						onSeedTimeChange={(v) => (seedTime = v)}
-						onPackSeedTimeChange={(v) => (packSeedTime = v)}
-						onPreferMagnetUrlChange={(v) => (preferMagnetUrl = v)}
-						onRejectDeadTorrentsChange={(v) => (rejectDeadTorrents = v)}
-					/>
-				{/if}
-
-				<!-- Test Result -->
-				<TestResult result={testResult} />
-
-				<!-- Actions -->
-				<div class="modal-action">
-					{#if mode === 'edit' && onDelete}
-						<button class="btn mr-auto btn-outline btn-error" onclick={onDelete}>Delete</button>
-					{/if}
-
-					<button
-						class="btn btn-ghost"
-						onclick={handleTest}
-						disabled={testing || saving || !url || !name || !urlValid()}
-					>
-						{#if testing}
-							<Loader2 class="h-4 w-4 animate-spin" />
-						{/if}
-						Test
-					</button>
-
-					<button class="btn btn-ghost" onclick={onClose}>Cancel</button>
-
-					<button
-						class="btn btn-primary"
-						onclick={handleSave}
-						disabled={saving || !url || !name || !urlValid()}
-					>
-						{#if saving}
-							<Loader2 class="h-4 w-4 animate-spin" />
-						{/if}
-						Save
-					</button>
 				</div>
+			</div>
+		{/if}
+
+		<!-- Form Content -->
+		{#if isInternalIndexer && indexer}
+			<IndexerFormInternal
+				{indexer}
+				{url}
+				urlError={urlError()}
+				{priority}
+				{enabled}
+				{enableAutomaticSearch}
+				{enableInteractiveSearch}
+				{isStreaming}
+				onUrlChange={(v) => (url = v)}
+				onUrlBlur={() => (urlTouched = true)}
+				onPriorityChange={(v) => (priority = v)}
+				onEnabledChange={(v) => (enabled = v)}
+				onAutomaticSearchChange={(v) => (enableAutomaticSearch = v)}
+				onInteractiveSearchChange={(v) => (enableInteractiveSearch = v)}
+			/>
+		{:else if isStreaming && selectedDefinition}
+			<IndexerFormStreaming
+				definition={selectedDefinition}
+				{name}
+				{priority}
+				{enabled}
+				{settings}
+				{enableAutomaticSearch}
+				{enableInteractiveSearch}
+				onNameChange={(v) => (name = v)}
+				onPriorityChange={(v) => (priority = v)}
+				onEnabledChange={(v) => (enabled = v)}
+				onSettingsChange={(k, v) => (settings[k] = v)}
+				onAutomaticSearchChange={(v) => (enableAutomaticSearch = v)}
+				onInteractiveSearchChange={(v) => (enableInteractiveSearch = v)}
+			/>
+		{:else}
+			<IndexerFormRegular
+				definition={selectedDefinition ?? null}
+				{name}
+				{url}
+				urlError={urlError()}
+				{priority}
+				{enabled}
+				{settings}
+				{enableAutomaticSearch}
+				{enableInteractiveSearch}
+				{minimumSeeders}
+				{seedRatio}
+				{seedTime}
+				{packSeedTime}
+				{preferMagnetUrl}
+				{rejectDeadTorrents}
+				{isTorrent}
+				{isStreaming}
+				hasAuthSettings={hasAuthSettings ?? false}
+				{definitionUrls}
+				onNameChange={(v) => (name = v)}
+				onUrlChange={(v) => (url = v)}
+				onUrlBlur={() => (urlTouched = true)}
+				onPriorityChange={(v) => (priority = v)}
+				onEnabledChange={(v) => (enabled = v)}
+				onSettingsChange={(s) => (settings = s)}
+				onAutomaticSearchChange={(v) => (enableAutomaticSearch = v)}
+				onInteractiveSearchChange={(v) => (enableInteractiveSearch = v)}
+				onMinimumSeedersChange={(v) => (minimumSeeders = v)}
+				onSeedRatioChange={(v) => (seedRatio = v)}
+				onSeedTimeChange={(v) => (seedTime = v)}
+				onPackSeedTimeChange={(v) => (packSeedTime = v)}
+				onPreferMagnetUrlChange={(v) => (preferMagnetUrl = v)}
+				onRejectDeadTorrentsChange={(v) => (rejectDeadTorrents = v)}
+			/>
+		{/if}
+
+		<!-- Test Result -->
+		<TestResult result={testResult} />
+
+		<!-- Actions -->
+		<div class="modal-action">
+			{#if mode === 'edit' && onDelete}
+				<button class="btn mr-auto btn-outline btn-error" onclick={onDelete}>Delete</button>
 			{/if}
+
+			<button
+				class="btn btn-ghost"
+				onclick={handleTest}
+				disabled={testing || saving || !url || !name || !urlValid()}
+			>
+				{#if testing}
+					<Loader2 class="h-4 w-4 animate-spin" />
+				{/if}
+				Test
+			</button>
+
+			<button class="btn btn-ghost" onclick={onClose}>Cancel</button>
+
+			<button
+				class="btn btn-primary"
+				onclick={handleSave}
+				disabled={saving || !url || !name || !urlValid()}
+			>
+				{#if saving}
+					<Loader2 class="h-4 w-4 animate-spin" />
+				{/if}
+				Save
+			</button>
+		</div>
+	{/if}
 </ModalWrapper>

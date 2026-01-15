@@ -64,7 +64,7 @@
 	<input
 		{id}
 		{type}
-		class="input input-bordered input-{size}"
+		class="input-bordered input input-{size}"
 		class:input-error={error}
 		{placeholder}
 		{disabled}

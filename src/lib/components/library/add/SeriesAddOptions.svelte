@@ -213,7 +213,7 @@
 <label class="flex cursor-pointer items-start gap-4 py-2">
 	<input
 		type="checkbox"
-		class="toggle toggle-primary mt-0.5 shrink-0"
+		class="toggle mt-0.5 shrink-0 toggle-primary"
 		checked={monitorType !== 'none'}
 		onchange={(e) => {
 			if (!e.currentTarget.checked) {
@@ -274,7 +274,11 @@
 
 <!-- Monitor Specials Toggle -->
 <label class="flex cursor-pointer items-start gap-4 py-2">
-	<input type="checkbox" class="toggle toggle-primary toggle-sm mt-0.5 shrink-0" bind:checked={monitorSpecials} />
+	<input
+		type="checkbox"
+		class="toggle mt-0.5 shrink-0 toggle-primary toggle-sm"
+		bind:checked={monitorSpecials}
+	/>
 	<div class="min-w-0">
 		<span class="flex items-center gap-2 text-sm font-medium"> Monitor Specials </span>
 		<p class="text-xs text-base-content/60">
@@ -426,13 +430,15 @@
 
 	<!-- Season Folder Toggle -->
 	<label class="flex cursor-pointer items-start gap-4 py-2">
-		<input type="checkbox" class="toggle toggle-primary toggle-sm mt-0.5 shrink-0" bind:checked={seasonFolder} />
+		<input
+			type="checkbox"
+			class="toggle mt-0.5 shrink-0 toggle-primary toggle-sm"
+			bind:checked={seasonFolder}
+		/>
 		<div class="min-w-0">
 			<span class="text-sm font-medium">Use Season Folders</span>
 			<p class="text-xs text-base-content/60">
-				{seasonFolder
-					? 'Episodes organized in Season ## folders'
-					: 'All episodes in series folder'}
+				{seasonFolder ? 'Episodes organized in Season ## folders' : 'All episodes in series folder'}
 			</p>
 		</div>
 	</label>

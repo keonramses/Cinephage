@@ -97,7 +97,7 @@
 	}
 </script>
 
-<ModalWrapper {open} onClose={onClose} maxWidth="2xl" labelledBy="root-folder-modal-title">
+<ModalWrapper {open} {onClose} maxWidth="2xl" labelledBy="root-folder-modal-title">
 	<!-- Header -->
 	<div class="mb-6 flex items-center justify-between">
 		<h3 id="root-folder-modal-title" class="text-xl font-bold">{modalTitle}</h3>
@@ -106,206 +106,206 @@
 		</button>
 	</div>
 
-			<!-- Folder Browser -->
-			{#if showFolderBrowser}
-				<FolderBrowser
-					value={path || '/'}
-					onSelect={handleFolderSelect}
-					onCancel={() => (showFolderBrowser = false)}
-				/>
-			{:else}
-				<!-- Form -->
-				<div class="space-y-4">
-					<div class="grid grid-cols-1 gap-3 sm:grid-cols-2 sm:gap-4">
-						<div class="form-control">
-							<label class="label py-1" for="name">
-								<span class="label-text">Name</span>
-							</label>
-							<input
-								id="name"
-								type="text"
-								class="input-bordered input input-sm"
-								bind:value={name}
-								placeholder="Movies Library"
-							/>
-						</div>
-
-						<div class="form-control">
-							<label class="label py-1" for="mediaType">
-								<span class="label-text">Media Type</span>
-							</label>
-							<select
-								id="mediaType"
-								class="select-bordered select select-sm"
-								bind:value={mediaType}
-							>
-								<option value="movie">Movies</option>
-								<option value="tv">TV Shows</option>
-							</select>
-						</div>
-					</div>
-
-					<div class="form-control">
-						<label class="label py-1" for="path">
-							<span class="label-text">Path</span>
-						</label>
-						<div class="flex gap-2">
-							<div class="join flex-1">
-								<input
-									id="path"
-									type="text"
-									class="input-bordered input input-sm join-item flex-1"
-									bind:value={path}
-									placeholder="/mnt/media/movies"
-								/>
-								<button
-									type="button"
-									class="btn join-item border border-base-300 btn-ghost btn-sm"
-									onclick={() => (showFolderBrowser = true)}
-									title="Browse folders"
-								>
-									<FolderOpen class="h-4 w-4" />
-								</button>
-							</div>
-							<button
-								class="btn btn-ghost btn-sm"
-								onclick={handleValidatePath}
-								disabled={validating || !path}
-							>
-								{#if validating}
-									<Loader2 class="h-4 w-4 animate-spin" />
-								{/if}
-								Validate
-							</button>
-						</div>
-						<div class="label py-1">
-							<span class="label-text-alt text-xs">
-								The folder path where your media library is stored
-							</span>
-						</div>
-					</div>
-
-					<label class="flex cursor-pointer items-center gap-3 py-2">
-						<input type="checkbox" class="checkbox checkbox-sm shrink-0" bind:checked={isDefault} />
-						<span class="text-sm"
-							>Set as default for {mediaType === 'movie' ? 'movies' : 'TV shows'}</span
-						>
+	<!-- Folder Browser -->
+	{#if showFolderBrowser}
+		<FolderBrowser
+			value={path || '/'}
+			onSelect={handleFolderSelect}
+			onCancel={() => (showFolderBrowser = false)}
+		/>
+	{:else}
+		<!-- Form -->
+		<div class="space-y-4">
+			<div class="grid grid-cols-1 gap-3 sm:grid-cols-2 sm:gap-4">
+				<div class="form-control">
+					<label class="label py-1" for="name">
+						<span class="label-text">Name</span>
 					</label>
-
-					<label class="flex cursor-pointer items-center gap-3 py-2">
-						<input type="checkbox" class="checkbox checkbox-sm shrink-0" bind:checked={readOnly} />
-						<span class="text-sm">Read-only folder (catalog only, no imports)</span>
-					</label>
-
-					<label class="flex cursor-pointer items-center gap-3 py-2">
-						<input type="checkbox" class="checkbox checkbox-sm shrink-0" bind:checked={preserveSymlinks} />
-						<span class="text-sm">Preserve symlinks (for NZBDav/rclone mounts)</span>
-					</label>
-
-					{#if preserveSymlinks}
-						<div class="alert alert-info">
-							<svg
-								xmlns="http://www.w3.org/2000/svg"
-								fill="none"
-								viewBox="0 0 24 24"
-								class="h-6 w-6 shrink-0 stroke-current"
-							>
-								<path
-									stroke-linecap="round"
-									stroke-linejoin="round"
-									stroke-width="2"
-									d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
-								></path>
-							</svg>
-							<div>
-								<div class="font-medium">Symlink preservation enabled</div>
-								<div class="text-sm opacity-80">
-									Symlinks will be recreated at the destination instead of copying file contents.
-									This is useful when the source folder contains symlinks to files on network mounts
-									(NZBDav, rclone).
-								</div>
-							</div>
-						</div>
-					{/if}
-
-					{#if readOnly}
-						<div class="alert alert-info">
-							<svg
-								xmlns="http://www.w3.org/2000/svg"
-								fill="none"
-								viewBox="0 0 24 24"
-								class="h-6 w-6 shrink-0 stroke-current"
-							>
-								<path
-									stroke-linecap="round"
-									stroke-linejoin="round"
-									stroke-width="2"
-									d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
-								></path>
-							</svg>
-							<div>
-								<div class="font-medium">Read-only mode enabled</div>
-								<div class="text-sm opacity-80">
-									This folder will be used for cataloging existing content only. Imports and new
-									media will not be written to this folder. Useful for virtual mounts like NZBDav.
-								</div>
-							</div>
-						</div>
-					{/if}
-
-					<!-- Save Error -->
-					{#if error}
-						<div class="alert alert-error">
-							<XCircle class="h-5 w-5" />
-							<div>
-								<div class="font-medium">Failed to save</div>
-								<div class="text-sm opacity-80">{error}</div>
-							</div>
-						</div>
-					{/if}
-
-					<!-- Validation Result -->
-					{#if validationResult}
-						<div class="alert {validationResult.valid ? 'alert-success' : 'alert-error'}">
-							{#if validationResult.valid}
-								<CheckCircle2 class="h-5 w-5" />
-								<div>
-									<div class="font-medium">
-										{readOnly ? 'Path is readable' : 'Path is valid'}
-									</div>
-									{#if validationResult.freeSpaceFormatted}
-										<div class="text-sm opacity-80">
-											Free space: {validationResult.freeSpaceFormatted}
-										</div>
-									{:else if readOnly}
-										<div class="text-sm opacity-80">Free space: N/A (read-only)</div>
-									{/if}
-								</div>
-							{:else}
-								<XCircle class="h-5 w-5" />
-								<div>
-									<div class="font-medium">Path validation failed</div>
-									<div class="text-sm opacity-80">{validationResult.error}</div>
-								</div>
-							{/if}
-						</div>
-					{/if}
+					<input
+						id="name"
+						type="text"
+						class="input-bordered input input-sm"
+						bind:value={name}
+						placeholder="Movies Library"
+					/>
 				</div>
 
-				<!-- Actions -->
-				<div class="modal-action">
-					{#if mode === 'edit' && onDelete}
-						<button class="btn mr-auto btn-outline btn-error" onclick={onDelete}>Delete</button>
-					{/if}
+				<div class="form-control">
+					<label class="label py-1" for="mediaType">
+						<span class="label-text">Media Type</span>
+					</label>
+					<select id="mediaType" class="select-bordered select select-sm" bind:value={mediaType}>
+						<option value="movie">Movies</option>
+						<option value="tv">TV Shows</option>
+					</select>
+				</div>
+			</div>
 
-					<button class="btn btn-ghost" onclick={onClose}>Cancel</button>
-
-					<button class="btn btn-primary" onclick={handleSave} disabled={saving || !path || !name}>
-						{#if saving}
+			<div class="form-control">
+				<label class="label py-1" for="path">
+					<span class="label-text">Path</span>
+				</label>
+				<div class="flex gap-2">
+					<div class="join flex-1">
+						<input
+							id="path"
+							type="text"
+							class="input-bordered input input-sm join-item flex-1"
+							bind:value={path}
+							placeholder="/mnt/media/movies"
+						/>
+						<button
+							type="button"
+							class="btn join-item border border-base-300 btn-ghost btn-sm"
+							onclick={() => (showFolderBrowser = true)}
+							title="Browse folders"
+						>
+							<FolderOpen class="h-4 w-4" />
+						</button>
+					</div>
+					<button
+						class="btn btn-ghost btn-sm"
+						onclick={handleValidatePath}
+						disabled={validating || !path}
+					>
+						{#if validating}
 							<Loader2 class="h-4 w-4 animate-spin" />
 						{/if}
-						Save
+						Validate
 					</button>
 				</div>
+				<div class="label py-1">
+					<span class="label-text-alt text-xs">
+						The folder path where your media library is stored
+					</span>
+				</div>
+			</div>
+
+			<label class="flex cursor-pointer items-center gap-3 py-2">
+				<input type="checkbox" class="checkbox shrink-0 checkbox-sm" bind:checked={isDefault} />
+				<span class="text-sm"
+					>Set as default for {mediaType === 'movie' ? 'movies' : 'TV shows'}</span
+				>
+			</label>
+
+			<label class="flex cursor-pointer items-center gap-3 py-2">
+				<input type="checkbox" class="checkbox shrink-0 checkbox-sm" bind:checked={readOnly} />
+				<span class="text-sm">Read-only folder (catalog only, no imports)</span>
+			</label>
+
+			<label class="flex cursor-pointer items-center gap-3 py-2">
+				<input
+					type="checkbox"
+					class="checkbox shrink-0 checkbox-sm"
+					bind:checked={preserveSymlinks}
+				/>
+				<span class="text-sm">Preserve symlinks (for NZBDav/rclone mounts)</span>
+			</label>
+
+			{#if preserveSymlinks}
+				<div class="alert alert-info">
+					<svg
+						xmlns="http://www.w3.org/2000/svg"
+						fill="none"
+						viewBox="0 0 24 24"
+						class="h-6 w-6 shrink-0 stroke-current"
+					>
+						<path
+							stroke-linecap="round"
+							stroke-linejoin="round"
+							stroke-width="2"
+							d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
+						></path>
+					</svg>
+					<div>
+						<div class="font-medium">Symlink preservation enabled</div>
+						<div class="text-sm opacity-80">
+							Symlinks will be recreated at the destination instead of copying file contents. This
+							is useful when the source folder contains symlinks to files on network mounts (NZBDav,
+							rclone).
+						</div>
+					</div>
+				</div>
 			{/if}
+
+			{#if readOnly}
+				<div class="alert alert-info">
+					<svg
+						xmlns="http://www.w3.org/2000/svg"
+						fill="none"
+						viewBox="0 0 24 24"
+						class="h-6 w-6 shrink-0 stroke-current"
+					>
+						<path
+							stroke-linecap="round"
+							stroke-linejoin="round"
+							stroke-width="2"
+							d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
+						></path>
+					</svg>
+					<div>
+						<div class="font-medium">Read-only mode enabled</div>
+						<div class="text-sm opacity-80">
+							This folder will be used for cataloging existing content only. Imports and new media
+							will not be written to this folder. Useful for virtual mounts like NZBDav.
+						</div>
+					</div>
+				</div>
+			{/if}
+
+			<!-- Save Error -->
+			{#if error}
+				<div class="alert alert-error">
+					<XCircle class="h-5 w-5" />
+					<div>
+						<div class="font-medium">Failed to save</div>
+						<div class="text-sm opacity-80">{error}</div>
+					</div>
+				</div>
+			{/if}
+
+			<!-- Validation Result -->
+			{#if validationResult}
+				<div class="alert {validationResult.valid ? 'alert-success' : 'alert-error'}">
+					{#if validationResult.valid}
+						<CheckCircle2 class="h-5 w-5" />
+						<div>
+							<div class="font-medium">
+								{readOnly ? 'Path is readable' : 'Path is valid'}
+							</div>
+							{#if validationResult.freeSpaceFormatted}
+								<div class="text-sm opacity-80">
+									Free space: {validationResult.freeSpaceFormatted}
+								</div>
+							{:else if readOnly}
+								<div class="text-sm opacity-80">Free space: N/A (read-only)</div>
+							{/if}
+						</div>
+					{:else}
+						<XCircle class="h-5 w-5" />
+						<div>
+							<div class="font-medium">Path validation failed</div>
+							<div class="text-sm opacity-80">{validationResult.error}</div>
+						</div>
+					{/if}
+				</div>
+			{/if}
+		</div>
+
+		<!-- Actions -->
+		<div class="modal-action">
+			{#if mode === 'edit' && onDelete}
+				<button class="btn mr-auto btn-outline btn-error" onclick={onDelete}>Delete</button>
+			{/if}
+
+			<button class="btn btn-ghost" onclick={onClose}>Cancel</button>
+
+			<button class="btn btn-primary" onclick={handleSave} disabled={saving || !path || !name}>
+				{#if saving}
+					<Loader2 class="h-4 w-4 animate-spin" />
+				{/if}
+				Save
+			</button>
+		</div>
+	{/if}
 </ModalWrapper>

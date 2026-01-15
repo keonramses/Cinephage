@@ -77,12 +77,12 @@
 </div>
 
 <label class="flex cursor-pointer items-center gap-2 py-2">
-	<input type="checkbox" class="checkbox checkbox-sm shrink-0" bind:checked={preferMagnetUrl} />
+	<input type="checkbox" class="checkbox shrink-0 checkbox-sm" bind:checked={preferMagnetUrl} />
 	<span class="text-sm">Prefer Magnet URLs</span>
 </label>
 
 <label class="flex cursor-pointer items-center gap-2 py-2">
-	<input type="checkbox" class="checkbox checkbox-sm shrink-0" bind:checked={rejectDeadTorrents} />
+	<input type="checkbox" class="checkbox shrink-0 checkbox-sm" bind:checked={rejectDeadTorrents} />
 	<span class="text-sm">Reject Dead Torrents</span>
 	<span class="text-xs text-base-content/50">(0 seeders)</span>
 </label>

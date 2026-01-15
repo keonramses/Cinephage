@@ -237,174 +237,174 @@
 	}
 </script>
 
-<ModalWrapper {open} onClose={onClose} maxWidth="lg" labelledBy="channel-category-manager-modal-title">
+<ModalWrapper {open} {onClose} maxWidth="lg" labelledBy="channel-category-manager-modal-title">
 	<!-- Header -->
 	<div class="mb-4 flex items-center justify-between">
 		<h3 id="channel-category-manager-modal-title" class="text-lg font-bold">Manage Categories</h3>
-				<button class="btn btn-circle btn-ghost btn-sm" onclick={onClose}>
-					<X class="h-4 w-4" />
-				</button>
-			</div>
+		<button class="btn btn-circle btn-ghost btn-sm" onclick={onClose}>
+			<X class="h-4 w-4" />
+		</button>
+	</div>
 
-			<!-- Add New Category -->
-			<div class="mb-4 rounded-lg bg-base-200 p-3">
-				<p class="mb-2 text-sm font-medium">Add New Category</p>
-				<div class="flex gap-2">
-					<input
-						type="text"
-						class="input-bordered input input-sm flex-1"
-						placeholder="Category name"
-						bind:value={newName}
-						onkeydown={(e) => e.key === 'Enter' && addCategory()}
-					/>
-					<div class="flex items-center gap-1">
-						{#each presetColors.slice(0, 5) as color (color)}
-							<button
-								type="button"
-								class="h-6 w-6 rounded-full border-2 transition-transform hover:scale-110
-									{newColor === color ? 'border-white ring-2 ring-primary' : 'border-transparent'}"
-								style="background-color: {color}"
-								onclick={() => (newColor = newColor === color ? '' : color)}
-								title="Select {color}"
-							></button>
-						{/each}
-					</div>
+	<!-- Add New Category -->
+	<div class="mb-4 rounded-lg bg-base-200 p-3">
+		<p class="mb-2 text-sm font-medium">Add New Category</p>
+		<div class="flex gap-2">
+			<input
+				type="text"
+				class="input-bordered input input-sm flex-1"
+				placeholder="Category name"
+				bind:value={newName}
+				onkeydown={(e) => e.key === 'Enter' && addCategory()}
+			/>
+			<div class="flex items-center gap-1">
+				{#each presetColors.slice(0, 5) as color (color)}
 					<button
-						class="btn btn-sm btn-primary"
-						onclick={addCategory}
-						disabled={!newName.trim() || isAdding}
-					>
-						{#if isAdding}
-							<Loader2 class="h-4 w-4 animate-spin" />
-						{:else}
-							<Plus class="h-4 w-4" />
-						{/if}
-					</button>
-				</div>
+						type="button"
+						class="h-6 w-6 rounded-full border-2 transition-transform hover:scale-110
+									{newColor === color ? 'border-white ring-2 ring-primary' : 'border-transparent'}"
+						style="background-color: {color}"
+						onclick={() => (newColor = newColor === color ? '' : color)}
+						title="Select {color}"
+					></button>
+				{/each}
 			</div>
+			<button
+				class="btn btn-sm btn-primary"
+				onclick={addCategory}
+				disabled={!newName.trim() || isAdding}
+			>
+				{#if isAdding}
+					<Loader2 class="h-4 w-4 animate-spin" />
+				{:else}
+					<Plus class="h-4 w-4" />
+				{/if}
+			</button>
+		</div>
+	</div>
 
-			<!-- Category List -->
-			{#if localCategories.length === 0}
-				<div class="py-8 text-center text-base-content/50">
-					<p>No categories yet</p>
-					<p class="text-sm">Create categories to organize your channels</p>
-				</div>
-			{:else}
-				<div class="space-y-1">
-					{#each localCategories as cat, index (cat.id)}
-						<div
-							class="flex items-center gap-2 rounded-lg px-2 py-2 transition-colors
+	<!-- Category List -->
+	{#if localCategories.length === 0}
+		<div class="py-8 text-center text-base-content/50">
+			<p>No categories yet</p>
+			<p class="text-sm">Create categories to organize your channels</p>
+		</div>
+	{:else}
+		<div class="space-y-1">
+			{#each localCategories as cat, index (cat.id)}
+				<div
+					class="flex items-center gap-2 rounded-lg px-2 py-2 transition-colors
 								{draggedIndex === index ? 'bg-base-200 opacity-50' : ''}
 								{dragOverIndex === index && draggedIndex !== index ? 'bg-primary/10' : ''}
 								{editingId === cat.id ? 'bg-base-200' : 'hover:bg-base-200/50'}"
-							role="listitem"
-							draggable={editingId !== cat.id}
-							ondragstart={(e) => handleDragStart(e, index)}
-							ondragover={(e) => handleDragOver(e, index)}
-							ondragleave={handleDragLeave}
-							ondrop={(e) => handleDrop(e, index)}
-							ondragend={handleDragEnd}
-						>
-							<!-- Drag Handle -->
-							{#if editingId !== cat.id}
-								<div class="cursor-grab">
-									<GripVertical class="h-4 w-4 text-base-content/30" />
-								</div>
-							{:else}
-								<div class="w-4"></div>
-							{/if}
-
-							{#if editingId === cat.id}
-								<!-- Edit Mode -->
-								<div class="flex flex-1 items-center gap-2">
-									<input
-										type="text"
-										class="input-bordered input input-sm flex-1"
-										bind:value={editingName}
-										onkeydown={(e) => {
-											if (e.key === 'Enter') saveEdit();
-											if (e.key === 'Escape') cancelEdit();
-										}}
-									/>
-									<div class="flex items-center gap-1">
-										{#each presetColors.slice(0, 5) as color (color)}
-											<button
-												type="button"
-												class="h-5 w-5 rounded-full border-2 transition-transform hover:scale-110
-													{editingColor === color ? 'border-white ring-2 ring-primary' : 'border-transparent'}"
-												style="background-color: {color}"
-												onclick={() => (editingColor = editingColor === color ? '' : color)}
-												title="Select {color}"
-											></button>
-										{/each}
-									</div>
-									<button
-										class="btn btn-ghost btn-xs"
-										onclick={cancelEdit}
-										disabled={savingId === cat.id}
-									>
-										<X class="h-3.5 w-3.5" />
-									</button>
-									<button
-										class="btn btn-xs btn-primary"
-										onclick={saveEdit}
-										disabled={!editingName.trim() || savingId === cat.id}
-									>
-										{#if savingId === cat.id}
-											<Loader2 class="h-3.5 w-3.5 animate-spin" />
-										{:else}
-											<Check class="h-3.5 w-3.5" />
-										{/if}
-									</button>
-								</div>
-							{:else}
-								<!-- Display Mode -->
-								{#if cat.color}
-									<span class="h-3 w-3 rounded-full" style="background-color: {cat.color}"></span>
-								{:else}
-									<span class="h-3 w-3 rounded-full bg-base-content/20"></span>
-								{/if}
-
-								<span class="flex-1 font-medium">{cat.name}</span>
-
-								<span class="text-sm text-base-content/50">
-									{getChannelCount(cat.id)} channels
-								</span>
-
-								<button
-									class="btn btn-ghost btn-xs"
-									onclick={() => startEdit(cat)}
-									disabled={deletingId === cat.id}
-								>
-									<Pencil class="h-3.5 w-3.5" />
-								</button>
-
-								<button
-									class="btn text-error btn-ghost btn-xs hover:bg-error/10"
-									onclick={() => deleteCategory(cat)}
-									disabled={deletingId === cat.id}
-								>
-									{#if deletingId === cat.id}
-										<Loader2 class="h-3.5 w-3.5 animate-spin" />
-									{:else}
-										<Trash2 class="h-3.5 w-3.5" />
-									{/if}
-								</button>
-							{/if}
+					role="listitem"
+					draggable={editingId !== cat.id}
+					ondragstart={(e) => handleDragStart(e, index)}
+					ondragover={(e) => handleDragOver(e, index)}
+					ondragleave={handleDragLeave}
+					ondrop={(e) => handleDrop(e, index)}
+					ondragend={handleDragEnd}
+				>
+					<!-- Drag Handle -->
+					{#if editingId !== cat.id}
+						<div class="cursor-grab">
+							<GripVertical class="h-4 w-4 text-base-content/30" />
 						</div>
-					{/each}
-				</div>
-			{/if}
+					{:else}
+						<div class="w-4"></div>
+					{/if}
 
-			<!-- Reordering indicator -->
-			{#if reordering}
-				<div class="mt-2 flex items-center justify-center gap-2 text-sm text-base-content/50">
-					<Loader2 class="h-4 w-4 animate-spin" />
-					Saving order...
-				</div>
-			{/if}
+					{#if editingId === cat.id}
+						<!-- Edit Mode -->
+						<div class="flex flex-1 items-center gap-2">
+							<input
+								type="text"
+								class="input-bordered input input-sm flex-1"
+								bind:value={editingName}
+								onkeydown={(e) => {
+									if (e.key === 'Enter') saveEdit();
+									if (e.key === 'Escape') cancelEdit();
+								}}
+							/>
+							<div class="flex items-center gap-1">
+								{#each presetColors.slice(0, 5) as color (color)}
+									<button
+										type="button"
+										class="h-5 w-5 rounded-full border-2 transition-transform hover:scale-110
+													{editingColor === color ? 'border-white ring-2 ring-primary' : 'border-transparent'}"
+										style="background-color: {color}"
+										onclick={() => (editingColor = editingColor === color ? '' : color)}
+										title="Select {color}"
+									></button>
+								{/each}
+							</div>
+							<button
+								class="btn btn-ghost btn-xs"
+								onclick={cancelEdit}
+								disabled={savingId === cat.id}
+							>
+								<X class="h-3.5 w-3.5" />
+							</button>
+							<button
+								class="btn btn-xs btn-primary"
+								onclick={saveEdit}
+								disabled={!editingName.trim() || savingId === cat.id}
+							>
+								{#if savingId === cat.id}
+									<Loader2 class="h-3.5 w-3.5 animate-spin" />
+								{:else}
+									<Check class="h-3.5 w-3.5" />
+								{/if}
+							</button>
+						</div>
+					{:else}
+						<!-- Display Mode -->
+						{#if cat.color}
+							<span class="h-3 w-3 rounded-full" style="background-color: {cat.color}"></span>
+						{:else}
+							<span class="h-3 w-3 rounded-full bg-base-content/20"></span>
+						{/if}
 
-		<!-- Actions -->
+						<span class="flex-1 font-medium">{cat.name}</span>
+
+						<span class="text-sm text-base-content/50">
+							{getChannelCount(cat.id)} channels
+						</span>
+
+						<button
+							class="btn btn-ghost btn-xs"
+							onclick={() => startEdit(cat)}
+							disabled={deletingId === cat.id}
+						>
+							<Pencil class="h-3.5 w-3.5" />
+						</button>
+
+						<button
+							class="btn text-error btn-ghost btn-xs hover:bg-error/10"
+							onclick={() => deleteCategory(cat)}
+							disabled={deletingId === cat.id}
+						>
+							{#if deletingId === cat.id}
+								<Loader2 class="h-3.5 w-3.5 animate-spin" />
+							{:else}
+								<Trash2 class="h-3.5 w-3.5" />
+							{/if}
+						</button>
+					{/if}
+				</div>
+			{/each}
+		</div>
+	{/if}
+
+	<!-- Reordering indicator -->
+	{#if reordering}
+		<div class="mt-2 flex items-center justify-center gap-2 text-sm text-base-content/50">
+			<Loader2 class="h-4 w-4 animate-spin" />
+			Saving order...
+		</div>
+	{/if}
+
+	<!-- Actions -->
 	<div class="modal-action">
 		<button class="btn" onclick={onClose}>Done</button>
 	</div>

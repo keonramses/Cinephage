@@ -142,89 +142,92 @@
 	}
 </script>
 
-<ModalWrapper {open} onClose={handleCancel} maxWidth="md" labelledBy="extraction-progress-modal-title">
+<ModalWrapper
+	{open}
+	onClose={handleCancel}
+	maxWidth="md"
+	labelledBy="extraction-progress-modal-title"
+>
 	<!-- Header -->
 	<div class="mb-4 flex items-center justify-between">
 		<h3 id="extraction-progress-modal-title" class="text-lg font-bold">Preparing Stream</h3>
-				<button class="btn btn-circle btn-ghost btn-sm" onclick={handleCancel}>
-					<X size={18} />
-				</button>
-			</div>
+		<button class="btn btn-circle btn-ghost btn-sm" onclick={handleCancel}>
+			<X size={18} />
+		</button>
+	</div>
 
-			<!-- Title -->
-			<p class="mb-6 truncate text-sm text-base-content/70" {title}>
-				{title}
-			</p>
+	<!-- Title -->
+	<p class="mb-6 truncate text-sm text-base-content/70" {title}>
+		{title}
+	</p>
 
-			<!-- Progress -->
-			<div class="space-y-4">
-				<!-- Phase indicator -->
-				<div class="flex items-center gap-3">
-					{#if phase === 'downloading'}
-						<div class="rounded-full bg-primary/10 p-2">
-							<Download size={20} class="animate-pulse text-primary" />
-						</div>
-					{:else if phase === 'extracting'}
-						<div class="rounded-full bg-secondary/10 p-2">
-							<Archive size={20} class="animate-pulse text-secondary" />
-						</div>
-					{:else if phase === 'complete'}
-						<div class="rounded-full bg-success/10 p-2">
-							<Check size={20} class="text-success" />
-						</div>
-					{:else if phase === 'error'}
-						<div class="rounded-full bg-error/10 p-2">
-							<AlertCircle size={20} class="text-error" />
-						</div>
-					{:else}
-						<div class="rounded-full bg-base-200 p-2">
-							<Loader2 size={20} class="animate-spin" />
-						</div>
-					{/if}
-					<span class="font-medium">{getPhaseLabel()}</span>
+	<!-- Progress -->
+	<div class="space-y-4">
+		<!-- Phase indicator -->
+		<div class="flex items-center gap-3">
+			{#if phase === 'downloading'}
+				<div class="rounded-full bg-primary/10 p-2">
+					<Download size={20} class="animate-pulse text-primary" />
 				</div>
+			{:else if phase === 'extracting'}
+				<div class="rounded-full bg-secondary/10 p-2">
+					<Archive size={20} class="animate-pulse text-secondary" />
+				</div>
+			{:else if phase === 'complete'}
+				<div class="rounded-full bg-success/10 p-2">
+					<Check size={20} class="text-success" />
+				</div>
+			{:else if phase === 'error'}
+				<div class="rounded-full bg-error/10 p-2">
+					<AlertCircle size={20} class="text-error" />
+				</div>
+			{:else}
+				<div class="rounded-full bg-base-200 p-2">
+					<Loader2 size={20} class="animate-spin" />
+				</div>
+			{/if}
+			<span class="font-medium">{getPhaseLabel()}</span>
+		</div>
 
-				<!-- Progress bar -->
-				{#if phase !== 'error'}
-					<div class="w-full">
-						<progress
-							class="progress {phase === 'complete'
-								? 'progress-success'
-								: 'progress-primary'} w-full"
-							value={getProgress()}
-							max="100"
-						></progress>
-						<div class="mt-1 flex justify-between text-xs text-base-content/50">
-							<span>{Math.round(getProgress())}%</span>
-							{#if phase === 'downloading'}
-								<span>Downloading segments...</span>
-							{:else if phase === 'extracting'}
-								<span>Decompressing files...</span>
-							{/if}
-						</div>
-					</div>
-				{/if}
-
-				<!-- Error message -->
-				{#if errorMessage}
-					<div class="alert alert-error">
-						<AlertCircle size={18} />
-						<span>{errorMessage}</span>
-					</div>
-				{/if}
-
-				<!-- Info box -->
-				{#if phase === 'downloading' || phase === 'extracting'}
-					<div class="alert text-sm alert-info">
-						<span>
-							This release uses compression. Content is being downloaded and extracted for
-							streaming. This is a one-time process - future plays will start instantly.
-						</span>
-					</div>
-				{/if}
+		<!-- Progress bar -->
+		{#if phase !== 'error'}
+			<div class="w-full">
+				<progress
+					class="progress {phase === 'complete' ? 'progress-success' : 'progress-primary'} w-full"
+					value={getProgress()}
+					max="100"
+				></progress>
+				<div class="mt-1 flex justify-between text-xs text-base-content/50">
+					<span>{Math.round(getProgress())}%</span>
+					{#if phase === 'downloading'}
+						<span>Downloading segments...</span>
+					{:else if phase === 'extracting'}
+						<span>Decompressing files...</span>
+					{/if}
+				</div>
 			</div>
+		{/if}
 
-		<!-- Footer -->
+		<!-- Error message -->
+		{#if errorMessage}
+			<div class="alert alert-error">
+				<AlertCircle size={18} />
+				<span>{errorMessage}</span>
+			</div>
+		{/if}
+
+		<!-- Info box -->
+		{#if phase === 'downloading' || phase === 'extracting'}
+			<div class="alert text-sm alert-info">
+				<span>
+					This release uses compression. Content is being downloaded and extracted for streaming.
+					This is a one-time process - future plays will start instantly.
+				</span>
+			</div>
+		{/if}
+	</div>
+
+	<!-- Footer -->
 	<div class="modal-action">
 		{#if phase === 'error'}
 			<button class="btn btn-primary" onclick={startExtraction}> Retry </button>

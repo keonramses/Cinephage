@@ -55,7 +55,7 @@
 
 	<textarea
 		{id}
-		class="textarea textarea-bordered"
+		class="textarea-bordered textarea"
 		class:textarea-error={error}
 		{rows}
 		{placeholder}

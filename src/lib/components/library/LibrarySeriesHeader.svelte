@@ -283,9 +283,11 @@
 					<span class="text-base-content/50">Quality Profile:</span>
 					<span class="ml-1 font-medium">{qualityProfileName || 'Default'}</span>
 				</div>
-				<div class="min-w-0 max-w-full">
+				<div class="max-w-full min-w-0">
 					<span class="shrink-0 text-base-content/50">Root Folder:</span>
-					<span class="ml-1 truncate font-medium" title={series.rootFolderPath || 'Not set'}>{series.rootFolderPath || 'Not set'}</span>
+					<span class="ml-1 truncate font-medium" title={series.rootFolderPath || 'Not set'}
+						>{series.rootFolderPath || 'Not set'}</span
+					>
 				</div>
 				<div>
 					<span class="text-base-content/50">Added:</span>

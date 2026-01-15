@@ -439,122 +439,117 @@
 			onClose();
 		}
 	}
-
 </script>
 
 <ModalWrapper {open} onClose={handleClose} maxWidth="2xl" labelledBy="add-library-modal-title">
 	<!-- Header -->
 	<div class="mb-6 flex items-center justify-between">
 		<h3 id="add-library-modal-title" class="text-xl font-bold">Add to Library</h3>
-				<button
-					class="btn btn-circle btn-ghost btn-sm"
-					onclick={handleClose}
-					disabled={isSubmitting}
-					aria-label="Close"
-				>
-					<X class="h-4 w-4" />
-				</button>
+		<button
+			class="btn btn-circle btn-ghost btn-sm"
+			onclick={handleClose}
+			disabled={isSubmitting}
+			aria-label="Close"
+		>
+			<X class="h-4 w-4" />
+		</button>
+	</div>
+
+	<!-- Body -->
+	<div class="min-w-0 space-y-5 overflow-hidden">
+		{#if isLoading}
+			<div class="flex items-center justify-center py-12">
+				<Loader2 class="h-8 w-8 animate-spin text-primary" />
 			</div>
-
-			<!-- Body -->
-			<div class="min-w-0 space-y-5 overflow-hidden">
-				{#if isLoading}
-					<div class="flex items-center justify-center py-12">
-						<Loader2 class="h-8 w-8 animate-spin text-primary" />
-					</div>
-				{:else}
-					<!-- Media Info Preview -->
-					<div class="flex items-start gap-4">
-						{#if posterPath}
-							<img
-								src={`https://image.tmdb.org/t/p/w92${posterPath}`}
-								alt={title}
-								class="w-16 rounded-md shadow-md"
-							/>
-						{:else}
-							<div class="flex h-24 w-16 items-center justify-center rounded-md bg-base-300">
-								<span class="text-xs text-base-content/30">No Image</span>
-							</div>
-						{/if}
-						<div>
-							<h3 class="text-lg font-bold">{title}</h3>
-							{#if year}
-								<p class="text-sm text-base-content/70">{year}</p>
-							{/if}
-							<span
-								class="mt-1 badge badge-sm {mediaType === 'movie'
-									? 'badge-info'
-									: 'badge-secondary'}"
-							>
-								{mediaType === 'movie' ? 'Movie' : 'TV Series'}
-							</span>
-						</div>
-					</div>
-
-					<!-- Error Display -->
-					{#if error}
-						<div class="alert alert-error">
-							<span>{error}</span>
-						</div>
-					{/if}
-
-					<!-- Common Options (Root Folder, Profile) -->
-					<CommonOptions
-						{mediaType}
-						{rootFolders}
-						{scoringProfiles}
-						bind:selectedRootFolder
-						bind:selectedScoringProfile
-						bind:searchOnAdd
-						bind:wantsSubtitles
+		{:else}
+			<!-- Media Info Preview -->
+			<div class="flex items-start gap-4">
+				{#if posterPath}
+					<img
+						src={`https://image.tmdb.org/t/p/w92${posterPath}`}
+						alt={title}
+						class="w-16 rounded-md shadow-md"
 					/>
-
-					<!-- Movie-specific options -->
-					{#if mediaType === 'movie'}
-						<MovieAddOptions
-							{tmdbId}
-							bind:minimumAvailability
-							bind:monitored
-							{collection}
-							bind:addEntireCollection
-						/>
-					{/if}
-
-					<!-- TV-specific options -->
-					{#if mediaType === 'tv'}
-						<SeriesAddOptions
-							{seasons}
-							bind:monitorType
-							bind:monitorNewItems
-							bind:monitorSpecials
-							bind:seriesType
-							bind:seasonFolder
-							{monitoredSeasons}
-							bind:showAdvanced
-						/>
-					{/if}
+				{:else}
+					<div class="flex h-24 w-16 items-center justify-center rounded-md bg-base-300">
+						<span class="text-xs text-base-content/30">No Image</span>
+					</div>
 				{/if}
+				<div>
+					<h3 class="text-lg font-bold">{title}</h3>
+					{#if year}
+						<p class="text-sm text-base-content/70">{year}</p>
+					{/if}
+					<span
+						class="mt-1 badge badge-sm {mediaType === 'movie' ? 'badge-info' : 'badge-secondary'}"
+					>
+						{mediaType === 'movie' ? 'Movie' : 'TV Series'}
+					</span>
+				</div>
 			</div>
 
-			<!-- Footer -->
-			<div class="modal-action mt-6 border-t border-base-300 pt-4">
-				<button class="btn btn-ghost" onclick={handleClose} disabled={isSubmitting}>
-					Cancel
-				</button>
-				<button
-					class="btn btn-primary"
-					onclick={handleSubmit}
-					disabled={isLoading || isSubmitting || filteredRootFolders.length === 0}
-				>
-					{#if isSubmitting}
-						<Loader2 class="mr-2 h-4 w-4 animate-spin" />
-						Adding...
-					{:else if willSearchOnAdd}
-						<Search class="mr-2 h-4 w-4" />
-						Add + Search
-					{:else}
-						Add to Library
-					{/if}
-				</button>
-			</div>
+			<!-- Error Display -->
+			{#if error}
+				<div class="alert alert-error">
+					<span>{error}</span>
+				</div>
+			{/if}
+
+			<!-- Common Options (Root Folder, Profile) -->
+			<CommonOptions
+				{mediaType}
+				{rootFolders}
+				{scoringProfiles}
+				bind:selectedRootFolder
+				bind:selectedScoringProfile
+				bind:searchOnAdd
+				bind:wantsSubtitles
+			/>
+
+			<!-- Movie-specific options -->
+			{#if mediaType === 'movie'}
+				<MovieAddOptions
+					{tmdbId}
+					bind:minimumAvailability
+					bind:monitored
+					{collection}
+					bind:addEntireCollection
+				/>
+			{/if}
+
+			<!-- TV-specific options -->
+			{#if mediaType === 'tv'}
+				<SeriesAddOptions
+					{seasons}
+					bind:monitorType
+					bind:monitorNewItems
+					bind:monitorSpecials
+					bind:seriesType
+					bind:seasonFolder
+					{monitoredSeasons}
+					bind:showAdvanced
+				/>
+			{/if}
+		{/if}
+	</div>
+
+	<!-- Footer -->
+	<div class="modal-action mt-6 border-t border-base-300 pt-4">
+		<button class="btn btn-ghost" onclick={handleClose} disabled={isSubmitting}> Cancel </button>
+		<button
+			class="btn btn-primary"
+			onclick={handleSubmit}
+			disabled={isLoading || isSubmitting || filteredRootFolders.length === 0}
+		>
+			{#if isSubmitting}
+				<Loader2 class="mr-2 h-4 w-4 animate-spin" />
+				Adding...
+			{:else if willSearchOnAdd}
+				<Search class="mr-2 h-4 w-4" />
+				Add + Search
+			{:else}
+				Add to Library
+			{/if}
+		</button>
+	</div>
 </ModalWrapper>

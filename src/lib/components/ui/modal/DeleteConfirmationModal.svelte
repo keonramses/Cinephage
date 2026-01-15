@@ -25,7 +25,7 @@
 	}
 </script>
 
-<ModalWrapper open={open} onClose={handleClose} maxWidth="md" labelledBy="delete-modal-title">
+<ModalWrapper {open} onClose={handleClose} maxWidth="md" labelledBy="delete-modal-title">
 	<div class="mb-4 flex items-center justify-between">
 		<h3 id="delete-modal-title" class="text-lg font-bold">{title}</h3>
 		<button
@@ -39,12 +39,12 @@
 	</div>
 
 	<p class="py-2">
-		Delete files for <strong>"{itemName}"</strong>? The item will remain in your library but
-		show as missing.
+		Delete files for <strong>"{itemName}"</strong>? The item will remain in your library but show as
+		missing.
 	</p>
 
 	<label class="mt-4 flex cursor-pointer items-center gap-3 py-2">
-		<input type="checkbox" class="checkbox checkbox-error shrink-0" bind:checked={deleteFiles} />
+		<input type="checkbox" class="checkbox shrink-0 checkbox-error" bind:checked={deleteFiles} />
 		<span class="text-sm">Delete files from disk</span>
 	</label>
 

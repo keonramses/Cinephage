@@ -94,112 +94,117 @@
 	}
 </script>
 
-<ModalWrapper open={open && !!channel} onClose={onClose} maxWidth="2xl" labelledBy="channel-schedule-modal-title">
+<ModalWrapper
+	open={open && !!channel}
+	{onClose}
+	maxWidth="2xl"
+	labelledBy="channel-schedule-modal-title"
+>
 	{#if channel}
-	<!-- Header -->
-	<div class="mb-4 flex items-center justify-between">
-		<div class="flex items-center gap-3">
-					{#if channel.displayLogo}
-						<img
-							src={channel.displayLogo}
-							alt=""
-							class="h-10 w-10 rounded bg-base-300 object-contain"
-						/>
-					{:else}
-						<div class="flex h-10 w-10 items-center justify-center rounded bg-base-300">
-							<Tv class="h-5 w-5 text-base-content/30" />
-						</div>
-					{/if}
-					<div>
-						<h3 class="text-lg font-bold">{channel.displayName}</h3>
-						<p class="text-sm text-base-content/60">{channel.accountName}</p>
-					</div>
-				</div>
-				<button class="btn btn-circle btn-ghost btn-sm" onclick={onClose}>
-					<X class="h-4 w-4" />
-				</button>
-			</div>
-
-			{#if channel.epgSourceChannelId && channel.epgSourceChannel}
-				<div class="mb-4 flex items-center gap-2 rounded-lg bg-info/10 px-3 py-2 text-sm text-info">
-					<Calendar class="h-4 w-4" />
-					<span>EPG from: {channel.epgSourceChannel.name}</span>
-				</div>
-			{/if}
-
-			<!-- Error -->
-			{#if error}
-				<div class="mb-4 alert alert-error">
-					<span>{error}</span>
-				</div>
-			{/if}
-
-			<!-- Program list -->
-			<div class="max-h-96 overflow-y-auto">
-				{#if loading}
-					<div class="flex justify-center py-8">
-						<Loader2 class="h-6 w-6 animate-spin text-base-content/50" />
-					</div>
-				{:else if programs.length === 0}
-					<div class="py-8 text-center text-base-content/50">No upcoming programs available</div>
+		<!-- Header -->
+		<div class="mb-4 flex items-center justify-between">
+			<div class="flex items-center gap-3">
+				{#if channel.displayLogo}
+					<img
+						src={channel.displayLogo}
+						alt=""
+						class="h-10 w-10 rounded bg-base-300 object-contain"
+					/>
 				{:else}
-					<div class="space-y-1">
-						{#each programs as program (program.id)}
-							{@const isCurrent = isCurrentlyAiring(program)}
-							{@const progress = isCurrent ? getProgress(program) : 0}
-							<div
-								class="rounded-lg p-3 transition-colors {isCurrent
-									? 'border border-primary/20 bg-primary/10'
-									: 'hover:bg-base-200'}"
-							>
-								<div class="flex items-start gap-3">
-									<div class="flex min-w-[100px] flex-col text-sm">
-										<span class="flex items-center gap-1 font-mono text-base-content/70">
-											<Clock class="h-3 w-3" />
-											{formatTime(program.startTime)}
-										</span>
-										<span class="text-xs text-base-content/50">
-											{formatTime(program.endTime)}
-										</span>
-									</div>
-									<div class="min-w-0 flex-1">
-										<div class="flex items-center gap-2">
-											<span class="font-medium">{program.title}</span>
-											{#if isCurrent}
-												<span class="badge badge-sm badge-primary">LIVE</span>
-											{/if}
-											{#if program.category}
-												<span class="badge badge-ghost badge-sm">{program.category}</span>
-											{/if}
-										</div>
-										{#if program.description}
-											<p class="mt-1 line-clamp-2 text-sm text-base-content/60">
-												{program.description}
-											</p>
-										{/if}
-										{#if isCurrent}
-											<div class="mt-2 flex items-center gap-2">
-												<progress
-													class="progress h-1.5 w-32 progress-primary"
-													value={progress}
-													max="100"
-												></progress>
-												<span class="text-xs text-base-content/50">
-													{Math.round(100 - progress)}% remaining
-												</span>
-											</div>
-										{/if}
-									</div>
-								</div>
-							</div>
-						{/each}
+					<div class="flex h-10 w-10 items-center justify-center rounded bg-base-300">
+						<Tv class="h-5 w-5 text-base-content/30" />
 					</div>
 				{/if}
+				<div>
+					<h3 class="text-lg font-bold">{channel.displayName}</h3>
+					<p class="text-sm text-base-content/60">{channel.accountName}</p>
+				</div>
 			</div>
+			<button class="btn btn-circle btn-ghost btn-sm" onclick={onClose}>
+				<X class="h-4 w-4" />
+			</button>
+		</div>
+
+		{#if channel.epgSourceChannelId && channel.epgSourceChannel}
+			<div class="mb-4 flex items-center gap-2 rounded-lg bg-info/10 px-3 py-2 text-sm text-info">
+				<Calendar class="h-4 w-4" />
+				<span>EPG from: {channel.epgSourceChannel.name}</span>
+			</div>
+		{/if}
+
+		<!-- Error -->
+		{#if error}
+			<div class="mb-4 alert alert-error">
+				<span>{error}</span>
+			</div>
+		{/if}
+
+		<!-- Program list -->
+		<div class="max-h-96 overflow-y-auto">
+			{#if loading}
+				<div class="flex justify-center py-8">
+					<Loader2 class="h-6 w-6 animate-spin text-base-content/50" />
+				</div>
+			{:else if programs.length === 0}
+				<div class="py-8 text-center text-base-content/50">No upcoming programs available</div>
+			{:else}
+				<div class="space-y-1">
+					{#each programs as program (program.id)}
+						{@const isCurrent = isCurrentlyAiring(program)}
+						{@const progress = isCurrent ? getProgress(program) : 0}
+						<div
+							class="rounded-lg p-3 transition-colors {isCurrent
+								? 'border border-primary/20 bg-primary/10'
+								: 'hover:bg-base-200'}"
+						>
+							<div class="flex items-start gap-3">
+								<div class="flex min-w-[100px] flex-col text-sm">
+									<span class="flex items-center gap-1 font-mono text-base-content/70">
+										<Clock class="h-3 w-3" />
+										{formatTime(program.startTime)}
+									</span>
+									<span class="text-xs text-base-content/50">
+										{formatTime(program.endTime)}
+									</span>
+								</div>
+								<div class="min-w-0 flex-1">
+									<div class="flex items-center gap-2">
+										<span class="font-medium">{program.title}</span>
+										{#if isCurrent}
+											<span class="badge badge-sm badge-primary">LIVE</span>
+										{/if}
+										{#if program.category}
+											<span class="badge badge-ghost badge-sm">{program.category}</span>
+										{/if}
+									</div>
+									{#if program.description}
+										<p class="mt-1 line-clamp-2 text-sm text-base-content/60">
+											{program.description}
+										</p>
+									{/if}
+									{#if isCurrent}
+										<div class="mt-2 flex items-center gap-2">
+											<progress
+												class="progress h-1.5 w-32 progress-primary"
+												value={progress}
+												max="100"
+											></progress>
+											<span class="text-xs text-base-content/50">
+												{Math.round(100 - progress)}% remaining
+											</span>
+										</div>
+									{/if}
+								</div>
+							</div>
+						</div>
+					{/each}
+				</div>
+			{/if}
+		</div>
 
 		<!-- Footer -->
-	<div class="modal-action">
-		<button class="btn btn-ghost" onclick={onClose}>Close</button>
-	</div>
+		<div class="modal-action">
+			<button class="btn btn-ghost" onclick={onClose}>Close</button>
+		</div>
 	{/if}
 </ModalWrapper>

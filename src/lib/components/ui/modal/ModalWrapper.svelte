@@ -68,7 +68,9 @@
 	>
 		<div
 			bind:this={modalBoxRef}
-			class="modal-box max-h-[90vh] overflow-y-auto overflow-x-hidden break-words {maxWidthClasses[maxWidth]}"
+			class="modal-box max-h-[90vh] overflow-x-hidden overflow-y-auto break-words {maxWidthClasses[
+				maxWidth
+			]}"
 		>
 			{@render children()}
 		</div>

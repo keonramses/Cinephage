@@ -19,7 +19,7 @@
 <label class="flex cursor-pointer items-start gap-3 py-2">
 	<input
 		type="checkbox"
-		class="checkbox checkbox-sm mt-0.5 shrink-0"
+		class="checkbox mt-0.5 shrink-0 checkbox-sm"
 		bind:checked
 		{disabled}
 		onchange={handleChange}

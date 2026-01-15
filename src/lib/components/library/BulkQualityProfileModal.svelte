@@ -79,7 +79,7 @@
 		<select
 			id="bulk-quality-profile"
 			bind:value={qualityProfileId}
-			class="select select-bordered w-full"
+			class="select-bordered select w-full"
 		>
 			<option value=""
 				>Default ({qualityProfiles.find((p) => p.isDefault)?.name ?? 'System Default'})</option

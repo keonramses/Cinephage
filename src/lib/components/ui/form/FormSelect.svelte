@@ -63,7 +63,7 @@
 
 	<select
 		{id}
-		class="select select-bordered select-{size}"
+		class="select-bordered select select-{size}"
 		class:select-error={error}
 		{disabled}
 		{value}

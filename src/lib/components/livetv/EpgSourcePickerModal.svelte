@@ -97,87 +97,83 @@
 	}
 </script>
 
-<ModalWrapper {open} onClose={onClose} maxWidth="2xl" labelledBy="epg-source-picker-modal-title">
+<ModalWrapper {open} {onClose} maxWidth="2xl" labelledBy="epg-source-picker-modal-title">
 	<!-- Header -->
 	<div class="mb-4 flex items-center justify-between">
 		<h3 id="epg-source-picker-modal-title" class="text-lg font-bold">Select EPG Source</h3>
-				<button class="btn btn-circle btn-ghost btn-sm" onclick={onClose}>
-					<X class="h-4 w-4" />
-				</button>
+		<button class="btn btn-circle btn-ghost btn-sm" onclick={onClose}>
+			<X class="h-4 w-4" />
+		</button>
+	</div>
+
+	<p class="mb-4 text-sm text-base-content/60">
+		Select a channel to use as the EPG source. Only channels with EPG data are shown.
+	</p>
+
+	<!-- Search -->
+	<div class="form-control mb-4">
+		<div class="relative">
+			<Search class="absolute top-1/2 left-3 h-4 w-4 -translate-y-1/2 text-base-content/50" />
+			<input
+				type="text"
+				class="input-bordered input w-full pl-10"
+				placeholder="Search channels..."
+				bind:value={searchQuery}
+			/>
+		</div>
+	</div>
+
+	<!-- Error -->
+	{#if error}
+		<div class="mb-4 alert alert-error">
+			<span>{error}</span>
+		</div>
+	{/if}
+
+	<!-- Channel list -->
+	<div class="max-h-96 overflow-y-auto">
+		{#if loading}
+			<div class="flex justify-center py-8">
+				<Loader2 class="h-6 w-6 animate-spin text-base-content/50" />
 			</div>
-
-			<p class="mb-4 text-sm text-base-content/60">
-				Select a channel to use as the EPG source. Only channels with EPG data are shown.
-			</p>
-
-			<!-- Search -->
-			<div class="form-control mb-4">
-				<div class="relative">
-					<Search class="absolute top-1/2 left-3 h-4 w-4 -translate-y-1/2 text-base-content/50" />
-					<input
-						type="text"
-						class="input-bordered input w-full pl-10"
-						placeholder="Search channels..."
-						bind:value={searchQuery}
-					/>
-				</div>
-			</div>
-
-			<!-- Error -->
-			{#if error}
-				<div class="mb-4 alert alert-error">
-					<span>{error}</span>
-				</div>
-			{/if}
-
-			<!-- Channel list -->
-			<div class="max-h-96 overflow-y-auto">
-				{#if loading}
-					<div class="flex justify-center py-8">
-						<Loader2 class="h-6 w-6 animate-spin text-base-content/50" />
-					</div>
-				{:else if channels.length === 0}
-					<div class="py-8 text-center text-base-content/50">
-						{#if debouncedSearch}
-							No channels found matching "{debouncedSearch}"
-						{:else}
-							No channels with EPG data available
-						{/if}
-					</div>
+		{:else if channels.length === 0}
+			<div class="py-8 text-center text-base-content/50">
+				{#if debouncedSearch}
+					No channels found matching "{debouncedSearch}"
 				{:else}
-					<div class="space-y-1">
-						{#each channels as channel (channel.id)}
-							<button
-								type="button"
-								class="flex w-full items-center gap-3 rounded-lg p-3 transition-colors hover:bg-base-200"
-								onclick={() => handleSelect(channel)}
-							>
-								{#if channel.logo}
-									<img
-										src={channel.logo}
-										alt=""
-										class="h-10 w-10 rounded bg-base-300 object-contain"
-									/>
-								{:else}
-									<div class="flex h-10 w-10 items-center justify-center rounded bg-base-300">
-										<Tv class="h-5 w-5 text-base-content/30" />
-									</div>
-								{/if}
-								<div class="min-w-0 flex-1 text-left">
-									<div class="truncate font-medium">{channel.name}</div>
-									<div class="flex items-center gap-2 text-xs text-base-content/50">
-										<span>{channel.accountName}</span>
-										<span>-</span>
-										<span>{channel.programCount} programs</span>
-									</div>
-								</div>
-							</button>
-						{/each}
-					</div>
+					No channels with EPG data available
 				{/if}
 			</div>
+		{:else}
+			<div class="space-y-1">
+				{#each channels as channel (channel.id)}
+					<button
+						type="button"
+						class="flex w-full items-center gap-3 rounded-lg p-3 transition-colors hover:bg-base-200"
+						onclick={() => handleSelect(channel)}
+					>
+						{#if channel.logo}
+							<img src={channel.logo} alt="" class="h-10 w-10 rounded bg-base-300 object-contain" />
+						{:else}
+							<div class="flex h-10 w-10 items-center justify-center rounded bg-base-300">
+								<Tv class="h-5 w-5 text-base-content/30" />
+							</div>
+						{/if}
+						<div class="min-w-0 flex-1 text-left">
+							<div class="truncate font-medium">{channel.name}</div>
+							<div class="flex items-center gap-2 text-xs text-base-content/50">
+								<span>{channel.accountName}</span>
+								<span>-</span>
+								<span>{channel.programCount} programs</span>
+							</div>
+						</div>
+					</button>
+				{/each}
+			</div>
+		{/if}
+	</div>
 
-		<!-- Footer -->
+	<!-- Footer -->
 	<div class="modal-action">
 		<button class="btn btn-ghost" onclick={onClose}>Cancel</button>
 	</div>

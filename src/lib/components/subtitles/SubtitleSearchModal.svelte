@@ -209,117 +209,117 @@
 	}
 </script>
 
-<ModalWrapper {open} onClose={onClose} maxWidth="4xl" labelledBy="subtitle-search-modal-title">
+<ModalWrapper {open} {onClose} maxWidth="4xl" labelledBy="subtitle-search-modal-title">
 	<!-- Header -->
-			<div class="mb-4 flex items-center justify-between">
-				<div>
-					<h3 id="subtitle-search-modal-title" class="flex items-center gap-2 text-lg font-bold">
-						<Subtitles size={20} class="text-primary" />
-						Subtitle Search
-					</h3>
-					<p class="text-sm text-base-content/60">{title}</p>
-				</div>
-				<div class="flex items-center gap-2">
-					<button class="btn btn-ghost btn-sm" onclick={performSearch} disabled={searching}>
-						{#if searching}
-							<Loader2 size={16} class="animate-spin" />
-						{:else}
-							<RefreshCw size={16} />
-						{/if}
-						Refresh
-					</button>
-					<button class="btn btn-circle btn-ghost btn-sm" onclick={onClose}>
-						<X size={16} />
-					</button>
-				</div>
-			</div>
-
-			<!-- Search stats -->
-			{#if searchMeta}
-				<div class="mb-4 flex flex-wrap items-center gap-4 text-sm text-base-content/70">
-					<span>{searchMeta.totalResults} results</span>
-					<span>Search: {searchMeta.searchTimeMs}ms</span>
-				</div>
-			{/if}
-
-			<!-- Filters -->
-			<div class="mb-4 flex flex-wrap items-center gap-4">
-				<div class="form-control">
-					<div class="input-group input-group-sm">
-						<span class="bg-base-200">
-							<Filter size={14} />
-						</span>
-						<input
-							type="text"
-							placeholder="Filter results..."
-							class="input-bordered input input-sm w-full sm:w-48"
-							bind:value={filterQuery}
-						/>
-					</div>
-				</div>
-
-				<label class="label cursor-pointer gap-2">
-					<input type="checkbox" class="checkbox checkbox-sm" bind:checked={showHashOnly} />
-					<span class="label-text">Hash matches only</span>
-				</label>
-			</div>
-
-			<!-- Results -->
-			<div class="flex-1 overflow-auto">
+	<div class="mb-4 flex items-center justify-between">
+		<div>
+			<h3 id="subtitle-search-modal-title" class="flex items-center gap-2 text-lg font-bold">
+				<Subtitles size={20} class="text-primary" />
+				Subtitle Search
+			</h3>
+			<p class="text-sm text-base-content/60">{title}</p>
+		</div>
+		<div class="flex items-center gap-2">
+			<button class="btn btn-ghost btn-sm" onclick={performSearch} disabled={searching}>
 				{#if searching}
-					<div class="flex flex-col items-center justify-center py-12">
-						<Loader2 size={32} class="animate-spin text-primary" />
-						<p class="mt-4 text-base-content/60">Searching subtitle providers...</p>
-					</div>
-				{:else if searchError}
-					<div class="alert alert-error">
-						<span>{searchError}</span>
-					</div>
-				{:else if filteredResults.length === 0}
-					<div class="flex flex-col items-center justify-center py-12">
-						<Search size={48} class="text-base-content/30" />
-						<p class="mt-4 text-base-content/60">No subtitles found</p>
-						<p class="mt-2 text-sm text-base-content/40">
-							Try adjusting your language profile or search filters
-						</p>
-					</div>
+					<Loader2 size={16} class="animate-spin" />
 				{:else}
-					<div class="overflow-x-auto">
-					<table class="table table-sm">
-						<thead class="sticky top-0 z-10 bg-base-100">
-							<tr>
-								<th>
-									<button class="btn btn-ghost btn-xs" onclick={() => toggleSort('language')}>
-										Language {sortBy === 'language' ? (sortDir === 'desc' ? '↓' : '↑') : ''}
-									</button>
-								</th>
-								<th>Release</th>
-								<th>Provider</th>
-								<th>
-									<button class="btn btn-ghost btn-xs" onclick={() => toggleSort('score')}>
-										Score {sortBy === 'score' ? (sortDir === 'desc' ? '↓' : '↑') : ''}
-									</button>
-								</th>
-								<th>Actions</th>
-							</tr>
-						</thead>
-						<tbody>
-							{#each filteredResults as result (getResultKey(result))}
-								<SubtitleSearchResultRow
-									{result}
-									onDownload={handleDownload}
-									downloading={downloadingIds.has(getResultKey(result))}
-									downloaded={downloadedIds.has(getResultKey(result))}
-									error={downloadErrors.get(getResultKey(result))}
-								/>
-							{/each}
-						</tbody>
-					</table>
-					</div>
+					<RefreshCw size={16} />
 				{/if}
-			</div>
+				Refresh
+			</button>
+			<button class="btn btn-circle btn-ghost btn-sm" onclick={onClose}>
+				<X size={16} />
+			</button>
+		</div>
+	</div>
 
-		<!-- Footer -->
+	<!-- Search stats -->
+	{#if searchMeta}
+		<div class="mb-4 flex flex-wrap items-center gap-4 text-sm text-base-content/70">
+			<span>{searchMeta.totalResults} results</span>
+			<span>Search: {searchMeta.searchTimeMs}ms</span>
+		</div>
+	{/if}
+
+	<!-- Filters -->
+	<div class="mb-4 flex flex-wrap items-center gap-4">
+		<div class="form-control">
+			<div class="input-group input-group-sm">
+				<span class="bg-base-200">
+					<Filter size={14} />
+				</span>
+				<input
+					type="text"
+					placeholder="Filter results..."
+					class="input-bordered input input-sm w-full sm:w-48"
+					bind:value={filterQuery}
+				/>
+			</div>
+		</div>
+
+		<label class="label cursor-pointer gap-2">
+			<input type="checkbox" class="checkbox checkbox-sm" bind:checked={showHashOnly} />
+			<span class="label-text">Hash matches only</span>
+		</label>
+	</div>
+
+	<!-- Results -->
+	<div class="flex-1 overflow-auto">
+		{#if searching}
+			<div class="flex flex-col items-center justify-center py-12">
+				<Loader2 size={32} class="animate-spin text-primary" />
+				<p class="mt-4 text-base-content/60">Searching subtitle providers...</p>
+			</div>
+		{:else if searchError}
+			<div class="alert alert-error">
+				<span>{searchError}</span>
+			</div>
+		{:else if filteredResults.length === 0}
+			<div class="flex flex-col items-center justify-center py-12">
+				<Search size={48} class="text-base-content/30" />
+				<p class="mt-4 text-base-content/60">No subtitles found</p>
+				<p class="mt-2 text-sm text-base-content/40">
+					Try adjusting your language profile or search filters
+				</p>
+			</div>
+		{:else}
+			<div class="overflow-x-auto">
+				<table class="table table-sm">
+					<thead class="sticky top-0 z-10 bg-base-100">
+						<tr>
+							<th>
+								<button class="btn btn-ghost btn-xs" onclick={() => toggleSort('language')}>
+									Language {sortBy === 'language' ? (sortDir === 'desc' ? '↓' : '↑') : ''}
+								</button>
+							</th>
+							<th>Release</th>
+							<th>Provider</th>
+							<th>
+								<button class="btn btn-ghost btn-xs" onclick={() => toggleSort('score')}>
+									Score {sortBy === 'score' ? (sortDir === 'desc' ? '↓' : '↑') : ''}
+								</button>
+							</th>
+							<th>Actions</th>
+						</tr>
+					</thead>
+					<tbody>
+						{#each filteredResults as result (getResultKey(result))}
+							<SubtitleSearchResultRow
+								{result}
+								onDownload={handleDownload}
+								downloading={downloadingIds.has(getResultKey(result))}
+								downloaded={downloadedIds.has(getResultKey(result))}
+								error={downloadErrors.get(getResultKey(result))}
+							/>
+						{/each}
+					</tbody>
+				</table>
+			</div>
+		{/if}
+	</div>
+
+	<!-- Footer -->
 	<div class="modal-action">
 		<button class="btn" onclick={onClose}>Close</button>
 	</div>

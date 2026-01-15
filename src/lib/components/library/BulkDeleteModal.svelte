@@ -61,7 +61,7 @@
 	</p>
 
 	<label class="mt-4 flex cursor-pointer items-center gap-3 py-2">
-		<input type="checkbox" class="checkbox checkbox-error shrink-0" bind:checked={deleteFiles} />
+		<input type="checkbox" class="checkbox shrink-0 checkbox-error" bind:checked={deleteFiles} />
 		<span class="text-sm">Delete files from disk</span>
 	</label>
 

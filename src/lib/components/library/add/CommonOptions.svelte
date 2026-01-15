@@ -39,7 +39,9 @@
 	}: Props = $props();
 
 	const filteredRootFolders = $derived(rootFolders.filter((f) => f.mediaType === mediaType));
-	const selectedRootFolderObj = $derived(filteredRootFolders.find((f) => f.id === selectedRootFolder));
+	const selectedRootFolderObj = $derived(
+		filteredRootFolders.find((f) => f.id === selectedRootFolder)
+	);
 	const selectedProfileObj = $derived(scoringProfiles.find((p) => p.id === selectedScoringProfile));
 
 	function formatBytes(bytes: number | null | undefined): string {
@@ -66,7 +68,11 @@
 			</span>
 		</div>
 	{:else}
-		<select id="root-folder" class="select-bordered select w-full max-w-full" bind:value={selectedRootFolder}>
+		<select
+			id="root-folder"
+			class="select-bordered select w-full max-w-full"
+			bind:value={selectedRootFolder}
+		>
 			{#each filteredRootFolders as folder (folder.id)}
 				<option value={folder.id}>
 					{folder.name}
@@ -112,23 +118,25 @@
 
 <!-- Search on Add Toggle -->
 <label class="flex cursor-pointer items-start gap-4 py-2">
-	<input type="checkbox" class="toggle toggle-success mt-0.5 shrink-0" bind:checked={searchOnAdd} />
+	<input type="checkbox" class="toggle mt-0.5 shrink-0 toggle-success" bind:checked={searchOnAdd} />
 	<div class="min-w-0">
 		<span class="flex items-center gap-2 text-sm font-medium">
 			<Search class="h-4 w-4 shrink-0" />
 			Search Immediately
 		</span>
 		<p class="text-xs text-base-content/60">
-			{searchOnAdd
-				? 'Search and grab best release right now'
-				: 'Let scheduler find releases later'}
+			{searchOnAdd ? 'Search and grab best release right now' : 'Let scheduler find releases later'}
 		</p>
 	</div>
 </label>
 
 <!-- Auto-Download Subtitles Toggle -->
 <label class="flex cursor-pointer items-start gap-4 py-2">
-	<input type="checkbox" class="toggle toggle-primary mt-0.5 shrink-0" bind:checked={wantsSubtitles} />
+	<input
+		type="checkbox"
+		class="toggle mt-0.5 shrink-0 toggle-primary"
+		bind:checked={wantsSubtitles}
+	/>
 	<div class="min-w-0">
 		<span class="flex items-center gap-2 text-sm font-medium">
 			<Subtitles class="h-4 w-4 shrink-0" />

@@ -89,7 +89,7 @@
 	}
 </script>
 
-<ModalWrapper {open} onClose={onClose} maxWidth="lg" labelledBy="series-edit-modal-title">
+<ModalWrapper {open} {onClose} maxWidth="lg" labelledBy="series-edit-modal-title">
 	<!-- Header -->
 	<div class="mb-4 flex items-center justify-between">
 		<h3 id="series-edit-modal-title" class="text-lg font-bold">Edit Series</h3>
@@ -141,11 +141,10 @@
 			<select
 				id="series-quality-profile"
 				bind:value={qualityProfileId}
-				class="select select-bordered w-full"
+				class="select-bordered select w-full"
 			>
 				<option value=""
-					>Default ({qualityProfiles.find((p) => p.isDefault)?.name ??
-						'System Default'})</option
+					>Default ({qualityProfiles.find((p) => p.isDefault)?.name ?? 'System Default'})</option
 				>
 				{#each qualityProfiles as profile (profile.id)}
 					<option value={profile.id}>
@@ -173,7 +172,7 @@
 			<select
 				id="series-root-folder"
 				bind:value={rootFolderId}
-				class="select select-bordered w-full"
+				class="select-bordered select w-full"
 			>
 				<option value="">Not set</option>
 				{#each rootFolders as folder (folder.id)}

@@ -81,7 +81,11 @@
 {#if collection && missingCollectionMovies.length > 0}
 	<div class="form-control min-w-0">
 		<label class="label cursor-pointer justify-start gap-4 rounded-lg bg-base-300/50 p-4">
-			<input type="checkbox" class="checkbox checkbox-primary shrink-0" bind:checked={addEntireCollection} />
+			<input
+				type="checkbox"
+				class="checkbox shrink-0 checkbox-primary"
+				bind:checked={addEntireCollection}
+			/>
 			<div class="min-w-0 flex-1">
 				<span class="label-text block truncate font-medium" title="Add entire {collection.name}">
 					Add entire {collection.name}
@@ -98,7 +102,7 @@
 
 <!-- Monitored Toggle -->
 <label class="flex cursor-pointer items-start gap-4 py-2">
-	<input type="checkbox" class="toggle toggle-primary mt-0.5 shrink-0" bind:checked={monitored} />
+	<input type="checkbox" class="toggle mt-0.5 shrink-0 toggle-primary" bind:checked={monitored} />
 	<div class="min-w-0">
 		<span class="flex items-center gap-2 text-sm font-medium">
 			<Eye class="h-4 w-4 shrink-0" />

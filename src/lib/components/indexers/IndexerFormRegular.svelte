@@ -165,7 +165,7 @@
 				<label class="flex cursor-pointer items-center gap-2 py-2">
 					<input
 						type="checkbox"
-						class="checkbox checkbox-sm shrink-0"
+						class="checkbox shrink-0 checkbox-sm"
 						checked={enabled}
 						onchange={(e) => onEnabledChange(e.currentTarget.checked)}
 					/>

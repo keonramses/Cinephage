@@ -31,7 +31,9 @@
 	</h2>
 
 	<!-- Facts Grid -->
-	<div class="grid grid-cols-1 gap-4 sm:grid-cols-2 sm:gap-6 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
+	<div
+		class="grid grid-cols-1 gap-4 sm:grid-cols-2 sm:gap-6 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5"
+	>
 		<MetadataFact label="Status" value={item.status} />
 
 		{#if isMovie && movie}
