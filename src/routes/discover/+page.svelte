@@ -416,9 +416,7 @@
 					</h2>
 				</div>
 
-				<div
-					class="grid grid-cols-2 gap-3 sm:grid-cols-3 sm:gap-4 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-7 2xl:grid-cols-9"
-				>
+				<div class="grid grid-cols-[repeat(auto-fit,minmax(140px,1fr))] gap-3 sm:gap-4">
 					{#each searchResults as item (item.id + (item.media_type || ''))}
 						<MediaCard
 							item={item as unknown as TmdbMediaItem}
@@ -492,9 +490,7 @@
 					</h2>
 				</div>
 
-				<div
-					class="grid grid-cols-2 gap-3 sm:grid-cols-3 sm:gap-4 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-7 2xl:grid-cols-9"
-				>
+				<div class="grid grid-cols-[repeat(auto-fit,minmax(140px,1fr))] gap-3 sm:gap-4">
 					{#each allResults as item (item.id + (item.media_type || ''))}
 						<MediaCard {item} onAddToLibrary={handleAddToLibrary} />
 					{/each}

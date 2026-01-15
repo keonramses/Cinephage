@@ -10,17 +10,17 @@
 
 <div class="divider text-sm text-base-content/60">Search Capabilities</div>
 
-<div class="grid grid-cols-2 gap-2">
-	<label class="label cursor-pointer flex-col items-start gap-1">
-		<span class="label-text text-xs">Auto Search</span>
+<div class="grid grid-cols-1 gap-2 sm:grid-cols-2">
+	<label class="flex cursor-pointer flex-col items-start gap-1 py-2">
+		<span class="text-xs text-base-content/60">Auto Search</span>
 		<input
 			type="checkbox"
 			class="toggle toggle-primary toggle-sm"
 			bind:checked={enableAutomaticSearch}
 		/>
 	</label>
-	<label class="label cursor-pointer flex-col items-start gap-1">
-		<span class="label-text text-xs">Interactive</span>
+	<label class="flex cursor-pointer flex-col items-start gap-1 py-2">
+		<span class="text-xs text-base-content/60">Interactive</span>
 		<input
 			type="checkbox"
 			class="toggle toggle-primary toggle-sm"

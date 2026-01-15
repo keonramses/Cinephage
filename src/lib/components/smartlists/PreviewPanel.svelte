@@ -105,9 +105,7 @@
 				</div>
 			{:else if loading && items.length === 0}
 				<!-- Loading skeleton -->
-				<div
-					class="grid grid-cols-3 gap-2 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-4 xl:grid-cols-6 2xl:grid-cols-7"
-				>
+				<div class="grid grid-cols-[repeat(auto-fit,minmax(110px,1fr))] gap-2 sm:gap-3">
 					{#each Array(12) as _, i (i)}
 						<div class="animate-pulse">
 							<div class="aspect-[2/3] rounded bg-base-300"></div>
@@ -123,9 +121,7 @@
 					</p>
 				</div>
 			{:else}
-				<div
-					class="grid grid-cols-3 gap-2 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-4 xl:grid-cols-6 2xl:grid-cols-7"
-				>
+				<div class="grid grid-cols-[repeat(auto-fit,minmax(110px,1fr))] gap-2 sm:gap-3">
 					{#each items as item (item.id)}
 						<div class="group relative">
 							<!-- Poster -->

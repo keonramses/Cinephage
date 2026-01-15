@@ -237,9 +237,7 @@
 			</div>
 		</div>
 	{:else}
-		<div
-			class="grid grid-cols-3 gap-2 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-6 xl:grid-cols-8 2xl:grid-cols-10"
-		>
+		<div class="grid grid-cols-[repeat(auto-fit,minmax(110px,1fr))] gap-2 sm:gap-3">
 			{#each filteredItems as item (item.id)}
 				<div class="group relative {item.isExcluded ? 'opacity-50' : ''}">
 					<div class="aspect-[2/3] overflow-hidden rounded bg-base-300">

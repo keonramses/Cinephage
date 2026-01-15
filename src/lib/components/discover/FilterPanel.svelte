@@ -162,7 +162,7 @@
 				<span class="badge badge-sm badge-primary">{selectedProviders.length}</span>
 			{/if}
 		</span>
-		<div class="grid grid-cols-4 gap-3">
+		<div class="grid grid-cols-3 gap-2 sm:grid-cols-4 sm:gap-3">
 			{#each providers as provider (provider.provider_id)}
 				<button
 					class="relative aspect-square overflow-hidden rounded-xl border-2 transition-all duration-200 {selectedProviders.includes(
