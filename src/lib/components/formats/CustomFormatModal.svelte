@@ -1,6 +1,7 @@
 <script lang="ts">
 	import type { FormatCondition, FormatCategory, UICustomFormat } from '$lib/types/format';
 	import { FORMAT_CATEGORY_LABELS, FORMAT_CATEGORY_ORDER } from '$lib/types/format';
+	import ModalWrapper from '$lib/components/ui/modal/ModalWrapper.svelte';
 	import FormatConditionBuilder from './FormatConditionBuilder.svelte';
 	import { X, Save, Loader2, FlaskConical, Check, AlertTriangle, Info } from 'lucide-svelte';
 
@@ -136,12 +137,10 @@
 	);
 </script>
 
-{#if open}
-	<div class="modal-open modal">
-		<div class="modal-box max-h-[90vh] max-w-2xl overflow-y-auto">
-			<!-- Header -->
-			<div class="mb-6 flex items-center justify-between">
-				<h3 class="text-xl font-bold">{modalTitle}</h3>
+<ModalWrapper {open} {onClose} maxWidth="2xl" labelledBy="custom-format-modal-title">
+	<!-- Header -->
+	<div class="mb-6 flex items-center justify-between">
+		<h3 id="custom-format-modal-title" class="text-xl font-bold">{modalTitle}</h3>
 				<button type="button" class="btn btn-circle btn-ghost btn-sm" onclick={onClose}>
 					<X class="h-4 w-4" />
 				</button>
@@ -243,7 +242,7 @@
 								bind:checked={enabled}
 								disabled={isReadonly}
 							/>
-							<div>
+							<div class="min-w-0">
 								<span class="label-text">Enabled</span>
 								<p class="text-xs text-base-content/60">
 									Disabled formats won't be used for scoring
@@ -333,12 +332,4 @@
 					</button>
 				{/if}
 			</div>
-		</div>
-		<button
-			type="button"
-			class="modal-backdrop cursor-default border-none bg-black/50"
-			onclick={onClose}
-			aria-label="Close modal"
-		></button>
-	</div>
-{/if}
+</ModalWrapper>

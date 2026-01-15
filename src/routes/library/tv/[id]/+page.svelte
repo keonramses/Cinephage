@@ -865,7 +865,7 @@
 	<title>{data.series.title} - Library - Cinephage</title>
 </svelte:head>
 
-<div class="flex w-full flex-col gap-6 px-4 pb-20 lg:px-8">
+<div class="flex w-full flex-col gap-4 overflow-x-hidden px-4 pb-20 md:gap-6 md:px-6 lg:px-8">
 	<!-- Header -->
 	<LibrarySeriesHeader
 		series={data.series}
@@ -886,9 +886,9 @@
 	/>
 
 	<!-- Main Content -->
-	<div class="grid gap-6 lg:grid-cols-3">
+	<div class="grid gap-4 lg:grid-cols-2 lg:gap-6 xl:grid-cols-3">
 		<!-- Seasons (takes 2 columns) -->
-		<div class="space-y-4 lg:col-span-2">
+		<div class="space-y-4 md:col-span-2 lg:col-span-2">
 			<div class="flex items-center justify-between">
 				<h2 class="text-lg font-semibold">Seasons</h2>
 				<div class="flex gap-1">

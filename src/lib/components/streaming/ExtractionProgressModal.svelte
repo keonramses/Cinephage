@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { X, Download, Archive, Check, AlertCircle, Loader2 } from 'lucide-svelte';
+	import ModalWrapper from '$lib/components/ui/modal/ModalWrapper.svelte';
 
 	interface Props {
 		open: boolean;
@@ -141,12 +142,10 @@
 	}
 </script>
 
-{#if open}
-	<div class="modal-open modal">
-		<div class="modal-box max-w-md">
-			<!-- Header -->
-			<div class="mb-4 flex items-center justify-between">
-				<h3 class="text-lg font-bold">Preparing Stream</h3>
+<ModalWrapper {open} onClose={handleCancel} maxWidth="md" labelledBy="extraction-progress-modal-title">
+	<!-- Header -->
+	<div class="mb-4 flex items-center justify-between">
+		<h3 id="extraction-progress-modal-title" class="text-lg font-bold">Preparing Stream</h3>
 				<button class="btn btn-circle btn-ghost btn-sm" onclick={handleCancel}>
 					<X size={18} />
 				</button>
@@ -225,17 +224,13 @@
 				{/if}
 			</div>
 
-			<!-- Footer -->
-			<div class="modal-action">
-				{#if phase === 'error'}
-					<button class="btn btn-primary" onclick={startExtraction}> Retry </button>
-				{/if}
-				<button class="btn btn-ghost" onclick={handleCancel}>
-					{phase === 'complete' ? 'Close' : 'Cancel'}
-				</button>
-			</div>
-		</div>
-		<!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
-		<div class="modal-backdrop bg-base-300/80" onclick={handleCancel}></div>
+		<!-- Footer -->
+	<div class="modal-action">
+		{#if phase === 'error'}
+			<button class="btn btn-primary" onclick={startExtraction}> Retry </button>
+		{/if}
+		<button class="btn btn-ghost" onclick={handleCancel}>
+			{phase === 'complete' ? 'Close' : 'Cancel'}
+		</button>
 	</div>
-{/if}
+</ModalWrapper>

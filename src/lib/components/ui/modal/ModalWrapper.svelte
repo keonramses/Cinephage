@@ -1,22 +1,33 @@
 <script lang="ts">
 	import type { Snippet } from 'svelte';
+	import { createFocusTrap, lockBodyScroll } from '$lib/utils/focus';
 
 	interface Props {
 		open: boolean;
 		onClose: () => void;
-		maxWidth?: 'sm' | 'md' | 'lg' | 'xl' | '2xl' | '3xl';
+		maxWidth?: 'sm' | 'md' | 'lg' | 'xl' | '2xl' | '3xl' | '4xl' | '5xl';
+		labelledBy?: string;
+		describedBy?: string;
 		children: Snippet;
 	}
 
-	let { open, onClose, maxWidth = 'lg', children }: Props = $props();
+	let { open, onClose, maxWidth = 'lg', labelledBy, describedBy, children }: Props = $props();
 
-	const maxWidthClasses = {
-		sm: 'max-w-sm',
-		md: 'max-w-md',
-		lg: 'max-w-lg',
-		xl: 'max-w-xl',
-		'2xl': 'max-w-2xl',
-		'3xl': 'max-w-3xl'
+	let modalBoxRef = $state<HTMLElement | null>(null);
+	let cleanupFocusTrap: (() => void) | null = null;
+	let cleanupScrollLock: (() => void) | null = null;
+
+	// Fluid max-width classes that scale down on small viewports
+	// Uses min() to cap at either the size or viewport-32px (for 16px margin each side)
+	const maxWidthClasses: Record<string, string> = {
+		sm: 'w-full max-w-[min(24rem,calc(100vw-2rem))]',
+		md: 'w-full max-w-[min(28rem,calc(100vw-2rem))]',
+		lg: 'w-full max-w-[min(32rem,calc(100vw-2rem))]',
+		xl: 'w-full max-w-[min(36rem,calc(100vw-2rem))]',
+		'2xl': 'w-full max-w-[min(42rem,calc(100vw-2rem))]',
+		'3xl': 'w-full max-w-[min(48rem,calc(100vw-2rem))]',
+		'4xl': 'w-full max-w-[min(56rem,calc(100vw-2rem))]',
+		'5xl': 'w-full max-w-[min(64rem,calc(100vw-2rem))]'
 	};
 
 	function handleKeydown(e: KeyboardEvent) {
@@ -24,13 +35,41 @@
 			onClose();
 		}
 	}
+
+	// Set up focus trap and scroll lock when modal opens
+	$effect(() => {
+		if (open && modalBoxRef) {
+			cleanupScrollLock = lockBodyScroll();
+			cleanupFocusTrap = createFocusTrap(modalBoxRef);
+		}
+
+		return () => {
+			if (cleanupFocusTrap) {
+				cleanupFocusTrap();
+				cleanupFocusTrap = null;
+			}
+			if (cleanupScrollLock) {
+				cleanupScrollLock();
+				cleanupScrollLock = null;
+			}
+		};
+	});
 </script>
 
 <svelte:window onkeydown={open ? handleKeydown : undefined} />
 
 {#if open}
-	<div class="modal-open modal">
-		<div class="modal-box max-h-[90vh] overflow-y-auto {maxWidthClasses[maxWidth]}">
+	<div
+		class="modal-open modal"
+		role="dialog"
+		aria-modal="true"
+		aria-labelledby={labelledBy}
+		aria-describedby={describedBy}
+	>
+		<div
+			bind:this={modalBoxRef}
+			class="modal-box max-h-[90vh] overflow-y-auto overflow-x-hidden break-words {maxWidthClasses[maxWidth]}"
+		>
 			{@render children()}
 		</div>
 		<button

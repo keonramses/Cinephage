@@ -26,10 +26,10 @@
 	});
 </script>
 
-<div class="space-y-6">
+<div class="space-y-4 md:space-y-6">
 	<!-- Overview -->
 	{#if series.overview}
-		<div class="rounded-xl bg-base-200 p-6">
+		<div class="rounded-xl bg-base-200 p-4 md:p-6">
 			<h3 class="mb-2 font-semibold">Overview</h3>
 			<p class="text-sm leading-relaxed text-base-content/80">
 				{series.overview}
@@ -38,35 +38,35 @@
 	{/if}
 
 	<!-- Details -->
-	<div class="rounded-xl bg-base-200 p-6">
+	<div class="rounded-xl bg-base-200 p-4 md:p-6">
 		<h3 class="mb-3 font-semibold">Details</h3>
 		<dl class="space-y-2 text-sm">
 			{#if series.originalTitle && series.originalTitle !== series.title}
-				<div class="flex justify-between">
+				<div class="flex flex-col gap-0.5 sm:flex-row sm:justify-between">
 					<dt class="text-base-content/60">Original Title</dt>
-					<dd>{series.originalTitle}</dd>
+					<dd class="sm:text-right">{series.originalTitle}</dd>
 				</div>
 			{/if}
 			{#if series.network}
-				<div class="flex justify-between">
+				<div class="flex flex-col gap-0.5 sm:flex-row sm:justify-between">
 					<dt class="text-base-content/60">Network</dt>
 					<dd>{series.network}</dd>
 				</div>
 			{/if}
 			{#if series.status}
-				<div class="flex justify-between">
+				<div class="flex flex-col gap-0.5 sm:flex-row sm:justify-between">
 					<dt class="text-base-content/60">Status</dt>
 					<dd>{series.status}</dd>
 				</div>
 			{/if}
 			{#if series.genres && series.genres.length > 0}
-				<div class="flex justify-between">
+				<div class="flex flex-col gap-0.5 sm:flex-row sm:justify-between">
 					<dt class="text-base-content/60">Genres</dt>
-					<dd class="text-right">{series.genres.join(', ')}</dd>
+					<dd class="sm:text-right">{series.genres.join(', ')}</dd>
 				</div>
 			{/if}
 			{#if series.imdbId}
-				<div class="flex justify-between">
+				<div class="flex flex-col gap-0.5 sm:flex-row sm:justify-between">
 					<dt class="text-base-content/60">IMDb</dt>
 					<dd>
 						<a
@@ -80,7 +80,7 @@
 					</dd>
 				</div>
 			{/if}
-			<div class="flex justify-between">
+			<div class="flex flex-col gap-0.5 sm:flex-row sm:justify-between">
 				<dt class="text-base-content/60">TMDB ID</dt>
 				<dd>
 					<a
@@ -94,7 +94,7 @@
 				</dd>
 			</div>
 			{#if series.tvdbId}
-				<div class="flex justify-between">
+				<div class="flex flex-col gap-0.5 sm:flex-row sm:justify-between">
 					<dt class="text-base-content/60">TVDB ID</dt>
 					<dd>
 						<a
@@ -112,7 +112,7 @@
 	</div>
 
 	<!-- Path Info -->
-	<div class="rounded-xl bg-base-200 p-6">
+	<div class="rounded-xl bg-base-200 p-4 md:p-6">
 		<h3 class="mb-3 font-semibold">Storage</h3>
 		<dl class="space-y-2 text-sm">
 			<div>
@@ -121,7 +121,7 @@
 					{seriesStoragePath}
 				</dd>
 			</div>
-			<div class="flex justify-between">
+			<div class="flex flex-col gap-0.5 sm:flex-row sm:justify-between">
 				<dt class="text-base-content/60">Season Folders</dt>
 				<dd>{series.seasonFolder ? 'Yes' : 'No'}</dd>
 			</div>

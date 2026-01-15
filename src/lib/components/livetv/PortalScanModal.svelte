@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { X, Loader2, Search, ChevronRight, ChevronLeft, Radio } from 'lucide-svelte';
+	import ModalWrapper from '$lib/components/ui/modal/ModalWrapper.svelte';
 
 	interface StalkerPortal {
 		id: string;
@@ -264,19 +265,15 @@
 	}
 </script>
 
-<svelte:window onkeydown={handleKeydown} />
-
-{#if open}
-	<div class="modal-open modal">
-		<div class="modal-box max-w-2xl">
-			<!-- Header -->
-			<div class="mb-6 flex items-center justify-between">
-				<div class="flex items-center gap-3">
-					<div class="flex h-10 w-10 items-center justify-center rounded-full bg-primary/10">
-						<Search class="h-5 w-5 text-primary" />
-					</div>
-					<div>
-						<h3 class="text-xl font-bold">Scan for Accounts</h3>
+<ModalWrapper {open} onClose={onClose} maxWidth="2xl" labelledBy="portal-scan-modal-title">
+	<!-- Header -->
+	<div class="mb-6 flex items-center justify-between">
+		<div class="flex items-center gap-3">
+			<div class="flex h-10 w-10 items-center justify-center rounded-full bg-primary/10">
+				<Search class="h-5 w-5 text-primary" />
+			</div>
+			<div>
+				<h3 id="portal-scan-modal-title" class="text-xl font-bold">Scan for Accounts</h3>
 						<div class="mt-1 flex items-center gap-2 text-sm text-base-content/60">
 							<span
 								class="badge badge-sm {currentStep === 'portal' ? 'badge-primary' : 'badge-ghost'}"
@@ -627,14 +624,6 @@
 						{/if}
 						Start Scan
 					</button>
-				</div>
-			{/if}
-		</div>
-		<button
-			type="button"
-			class="modal-backdrop cursor-default border-none bg-black/50"
-			onclick={onClose}
-			aria-label="Close modal"
-		></button>
-	</div>
-{/if}
+			</div>
+		{/if}
+</ModalWrapper>

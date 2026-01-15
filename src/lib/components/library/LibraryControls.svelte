@@ -92,7 +92,7 @@
 			{/if}
 		</button>
 		<div
-			class="dropdown-content z-50 w-72 rounded-box bg-base-200 p-4 shadow-lg"
+			class="dropdown-content z-50 w-[min(18rem,calc(100vw-2rem))] rounded-box bg-base-200 p-4 shadow-lg"
 			class:hidden={!isFilterOpen}
 		>
 			<div class="space-y-4">

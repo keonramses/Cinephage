@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { X, Loader2 } from 'lucide-svelte';
+	import ModalWrapper from '$lib/components/ui/modal/ModalWrapper.svelte';
 
 	interface QualityProfile {
 		id: string;
@@ -46,89 +47,71 @@
 	function handleSave() {
 		onSave(qualityProfileId || null);
 	}
-
-	function handleKeydown(e: KeyboardEvent) {
-		if (e.key === 'Escape') {
-			onCancel();
-		}
-	}
 </script>
 
-<svelte:window onkeydown={open ? handleKeydown : undefined} />
-
-{#if open}
-	<div class="modal-open modal">
-		<div class="modal-box max-w-md">
-			<div class="mb-4 flex items-center justify-between">
-				<h3 class="text-lg font-bold">Change Quality Profile</h3>
-				<button
-					type="button"
-					class="btn btn-circle btn-ghost btn-sm"
-					onclick={onCancel}
-					aria-label="Close"
-				>
-					<X class="h-4 w-4" />
-				</button>
-			</div>
-
-			<div class="mb-4 rounded-lg bg-base-200 p-3">
-				<div class="font-medium">
-					{selectedCount}
-					{itemLabel} selected
-				</div>
-				<div class="text-sm text-base-content/60">
-					The selected quality profile will be applied to all selected items.
-				</div>
-			</div>
-
-			<div class="form-control">
-				<label class="label" for="bulk-quality-profile">
-					<span class="label-text font-medium">Quality Profile</span>
-				</label>
-				<select
-					id="bulk-quality-profile"
-					bind:value={qualityProfileId}
-					class="select-bordered select w-full"
-				>
-					<option value=""
-						>Default ({qualityProfiles.find((p) => p.isDefault)?.name ?? 'System Default'})</option
-					>
-					{#each qualityProfiles as profile (profile.id)}
-						<option value={profile.id}>
-							{profile.name}
-							{profile.isBuiltIn ? '' : '(Custom)'}
-						</option>
-					{/each}
-				</select>
-				<div class="label">
-					<span class="label-text-alt text-base-content/60">
-						{#if currentProfile}
-							{currentProfile.description}
-						{:else}
-							Controls quality scoring and upgrade behavior
-						{/if}
-					</span>
-				</div>
-			</div>
-
-			<div class="modal-action">
-				<button type="button" class="btn btn-ghost" onclick={onCancel} disabled={saving}>
-					Cancel
-				</button>
-				<button type="button" class="btn btn-primary" onclick={handleSave} disabled={saving}>
-					{#if saving}
-						<Loader2 class="h-4 w-4 animate-spin" />
-					{/if}
-					Apply to {selectedCount}
-					{itemLabel}
-				</button>
-			</div>
-		</div>
+<ModalWrapper {open} onClose={onCancel} maxWidth="md" labelledBy="bulk-profile-modal-title">
+	<div class="mb-4 flex items-center justify-between">
+		<h3 id="bulk-profile-modal-title" class="text-lg font-bold">Change Quality Profile</h3>
 		<button
 			type="button"
-			class="modal-backdrop cursor-default border-none bg-black/50"
+			class="btn btn-circle btn-ghost btn-sm"
 			onclick={onCancel}
-			aria-label="Close modal"
-		></button>
+			aria-label="Close"
+		>
+			<X class="h-4 w-4" />
+		</button>
 	</div>
-{/if}
+
+	<div class="mb-4 rounded-lg bg-base-200 p-3">
+		<div class="font-medium">
+			{selectedCount}
+			{itemLabel} selected
+		</div>
+		<div class="text-sm text-base-content/60">
+			The selected quality profile will be applied to all selected items.
+		</div>
+	</div>
+
+	<div class="form-control">
+		<label class="label" for="bulk-quality-profile">
+			<span class="label-text font-medium">Quality Profile</span>
+		</label>
+		<select
+			id="bulk-quality-profile"
+			bind:value={qualityProfileId}
+			class="select select-bordered w-full"
+		>
+			<option value=""
+				>Default ({qualityProfiles.find((p) => p.isDefault)?.name ?? 'System Default'})</option
+			>
+			{#each qualityProfiles as profile (profile.id)}
+				<option value={profile.id}>
+					{profile.name}
+					{profile.isBuiltIn ? '' : '(Custom)'}
+				</option>
+			{/each}
+		</select>
+		<div class="label">
+			<span class="label-text-alt text-base-content/60">
+				{#if currentProfile}
+					{currentProfile.description}
+				{:else}
+					Controls quality scoring and upgrade behavior
+				{/if}
+			</span>
+		</div>
+	</div>
+
+	<div class="modal-action">
+		<button type="button" class="btn btn-ghost" onclick={onCancel} disabled={saving}>
+			Cancel
+		</button>
+		<button type="button" class="btn btn-primary" onclick={handleSave} disabled={saving}>
+			{#if saving}
+				<Loader2 class="h-4 w-4 animate-spin" />
+			{/if}
+			Apply to {selectedCount}
+			{itemLabel}
+		</button>
+	</div>
+</ModalWrapper>

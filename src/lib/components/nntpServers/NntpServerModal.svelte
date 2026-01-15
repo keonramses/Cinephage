@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { X, Loader2, XCircle } from 'lucide-svelte';
 	import { SectionHeader, TestResult } from '$lib/components/ui/modal';
+	import ModalWrapper from '$lib/components/ui/modal/ModalWrapper.svelte';
 
 	interface NntpServer {
 		id: string;
@@ -136,28 +137,19 @@
 		onSave(getFormData());
 	}
 
-	function handleKeydown(e: KeyboardEvent) {
-		if (e.key === 'Escape') {
-			onClose();
-		}
-	}
 </script>
 
-<svelte:window onkeydown={handleKeydown} />
+<ModalWrapper {open} onClose={onClose} maxWidth="2xl" labelledBy="nntp-server-modal-title">
+	<!-- Header -->
+	<div class="mb-6 flex items-center justify-between">
+		<h3 id="nntp-server-modal-title" class="text-xl font-bold">{modalTitle}</h3>
+		<button class="btn btn-circle btn-ghost btn-sm" onclick={onClose}>
+			<X class="h-4 w-4" />
+		</button>
+	</div>
 
-{#if open}
-	<div class="modal-open modal">
-		<div class="modal-box max-h-[90vh] max-w-2xl overflow-y-auto">
-			<!-- Header -->
-			<div class="mb-6 flex items-center justify-between">
-				<h3 class="text-xl font-bold">{modalTitle}</h3>
-				<button class="btn btn-circle btn-ghost btn-sm" onclick={onClose}>
-					<X class="h-4 w-4" />
-				</button>
-			</div>
-
-			<!-- Main Form - Two Column Layout -->
-			<div class="grid grid-cols-2 gap-6">
+			<!-- Main Form - Responsive Two Column Layout -->
+			<div class="grid grid-cols-1 gap-4 sm:grid-cols-2 sm:gap-6">
 				<!-- Left Column: Connection -->
 				<div class="space-y-4">
 					<SectionHeader title="Connection" />
@@ -175,7 +167,7 @@
 						/>
 					</div>
 
-					<div class="grid grid-cols-2 gap-3">
+					<div class="grid grid-cols-2 gap-2 sm:gap-3">
 						<div class="form-control">
 							<label class="label py-1" for="host">
 								<span class="label-text">Host</span>
@@ -204,7 +196,7 @@
 						</div>
 					</div>
 
-					<div class="grid grid-cols-2 gap-3">
+					<div class="grid grid-cols-2 gap-2 sm:gap-3">
 						<div class="form-control">
 							<label class="label py-1" for="username">
 								<span class="label-text">Username</span>
@@ -344,12 +336,4 @@
 					Save
 				</button>
 			</div>
-		</div>
-		<button
-			type="button"
-			class="modal-backdrop cursor-default border-none bg-black/50"
-			onclick={onClose}
-			aria-label="Close modal"
-		></button>
-	</div>
-{/if}
+</ModalWrapper>

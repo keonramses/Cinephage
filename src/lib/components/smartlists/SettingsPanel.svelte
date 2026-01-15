@@ -71,7 +71,7 @@
 	<div class="collapse-content">
 		<div class="space-y-4 pt-2">
 			<!-- Sort & Limit -->
-			<div class="grid grid-cols-2 gap-4">
+			<div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
 				<div class="form-control">
 					<label class="label py-1" for="sortBy">
 						<span

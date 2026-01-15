@@ -393,7 +393,7 @@
 <!-- Root Folder Delete Confirmation Modal -->
 {#if confirmFolderDeleteOpen}
 	<div class="modal-open modal">
-		<div class="modal-box">
+		<div class="modal-box w-full max-w-[min(28rem,calc(100vw-2rem))] break-words">
 			<h3 class="text-lg font-bold">Confirm Delete</h3>
 			<p class="py-4">
 				Are you sure you want to delete <strong>{deleteFolderTarget?.name}</strong>? This action

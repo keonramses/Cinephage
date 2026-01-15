@@ -236,16 +236,13 @@
 	</td>
 
 	<!-- Title -->
-	<td>
-		<div class="flex flex-col">
-			<span class={`font-medium ${!episode.title ? 'text-base-content/60' : ''}`}>
+	<td class="min-w-0">
+		<div class="flex min-w-0 flex-col">
+			<span class={`truncate font-medium ${!episode.title ? 'text-base-content/60' : ''}`}>
 				{episode.title || 'TBA'}
 			</span>
 			{#if episode.file}
-				<span
-					class="max-w-xs truncate text-xs text-base-content/50"
-					title={episode.file.relativePath}
-				>
+				<span class="truncate text-xs text-base-content/50" title={episode.file.relativePath}>
 					{episode.file.relativePath.split('/').pop()}
 				</span>
 			{/if}
@@ -298,7 +295,7 @@
 
 	<!-- Actions -->
 	<td>
-		<div class="flex items-center gap-1">
+		<div class="flex flex-wrap items-center gap-1">
 			<!-- Monitor toggle -->
 			<button
 				class="btn btn-ghost btn-xs {episode.monitored ? 'text-success' : 'text-base-content/40'}"

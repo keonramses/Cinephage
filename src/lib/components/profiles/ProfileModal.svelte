@@ -3,6 +3,7 @@
 	import type { FormatCategory } from '$lib/types/format';
 	import { groupFormatScoresByCategory } from '$lib/types/format';
 	import { X, Save, Info, Loader2, Settings, Layers } from 'lucide-svelte';
+	import ModalWrapper from '$lib/components/ui/modal/ModalWrapper.svelte';
 	import { SectionHeader } from '$lib/components/ui/modal';
 	import FormatScoreAccordion from './FormatScoreAccordion.svelte';
 
@@ -138,12 +139,10 @@
 	const customProfiles = $derived(allProfiles.filter((p) => !p.isBuiltIn));
 </script>
 
-{#if open}
-	<div class="modal-open modal">
-		<div class="modal-box max-h-[90vh] max-w-3xl overflow-y-auto">
-			<!-- Header -->
-			<div class="mb-6 flex items-center justify-between">
-				<h3 class="text-xl font-bold">{modalTitle}</h3>
+<ModalWrapper {open} {onClose} maxWidth="3xl" labelledBy="profile-modal-title">
+	<!-- Header -->
+	<div class="mb-6 flex items-center justify-between">
+		<h3 id="profile-modal-title" class="text-xl font-bold">{modalTitle}</h3>
 				<button class="btn btn-circle btn-ghost btn-sm" onclick={onClose}>
 					<X class="h-4 w-4" />
 				</button>
@@ -181,8 +180,8 @@
 
 			<!-- Tab Content -->
 			{#if activeTab === 'general'}
-				<!-- Main Form - Two Column Layout -->
-				<div class="grid grid-cols-2 gap-6">
+				<!-- Main Form - Responsive Two Column Layout -->
+				<div class="grid grid-cols-1 gap-4 sm:grid-cols-2 sm:gap-6">
 					<!-- Left Column: Profile Details -->
 					<div class="space-y-4">
 						<SectionHeader title="Profile" />
@@ -281,7 +280,7 @@
 					<div class="space-y-4">
 						<SectionHeader title="Size Limits" />
 
-						<div class="grid grid-cols-2 gap-3">
+						<div class="grid grid-cols-2 gap-2 sm:gap-3">
 							<div class="form-control">
 								<label class="label py-1" for="movie-min-size">
 									<span class="label-text">Movie Min (GB)</span>
@@ -315,7 +314,7 @@
 							</div>
 						</div>
 
-						<div class="grid grid-cols-2 gap-3">
+						<div class="grid grid-cols-2 gap-2 sm:gap-3">
 							<div class="form-control">
 								<label class="label py-1" for="episode-min-size">
 									<span class="label-text">Episode Min (MB)</span>
@@ -404,12 +403,4 @@
 					</button>
 				{/if}
 			</div>
-		</div>
-		<button
-			type="button"
-			class="modal-backdrop cursor-default border-none bg-black/50"
-			onclick={onClose}
-			aria-label="Close modal"
-		></button>
-	</div>
-{/if}
+</ModalWrapper>

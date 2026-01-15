@@ -85,8 +85,8 @@
 		</div>
 	</div>
 
-	<!-- Stats Grid -->
-	<div class="grid grid-cols-2 gap-4 md:grid-cols-3 lg:grid-cols-5">
+	<!-- Stats Grid - Auto-fit for fluid column count based on available space -->
+	<div class="grid grid-cols-[repeat(auto-fit,minmax(160px,1fr))] gap-3 sm:gap-4">
 		<!-- Movies -->
 		<a href={resolve('/movies')} class="card bg-base-200 transition-colors hover:bg-base-300">
 			<div class="card-body p-4">
@@ -219,7 +219,7 @@
 							</h2>
 							<a href={resolve('/movies')} class="btn btn-ghost btn-sm">View All</a>
 						</div>
-						<div class="grid grid-cols-3 gap-3 sm:grid-cols-4 md:grid-cols-6">
+						<div class="grid grid-cols-[repeat(auto-fit,minmax(100px,1fr))] gap-2 sm:gap-3">
 							{#each data.recentlyAdded.movies as movie (movie.id)}
 								<a
 									href={resolve(`/library/movie/${movie.id}`)}
@@ -262,7 +262,7 @@
 							</h2>
 							<a href={resolve('/tv')} class="btn btn-ghost btn-sm">View All</a>
 						</div>
-						<div class="grid grid-cols-3 gap-3 sm:grid-cols-4 md:grid-cols-6">
+						<div class="grid grid-cols-[repeat(auto-fit,minmax(100px,1fr))] gap-2 sm:gap-3">
 							{#each data.recentlyAdded.series as show (show.id)}
 								<a
 									href={resolve(`/library/tv/${show.id}`)}

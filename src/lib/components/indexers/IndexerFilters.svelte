@@ -24,7 +24,7 @@
 			<input
 				type="text"
 				placeholder="Search indexers..."
-				class="input-bordered input input-sm w-48"
+				class="input-bordered input input-sm w-full sm:w-48"
 				value={filters.search}
 				oninput={(e) => updateFilter('search', e.currentTarget.value)}
 			/>

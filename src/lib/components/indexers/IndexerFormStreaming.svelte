@@ -76,18 +76,16 @@
 			/>
 		</div>
 
-		<div class="form-control">
-			<span class="label py-1">
-				<span class="label-text">Status</span>
-			</span>
-			<label class="label cursor-pointer justify-start gap-2 py-2">
+		<div>
+			<span class="block py-1 text-sm">Status</span>
+			<label class="flex cursor-pointer items-center gap-2 py-2">
 				<input
 					type="checkbox"
-					class="toggle toggle-primary toggle-sm"
+					class="toggle toggle-primary toggle-sm shrink-0"
 					checked={enabled}
 					onchange={(e) => onEnabledChange(e.currentTarget.checked)}
 				/>
-				<span class="label-text text-sm">{enabled ? 'Enabled' : 'Disabled'}</span>
+				<span class="text-sm">{enabled ? 'Enabled' : 'Disabled'}</span>
 			</label>
 		</div>
 	</div>

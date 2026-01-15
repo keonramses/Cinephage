@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { X, Loader2, XCircle, CheckCircle2, Tv } from 'lucide-svelte';
+	import ModalWrapper from '$lib/components/ui/modal/ModalWrapper.svelte';
 	import type { StalkerAccount, StalkerAccountTestResult } from '$lib/types/livetv';
 
 	interface StalkerAccountFormData {
@@ -125,12 +126,6 @@
 		onSave(getFormData());
 	}
 
-	function handleKeydown(e: KeyboardEvent) {
-		if (e.key === 'Escape') {
-			onClose();
-		}
-	}
-
 	function formatExpiryDate(isoDate: string | null): string {
 		if (!isoDate) return 'Unknown';
 		try {
@@ -145,23 +140,19 @@
 	}
 </script>
 
-<svelte:window onkeydown={handleKeydown} />
-
-{#if open}
-	<div class="modal-open modal">
-		<div class="modal-box max-w-lg">
-			<!-- Header -->
-			<div class="mb-6 flex items-center justify-between">
-				<div class="flex items-center gap-3">
-					<div class="flex h-10 w-10 items-center justify-center rounded-full bg-primary/10">
-						<Tv class="h-5 w-5 text-primary" />
-					</div>
-					<h3 class="text-xl font-bold">{modalTitle}</h3>
-				</div>
-				<button class="btn btn-circle btn-ghost btn-sm" onclick={onClose}>
-					<X class="h-4 w-4" />
-				</button>
+<ModalWrapper {open} onClose={onClose} maxWidth="lg" labelledBy="stalker-account-modal-title">
+	<!-- Header -->
+	<div class="mb-6 flex items-center justify-between">
+		<div class="flex items-center gap-3">
+			<div class="flex h-10 w-10 items-center justify-center rounded-full bg-primary/10">
+				<Tv class="h-5 w-5 text-primary" />
 			</div>
+			<h3 id="stalker-account-modal-title" class="text-xl font-bold">{modalTitle}</h3>
+		</div>
+		<button class="btn btn-circle btn-ghost btn-sm" onclick={onClose}>
+			<X class="h-4 w-4" />
+		</button>
+	</div>
 
 			<!-- Form -->
 			<div class="space-y-4">
@@ -333,12 +324,4 @@
 					Save
 				</button>
 			</div>
-		</div>
-		<button
-			type="button"
-			class="modal-backdrop cursor-default border-none bg-black/50"
-			onclick={onClose}
-			aria-label="Close modal"
-		></button>
-	</div>
-{/if}
+</ModalWrapper>

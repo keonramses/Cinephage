@@ -235,7 +235,7 @@
 <!-- TMDB API Key Modal -->
 {#if tmdbModalOpen}
 	<div class="modal-open modal">
-		<div class="modal-box">
+		<div class="modal-box w-full max-w-[min(28rem,calc(100vw-2rem))] break-words">
 			<button
 				onclick={closeTmdbModal}
 				class="btn absolute top-2 right-2 btn-circle btn-ghost btn-sm"

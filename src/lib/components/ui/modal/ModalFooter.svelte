@@ -30,7 +30,7 @@
 	}: Props = $props();
 </script>
 
-<div class="modal-action mt-6 border-t border-base-300 pt-4">
+<div class="modal-action mt-6 flex-wrap gap-2 border-t border-base-300 pt-4">
 	{#if showDelete && onDelete}
 		<button
 			class="btn mr-auto text-error btn-ghost"

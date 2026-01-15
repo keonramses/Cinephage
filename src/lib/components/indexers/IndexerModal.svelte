@@ -2,6 +2,7 @@
 	import { X, Loader2, Globe, Lock, Zap } from 'lucide-svelte';
 	import type { IndexerDefinition, Indexer, IndexerFormData } from '$lib/types/indexer';
 	import { computeUIHints } from '$lib/types/indexer';
+	import ModalWrapper from '$lib/components/ui/modal/ModalWrapper.svelte';
 	import { TestResult } from '$lib/components/ui/modal';
 	import IndexerDefinitionPicker from './IndexerDefinitionPicker.svelte';
 	import IndexerFormStreaming from './IndexerFormStreaming.svelte';
@@ -198,21 +199,12 @@
 		onSave(getFormData());
 	}
 
-	function handleKeydown(e: KeyboardEvent) {
-		if (e.key === 'Escape') {
-			onClose();
-		}
-	}
 </script>
 
-<svelte:window onkeydown={handleKeydown} />
-
-{#if open}
-	<div class="modal-open modal">
-		<div class="modal-box max-h-[90vh] max-w-3xl overflow-x-hidden overflow-y-auto">
-			<!-- Header -->
-			<div class="mb-6 flex items-center justify-between">
-				<h3 class="text-xl font-bold">{modalTitle}</h3>
+<ModalWrapper {open} {onClose} maxWidth="3xl" labelledBy="indexer-modal-title">
+	<!-- Header -->
+	<div class="mb-6 flex items-center justify-between">
+		<h3 id="indexer-modal-title" class="text-xl font-bold">{modalTitle}</h3>
 				<button class="btn btn-circle btn-ghost btn-sm" onclick={onClose}>
 					<X class="h-4 w-4" />
 				</button>
@@ -392,12 +384,4 @@
 					</button>
 				</div>
 			{/if}
-		</div>
-		<button
-			type="button"
-			class="modal-backdrop cursor-default border-none bg-black/50"
-			onclick={onClose}
-			aria-label="Close modal"
-		></button>
-	</div>
-{/if}
+</ModalWrapper>

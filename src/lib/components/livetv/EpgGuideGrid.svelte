@@ -2,7 +2,8 @@
 	import { SvelteMap } from 'svelte/reactivity';
 	import { Tv, ChevronLeft, ChevronRight, Clock, Loader2, X } from 'lucide-svelte';
 	import type { ChannelLineupItemWithDetails, EpgProgram } from '$lib/types/livetv';
-	import { onMount, onDestroy } from 'svelte';
+	import { onMount } from 'svelte';
+	import { getEpgConfig } from './epgConfig';
 
 	interface Props {
 		lineup: ChannelLineupItemWithDetails[];
@@ -10,6 +11,16 @@
 	}
 
 	let { lineup, loading }: Props = $props();
+
+	// Viewport width tracking for responsive config
+	let viewportWidth = $state(typeof window !== 'undefined' ? window.innerWidth : 1024);
+	const gridConfig = $derived(getEpgConfig(viewportWidth));
+
+	// Reactive grid configuration from breakpoint config
+	const CHANNEL_WIDTH = $derived(gridConfig.channelWidth);
+	const HOUR_WIDTH = $derived(gridConfig.hourWidth);
+	const ROW_HEIGHT = $derived(gridConfig.rowHeight);
+	const SLOT_MINUTES = $derived(gridConfig.slotMinutes);
 
 	// Time window state - store as timestamp for reactivity
 	let windowStartTime = $state(getWindowStartTime(Date.now()));
@@ -30,12 +41,6 @@
 		program: EpgProgram;
 		channel: ChannelLineupItemWithDetails;
 	} | null>(null);
-
-	// Grid configuration
-	const CHANNEL_WIDTH = 180; // px
-	const HOUR_WIDTH = 400; // px per hour
-	const ROW_HEIGHT = 64; // px
-	const SLOT_MINUTES = 30;
 
 	function getWindowStartTime(time: number): number {
 		// eslint-disable-next-line svelte/prefer-svelte-reactivity -- pure function, not reactive state
@@ -73,12 +78,19 @@
 		timeInterval = setInterval(() => {
 			nowTime = Date.now();
 		}, 60000); // Update every minute
-	});
 
-	onDestroy(() => {
-		if (timeInterval) {
-			clearInterval(timeInterval);
+		// Track viewport width for responsive config
+		function handleResize() {
+			viewportWidth = window.innerWidth;
 		}
+		window.addEventListener('resize', handleResize);
+
+		return () => {
+			window.removeEventListener('resize', handleResize);
+			if (timeInterval) {
+				clearInterval(timeInterval);
+			}
+		};
 	});
 
 	// Reload programs when time window changes
@@ -303,7 +315,7 @@
 <!-- Program details modal -->
 {#if selectedProgram}
 	<div class="modal-open modal">
-		<div class="modal-box max-w-md">
+		<div class="modal-box w-full max-w-[min(28rem,calc(100vw-2rem))] break-words">
 			<div class="mb-4 flex items-start justify-between">
 				<div>
 					<h3 class="text-lg font-bold">{selectedProgram.program.title}</h3>

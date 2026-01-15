@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { X, Loader2, Search, Tv } from 'lucide-svelte';
+	import ModalWrapper from '$lib/components/ui/modal/ModalWrapper.svelte';
 
 	interface ChannelWithEpg {
 		id: string;
@@ -96,14 +97,10 @@
 	}
 </script>
 
-<svelte:window onkeydown={open ? handleKeydown : undefined} />
-
-{#if open}
-	<div class="modal-open modal">
-		<div class="modal-box max-h-[80vh] max-w-2xl">
-			<!-- Header -->
-			<div class="mb-4 flex items-center justify-between">
-				<h3 class="text-lg font-bold">Select EPG Source</h3>
+<ModalWrapper {open} onClose={onClose} maxWidth="2xl" labelledBy="epg-source-picker-modal-title">
+	<!-- Header -->
+	<div class="mb-4 flex items-center justify-between">
+		<h3 id="epg-source-picker-modal-title" class="text-lg font-bold">Select EPG Source</h3>
 				<button class="btn btn-circle btn-ghost btn-sm" onclick={onClose}>
 					<X class="h-4 w-4" />
 				</button>
@@ -180,16 +177,8 @@
 				{/if}
 			</div>
 
-			<!-- Footer -->
-			<div class="modal-action">
-				<button class="btn btn-ghost" onclick={onClose}>Cancel</button>
-			</div>
-		</div>
-		<button
-			type="button"
-			class="modal-backdrop cursor-default border-none bg-black/50"
-			onclick={onClose}
-			aria-label="Close modal"
-		></button>
+		<!-- Footer -->
+	<div class="modal-action">
+		<button class="btn btn-ghost" onclick={onClose}>Cancel</button>
 	</div>
-{/if}
+</ModalWrapper>

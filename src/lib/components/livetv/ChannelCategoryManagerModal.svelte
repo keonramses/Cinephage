@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { X, Plus, GripVertical, Pencil, Trash2, Check, Loader2 } from 'lucide-svelte';
 	import type { ChannelCategory, ChannelLineupItemWithDetails } from '$lib/types/livetv';
+	import ModalWrapper from '$lib/components/ui/modal/ModalWrapper.svelte';
 
 	interface Props {
 		open: boolean;
@@ -236,14 +237,10 @@
 	}
 </script>
 
-<svelte:window onkeydown={handleKeydown} />
-
-{#if open}
-	<div class="modal-open modal">
-		<div class="modal-box max-w-lg">
-			<!-- Header -->
-			<div class="mb-4 flex items-center justify-between">
-				<h3 class="text-lg font-bold">Manage Categories</h3>
+<ModalWrapper {open} onClose={onClose} maxWidth="lg" labelledBy="channel-category-manager-modal-title">
+	<!-- Header -->
+	<div class="mb-4 flex items-center justify-between">
+		<h3 id="channel-category-manager-modal-title" class="text-lg font-bold">Manage Categories</h3>
 				<button class="btn btn-circle btn-ghost btn-sm" onclick={onClose}>
 					<X class="h-4 w-4" />
 				</button>
@@ -407,12 +404,8 @@
 				</div>
 			{/if}
 
-			<!-- Actions -->
-			<div class="modal-action">
-				<button class="btn" onclick={onClose}>Done</button>
-			</div>
-		</div>
-		<!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
-		<div class="modal-backdrop bg-black/50" onclick={onClose}></div>
+		<!-- Actions -->
+	<div class="modal-action">
+		<button class="btn" onclick={onClose}>Done</button>
 	</div>
-{/if}
+</ModalWrapper>

@@ -11,6 +11,7 @@
 	} from 'lucide-svelte';
 	import { resolvePath } from '$lib/utils/routing';
 	import { formatBytes } from '$lib/utils/format';
+	import HistoryItemCard from './HistoryItemCard.svelte';
 
 	interface Props {
 		items: HistoryItemWithMedia[];
@@ -75,7 +76,15 @@
 		<p class="mt-1 text-sm">Completed and removed downloads will appear here</p>
 	</div>
 {:else}
-	<div class="overflow-x-auto">
+	<!-- Mobile: Card View -->
+	<div class="space-y-3 lg:hidden">
+		{#each items as item (item.id)}
+			<HistoryItemCard {item} />
+		{/each}
+	</div>
+
+	<!-- Desktop: Table View -->
+	<div class="hidden overflow-x-auto lg:block">
 		<table class="table table-sm">
 			<thead>
 				<tr>

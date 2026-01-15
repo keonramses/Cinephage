@@ -20,7 +20,7 @@
 
 <div class="divider text-sm text-base-content/60">Torrent Settings</div>
 
-<div class="grid grid-cols-2 gap-4">
+<div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
 	<div class="form-control">
 		<label class="label" for="minimumSeeders">
 			<span class="label-text">Min Seeders</span>
@@ -76,13 +76,13 @@
 	</div>
 </div>
 
-<label class="label cursor-pointer justify-start gap-2">
-	<input type="checkbox" class="checkbox checkbox-sm" bind:checked={preferMagnetUrl} />
-	<span class="label-text">Prefer Magnet URLs</span>
+<label class="flex cursor-pointer items-center gap-2 py-2">
+	<input type="checkbox" class="checkbox checkbox-sm shrink-0" bind:checked={preferMagnetUrl} />
+	<span class="text-sm">Prefer Magnet URLs</span>
 </label>
 
-<label class="label cursor-pointer justify-start gap-2">
-	<input type="checkbox" class="checkbox checkbox-sm" bind:checked={rejectDeadTorrents} />
-	<span class="label-text">Reject Dead Torrents</span>
-	<span class="label-text-alt text-base-content/50">(0 seeders)</span>
+<label class="flex cursor-pointer items-center gap-2 py-2">
+	<input type="checkbox" class="checkbox checkbox-sm shrink-0" bind:checked={rejectDeadTorrents} />
+	<span class="text-sm">Reject Dead Torrents</span>
+	<span class="text-xs text-base-content/50">(0 seeders)</span>
 </label>

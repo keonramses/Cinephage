@@ -1,6 +1,8 @@
 <script lang="ts">
-	import { X, Loader2 } from 'lucide-svelte';
+	import { X } from 'lucide-svelte';
 	import type { LibraryMovie } from '$lib/types/library';
+	import { ModalWrapper, ModalFooter } from '$lib/components/ui/modal';
+	import { FormCheckbox } from '$lib/components/ui/form';
 
 	interface QualityProfile {
 		id: string;
@@ -87,158 +89,124 @@
 			wantsSubtitles
 		});
 	}
-
-	function handleKeydown(e: KeyboardEvent) {
-		if (e.key === 'Escape') {
-			onClose();
-		}
-	}
 </script>
 
-<svelte:window onkeydown={handleKeydown} />
+<ModalWrapper {open} onClose={onClose} maxWidth="lg" labelledBy="movie-edit-modal-title">
+	<!-- Header -->
+	<div class="mb-4 flex items-center justify-between">
+		<h3 id="movie-edit-modal-title" class="text-lg font-bold">Edit Movie</h3>
+		<button class="btn btn-circle btn-ghost btn-sm" onclick={onClose}>
+			<X class="h-4 w-4" />
+		</button>
+	</div>
 
-{#if open}
-	<div class="modal-open modal">
-		<div class="modal-box max-w-lg">
-			<!-- Header -->
-			<div class="mb-4 flex items-center justify-between">
-				<h3 class="text-lg font-bold">Edit Movie</h3>
-				<button class="btn btn-circle btn-ghost btn-sm" onclick={onClose}>
-					<X class="h-4 w-4" />
-				</button>
-			</div>
+	<!-- Movie info -->
+	<div class="mb-6 rounded-lg bg-base-200 p-3">
+		<div class="font-medium">{movie.title}</div>
+		{#if movie.year}
+			<div class="text-sm text-base-content/60">{movie.year}</div>
+		{/if}
+	</div>
 
-			<!-- Movie info -->
-			<div class="mb-6 rounded-lg bg-base-200 p-3">
-				<div class="font-medium">{movie.title}</div>
-				{#if movie.year}
-					<div class="text-sm text-base-content/60">{movie.year}</div>
-				{/if}
-			</div>
+	<!-- Form -->
+	<div class="space-y-4">
+		<!-- Monitored -->
+		<FormCheckbox
+			bind:checked={monitored}
+			label="Monitored"
+			description="Search for new releases and upgrades"
+			variant="toggle"
+		/>
 
-			<!-- Form -->
-			<div class="space-y-4">
-				<!-- Monitored -->
-				<div class="form-control">
-					<label class="label cursor-pointer justify-start gap-3">
-						<input type="checkbox" bind:checked={monitored} class="toggle toggle-primary" />
-						<div>
-							<span class="label-text font-medium">Monitored</span>
-							<p class="text-xs text-base-content/60">Search for new releases and upgrades</p>
-						</div>
-					</label>
-				</div>
+		<!-- Wants Subtitles -->
+		<FormCheckbox
+			bind:checked={wantsSubtitles}
+			label="Auto-Download Subtitles"
+			description="Automatically search and download subtitles"
+			variant="toggle"
+		/>
 
-				<!-- Wants Subtitles -->
-				<div class="form-control">
-					<label class="label cursor-pointer justify-start gap-3">
-						<input type="checkbox" bind:checked={wantsSubtitles} class="toggle toggle-primary" />
-						<div>
-							<span class="label-text font-medium">Auto-Download Subtitles</span>
-							<p class="text-xs text-base-content/60">
-								Automatically search and download subtitles
-							</p>
-						</div>
-					</label>
-				</div>
-
-				<!-- Quality Profile -->
-				<div class="form-control">
-					<label class="label" for="movie-quality-profile">
-						<span class="label-text font-medium">Quality Profile</span>
-					</label>
-					<select
-						id="movie-quality-profile"
-						bind:value={qualityProfileId}
-						class="select-bordered select w-full"
-					>
-						<option value=""
-							>Default ({qualityProfiles.find((p) => p.isDefault)?.name ??
-								'System Default'})</option
-						>
-						{#each qualityProfiles as profile (profile.id)}
-							<option value={profile.id}>
-								{profile.name}
-								{profile.isBuiltIn ? '' : '(Custom)'}
-							</option>
-						{/each}
-					</select>
-					<div class="label">
-						<span class="label-text-alt text-base-content/60">
-							{#if currentProfile}
-								{currentProfile.description}
-							{:else}
-								Controls quality scoring and upgrade behavior
-							{/if}
-						</span>
-					</div>
-				</div>
-
-				<!-- Root Folder -->
-				<div class="form-control">
-					<label class="label" for="movie-root-folder">
-						<span class="label-text font-medium">Root Folder</span>
-					</label>
-					<select
-						id="movie-root-folder"
-						bind:value={rootFolderId}
-						class="select-bordered select w-full"
-					>
-						<option value="">Not set</option>
-						{#each rootFolders as folder (folder.id)}
-							<option value={folder.id}>
-								{folder.path}
-								{#if folder.freeSpaceBytes}
-									({formatBytes(folder.freeSpaceBytes)} free)
-								{/if}
-							</option>
-						{/each}
-					</select>
-					<div class="label">
-						<span class="label-text-alt text-base-content/60">
-							Where downloaded files will be stored
-						</span>
-					</div>
-				</div>
-
-				<!-- Minimum Availability -->
-				<div class="form-control">
-					<label class="label" for="movie-min-availability">
-						<span class="label-text font-medium">Minimum Availability</span>
-					</label>
-					<select
-						id="movie-min-availability"
-						bind:value={minimumAvailability}
-						class="select-bordered select w-full"
-					>
-						{#each availabilityOptions as option (option.value)}
-							<option value={option.value}>{option.label}</option>
-						{/each}
-					</select>
-					<div class="label">
-						<span class="label-text-alt text-base-content/60">
-							{availabilityOptions.find((o) => o.value === minimumAvailability)?.description}
-						</span>
-					</div>
-				</div>
-			</div>
-
-			<!-- Actions -->
-			<div class="modal-action">
-				<button class="btn btn-ghost" onclick={onClose}>Cancel</button>
-				<button class="btn btn-primary" onclick={handleSave} disabled={saving}>
-					{#if saving}
-						<Loader2 class="h-4 w-4 animate-spin" />
+		<!-- Quality Profile -->
+		<div class="form-control">
+			<label class="label" for="movie-quality-profile">
+				<span class="label-text font-medium">Quality Profile</span>
+			</label>
+			<select
+				id="movie-quality-profile"
+				bind:value={qualityProfileId}
+				class="select select-bordered w-full"
+			>
+				<option value=""
+					>Default ({qualityProfiles.find((p) => p.isDefault)?.name ??
+						'System Default'})</option
+				>
+				{#each qualityProfiles as profile (profile.id)}
+					<option value={profile.id}>
+						{profile.name}
+						{profile.isBuiltIn ? '' : '(Custom)'}
+					</option>
+				{/each}
+			</select>
+			<div class="label">
+				<span class="label-text-alt text-base-content/60">
+					{#if currentProfile}
+						{currentProfile.description}
+					{:else}
+						Controls quality scoring and upgrade behavior
 					{/if}
-					Save Changes
-				</button>
+				</span>
 			</div>
 		</div>
-		<button
-			type="button"
-			class="modal-backdrop border-none bg-black/50"
-			onclick={onClose}
-			aria-label="Close modal"
-		></button>
+
+		<!-- Root Folder -->
+		<div class="form-control">
+			<label class="label" for="movie-root-folder">
+				<span class="label-text font-medium">Root Folder</span>
+			</label>
+			<select
+				id="movie-root-folder"
+				bind:value={rootFolderId}
+				class="select select-bordered w-full"
+			>
+				<option value="">Not set</option>
+				{#each rootFolders as folder (folder.id)}
+					<option value={folder.id}>
+						{folder.path}
+						{#if folder.freeSpaceBytes}
+							({formatBytes(folder.freeSpaceBytes)} free)
+						{/if}
+					</option>
+				{/each}
+			</select>
+			<div class="label">
+				<span class="label-text-alt text-base-content/60">
+					Where downloaded files will be stored
+				</span>
+			</div>
+		</div>
+
+		<!-- Minimum Availability -->
+		<div class="form-control">
+			<label class="label" for="movie-min-availability">
+				<span class="label-text font-medium">Minimum Availability</span>
+			</label>
+			<select
+				id="movie-min-availability"
+				bind:value={minimumAvailability}
+				class="select select-bordered w-full"
+			>
+				{#each availabilityOptions as option (option.value)}
+					<option value={option.value}>{option.label}</option>
+				{/each}
+			</select>
+			<div class="label">
+				<span class="label-text-alt text-base-content/60">
+					{availabilityOptions.find((o) => o.value === minimumAvailability)?.description}
+				</span>
+			</div>
+		</div>
 	</div>
-{/if}
+
+	<!-- Actions -->
+	<ModalFooter onCancel={onClose} onSave={handleSave} {saving} saveLabel="Save Changes" />
+</ModalWrapper>

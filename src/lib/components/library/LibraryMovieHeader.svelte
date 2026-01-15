@@ -111,7 +111,7 @@
 	</div>
 
 	<!-- Content -->
-	<div class="relative z-10 flex gap-6 p-6">
+	<div class="relative z-10 flex gap-4 p-4 md:gap-6 md:p-6">
 		<!-- Poster -->
 		<div class="hidden shrink-0 sm:block">
 			<div class="w-32 overflow-hidden rounded-lg shadow-lg md:w-40">
@@ -125,10 +125,10 @@
 		</div>
 
 		<!-- Info -->
-		<div class="flex flex-1 flex-col justify-between gap-4">
+		<div class="flex min-w-0 flex-1 flex-col justify-between gap-4">
 			<!-- Top row: Title and actions -->
-			<div class="flex flex-wrap items-start justify-between gap-4">
-				<div class="flex-1">
+			<div class="flex flex-wrap items-start justify-between gap-2 md:gap-4">
+				<div class="min-w-0 flex-1">
 					<h1 class="text-2xl font-bold md:text-3xl">
 						{movie.title}
 						{#if movie.year}
@@ -151,7 +151,7 @@
 				</div>
 
 				<!-- Action buttons -->
-				<div class="flex items-center gap-2">
+				<div class="flex flex-wrap items-center gap-1 sm:gap-2">
 					<MonitorToggle
 						monitored={movie.monitored ?? false}
 						onToggle={onMonitorToggle}
@@ -193,14 +193,14 @@
 			</div>
 
 			<!-- Middle row: Settings info -->
-			<div class="flex flex-wrap gap-x-6 gap-y-2 text-sm">
-				<div>
+			<div class="flex flex-wrap gap-x-3 gap-y-2 text-sm md:gap-x-6">
+				<div class="shrink-0">
 					<span class="text-base-content/50">Quality Profile:</span>
 					<span class="ml-1 font-medium">{qualityProfileName || 'Default'}</span>
 				</div>
-				<div>
-					<span class="text-base-content/50">Root Folder:</span>
-					<span class="ml-1 font-medium">{movie.rootFolderPath || 'Not set'}</span>
+				<div class="min-w-0 max-w-full">
+					<span class="shrink-0 text-base-content/50">Root Folder:</span>
+					<span class="ml-1 truncate font-medium" title={movie.rootFolderPath || 'Not set'}>{movie.rootFolderPath || 'Not set'}</span>
 				</div>
 				<div>
 					<span class="text-base-content/50">Added:</span>

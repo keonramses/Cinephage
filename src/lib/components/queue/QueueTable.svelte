@@ -19,6 +19,7 @@
 	} from 'lucide-svelte';
 	import QueueStatusBadge from './QueueStatusBadge.svelte';
 	import QueueProgressBar from './QueueProgressBar.svelte';
+	import QueueItemCard from './QueueItemCard.svelte';
 
 	interface Props {
 		items: QueueItemWithMedia[];
@@ -76,7 +77,15 @@
 		<p class="mt-1 text-sm">Downloads will appear here when you grab releases</p>
 	</div>
 {:else}
-	<div class="overflow-x-auto">
+	<!-- Mobile: Card View -->
+	<div class="space-y-3 lg:hidden">
+		{#each items as item (item.id)}
+			<QueueItemCard {item} {actionInProgress} {handleAction} />
+		{/each}
+	</div>
+
+	<!-- Desktop: Table View -->
+	<div class="hidden overflow-x-auto lg:block">
 		<table class="table table-sm">
 			<thead>
 				<tr>

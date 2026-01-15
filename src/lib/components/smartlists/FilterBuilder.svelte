@@ -399,7 +399,7 @@
 				{/if}
 
 				<!-- Year Range -->
-				<div class="grid grid-cols-2 gap-4">
+				<div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
 					<div class="form-control">
 						<label class="label py-1" for="yearMin">
 							<span
@@ -437,7 +437,7 @@
 				</div>
 
 				<!-- Rating -->
-				<div class="grid grid-cols-2 gap-4">
+				<div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
 					<div class="form-control">
 						<label class="label py-1" for="ratingMin">
 							<span
@@ -578,7 +578,7 @@
 				</div>
 
 				<!-- Runtime -->
-				<div class="grid grid-cols-2 gap-4">
+				<div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
 					<div class="form-control">
 						<label class="label py-1" for="runtimeMin">
 							<span

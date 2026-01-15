@@ -360,7 +360,7 @@
 	<title>{data.movie.title} - Library - Cinephage</title>
 </svelte:head>
 
-<div class="flex w-full flex-col gap-6 px-4 pb-20 lg:px-8">
+<div class="flex w-full flex-col gap-4 overflow-x-hidden px-4 pb-20 md:gap-6 md:px-6 lg:px-8">
 	<!-- Header -->
 	<LibraryMovieHeader
 		movie={data.movie}
@@ -379,10 +379,10 @@
 	/>
 
 	<!-- Main Content -->
-	<div class="grid gap-6 lg:grid-cols-3">
+	<div class="grid gap-4 lg:grid-cols-2 lg:gap-6 xl:grid-cols-3">
 		<!-- Files Section (takes 2 columns on large screens) -->
-		<div class="lg:col-span-2">
-			<div class="rounded-xl bg-base-200 p-6">
+		<div class="md:col-span-2 lg:col-span-2">
+			<div class="rounded-xl bg-base-200 p-4 md:p-6">
 				<div class="mb-4 flex items-center justify-between">
 					<h2 class="text-lg font-semibold">Files</h2>
 					{#if data.movie.files.length > 0}
@@ -405,10 +405,10 @@
 		</div>
 
 		<!-- Sidebar -->
-		<div class="space-y-6">
+		<div class="space-y-4 md:space-y-6">
 			<!-- Overview -->
 			{#if data.movie.overview}
-				<div class="rounded-xl bg-base-200 p-6">
+				<div class="rounded-xl bg-base-200 p-4 md:p-6">
 					<h3 class="mb-2 font-semibold">Overview</h3>
 					<p class="text-sm leading-relaxed text-base-content/80">
 						{data.movie.overview}
@@ -417,29 +417,29 @@
 			{/if}
 
 			<!-- Details -->
-			<div class="rounded-xl bg-base-200 p-6">
+			<div class="rounded-xl bg-base-200 p-4 md:p-6">
 				<h3 class="mb-3 font-semibold">Details</h3>
 				<dl class="space-y-2 text-sm">
 					{#if data.movie.originalTitle && data.movie.originalTitle !== data.movie.title}
-						<div class="flex justify-between">
+						<div class="flex flex-col gap-0.5 sm:flex-row sm:justify-between">
 							<dt class="text-base-content/60">Original Title</dt>
-							<dd>{data.movie.originalTitle}</dd>
+							<dd class="sm:text-right">{data.movie.originalTitle}</dd>
 						</div>
 					{/if}
 					{#if data.movie.runtime}
-						<div class="flex justify-between">
+						<div class="flex flex-col gap-0.5 sm:flex-row sm:justify-between">
 							<dt class="text-base-content/60">Runtime</dt>
 							<dd>{Math.floor(data.movie.runtime / 60)}h {data.movie.runtime % 60}m</dd>
 						</div>
 					{/if}
 					{#if data.movie.genres && data.movie.genres.length > 0}
-						<div class="flex justify-between">
+						<div class="flex flex-col gap-0.5 sm:flex-row sm:justify-between">
 							<dt class="text-base-content/60">Genres</dt>
-							<dd class="text-right">{data.movie.genres.join(', ')}</dd>
+							<dd class="sm:text-right">{data.movie.genres.join(', ')}</dd>
 						</div>
 					{/if}
 					{#if data.movie.imdbId}
-						<div class="flex justify-between">
+						<div class="flex flex-col gap-0.5 sm:flex-row sm:justify-between">
 							<dt class="text-base-content/60">IMDb</dt>
 							<dd>
 								<a
@@ -453,7 +453,7 @@
 							</dd>
 						</div>
 					{/if}
-					<div class="flex justify-between">
+					<div class="flex flex-col gap-0.5 sm:flex-row sm:justify-between">
 						<dt class="text-base-content/60">TMDB ID</dt>
 						<dd>
 							<a
@@ -470,7 +470,7 @@
 			</div>
 
 			<!-- Path Info -->
-			<div class="rounded-xl bg-base-200 p-6">
+			<div class="rounded-xl bg-base-200 p-4 md:p-6">
 				<h3 class="mb-3 font-semibold">Storage</h3>
 				<dl class="space-y-2 text-sm">
 					<div>

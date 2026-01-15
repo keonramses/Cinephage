@@ -5,7 +5,8 @@
 		RootFolderFormData,
 		PathValidationResult
 	} from '$lib/types/downloadClient';
-	import FolderBrowser from '$lib/components/FolderBrowser.svelte';
+	import { FolderBrowser } from '$lib/components/library';
+	import ModalWrapper from '$lib/components/ui/modal/ModalWrapper.svelte';
 
 	interface Props {
 		open: boolean;
@@ -88,16 +89,6 @@
 		onSave(getFormData());
 	}
 
-	function handleKeydown(e: KeyboardEvent) {
-		if (e.key === 'Escape') {
-			if (showFolderBrowser) {
-				showFolderBrowser = false;
-			} else {
-				onClose();
-			}
-		}
-	}
-
 	function handleFolderSelect(selectedPath: string) {
 		path = selectedPath;
 		showFolderBrowser = false;
@@ -106,18 +97,14 @@
 	}
 </script>
 
-<svelte:window onkeydown={handleKeydown} />
-
-{#if open}
-	<div class="modal-open modal">
-		<div class="modal-box max-h-[90vh] max-w-2xl overflow-y-auto">
-			<!-- Header -->
-			<div class="mb-6 flex items-center justify-between">
-				<h3 class="text-xl font-bold">{modalTitle}</h3>
-				<button class="btn btn-circle btn-ghost btn-sm" onclick={onClose}>
-					<X class="h-4 w-4" />
-				</button>
-			</div>
+<ModalWrapper {open} onClose={onClose} maxWidth="2xl" labelledBy="root-folder-modal-title">
+	<!-- Header -->
+	<div class="mb-6 flex items-center justify-between">
+		<h3 id="root-folder-modal-title" class="text-xl font-bold">{modalTitle}</h3>
+		<button class="btn btn-circle btn-ghost btn-sm" onclick={onClose}>
+			<X class="h-4 w-4" />
+		</button>
+	</div>
 
 			<!-- Folder Browser -->
 			{#if showFolderBrowser}
@@ -129,7 +116,7 @@
 			{:else}
 				<!-- Form -->
 				<div class="space-y-4">
-					<div class="grid grid-cols-2 gap-4">
+					<div class="grid grid-cols-1 gap-3 sm:grid-cols-2 sm:gap-4">
 						<div class="form-control">
 							<label class="label py-1" for="name">
 								<span class="label-text">Name</span>
@@ -198,28 +185,22 @@
 						</div>
 					</div>
 
-					<div class="form-control">
-						<label class="label cursor-pointer justify-start gap-3">
-							<input type="checkbox" class="checkbox checkbox-sm" bind:checked={isDefault} />
-							<span class="label-text"
-								>Set as default for {mediaType === 'movie' ? 'movies' : 'TV shows'}</span
-							>
-						</label>
-					</div>
+					<label class="flex cursor-pointer items-center gap-3 py-2">
+						<input type="checkbox" class="checkbox checkbox-sm shrink-0" bind:checked={isDefault} />
+						<span class="text-sm"
+							>Set as default for {mediaType === 'movie' ? 'movies' : 'TV shows'}</span
+						>
+					</label>
 
-					<div class="form-control">
-						<label class="label cursor-pointer justify-start gap-3">
-							<input type="checkbox" class="checkbox checkbox-sm" bind:checked={readOnly} />
-							<span class="label-text">Read-only folder (catalog only, no imports)</span>
-						</label>
-					</div>
+					<label class="flex cursor-pointer items-center gap-3 py-2">
+						<input type="checkbox" class="checkbox checkbox-sm shrink-0" bind:checked={readOnly} />
+						<span class="text-sm">Read-only folder (catalog only, no imports)</span>
+					</label>
 
-					<div class="form-control">
-						<label class="label cursor-pointer justify-start gap-3">
-							<input type="checkbox" class="checkbox checkbox-sm" bind:checked={preserveSymlinks} />
-							<span class="label-text">Preserve symlinks (for NZBDav/rclone mounts)</span>
-						</label>
-					</div>
+					<label class="flex cursor-pointer items-center gap-3 py-2">
+						<input type="checkbox" class="checkbox checkbox-sm shrink-0" bind:checked={preserveSymlinks} />
+						<span class="text-sm">Preserve symlinks (for NZBDav/rclone mounts)</span>
+					</label>
 
 					{#if preserveSymlinks}
 						<div class="alert alert-info">
@@ -327,12 +308,4 @@
 					</button>
 				</div>
 			{/if}
-		</div>
-		<button
-			type="button"
-			class="modal-backdrop cursor-default border-none bg-black/50"
-			onclick={onClose}
-			aria-label="Close modal"
-		></button>
-	</div>
-{/if}
+</ModalWrapper>

@@ -2,6 +2,7 @@
 	import { X, Loader2, Search } from 'lucide-svelte';
 	import { toasts } from '$lib/stores/toast.svelte';
 	import { SvelteSet } from 'svelte/reactivity';
+	import ModalWrapper from '$lib/components/ui/modal/ModalWrapper.svelte';
 	import CommonOptions from './add/CommonOptions.svelte';
 	import MovieAddOptions, { type MinimumAvailability } from './add/MovieAddOptions.svelte';
 	import SeriesAddOptions, {
@@ -439,21 +440,12 @@
 		}
 	}
 
-	function handleKeydown(e: KeyboardEvent) {
-		if (e.key === 'Escape') {
-			handleClose();
-		}
-	}
 </script>
 
-<svelte:window onkeydown={open ? handleKeydown : undefined} />
-
-{#if open}
-	<div class="modal-open modal">
-		<div class="modal-box max-h-[90vh] max-w-2xl overflow-y-auto">
-			<!-- Header -->
-			<div class="mb-6 flex items-center justify-between">
-				<h3 class="text-xl font-bold">Add to Library</h3>
+<ModalWrapper {open} onClose={handleClose} maxWidth="2xl" labelledBy="add-library-modal-title">
+	<!-- Header -->
+	<div class="mb-6 flex items-center justify-between">
+		<h3 id="add-library-modal-title" class="text-xl font-bold">Add to Library</h3>
 				<button
 					class="btn btn-circle btn-ghost btn-sm"
 					onclick={handleClose}
@@ -465,7 +457,7 @@
 			</div>
 
 			<!-- Body -->
-			<div class="space-y-5">
+			<div class="min-w-0 space-y-5 overflow-hidden">
 				{#if isLoading}
 					<div class="flex items-center justify-center py-12">
 						<Loader2 class="h-8 w-8 animate-spin text-primary" />
@@ -565,12 +557,4 @@
 					{/if}
 				</button>
 			</div>
-		</div>
-		<button
-			type="button"
-			class="modal-backdrop cursor-default border-none bg-black/50"
-			onclick={handleClose}
-			aria-label="Close modal"
-		></button>
-	</div>
-{/if}
+</ModalWrapper>

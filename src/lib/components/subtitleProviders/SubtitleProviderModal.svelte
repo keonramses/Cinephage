@@ -2,6 +2,7 @@
 	import { X, Loader2, CheckCircle2, Globe, Key, Hash, Search } from 'lucide-svelte';
 	import type { SubtitleProviderConfig, ProviderImplementation } from '$lib/server/subtitles/types';
 	import type { ProviderDefinition } from '$lib/server/subtitles/providers/interfaces';
+	import ModalWrapper from '$lib/components/ui/modal/ModalWrapper.svelte';
 	import { SectionHeader, TestResult } from '$lib/components/ui/modal';
 
 	interface SubtitleProviderFormData {
@@ -138,21 +139,12 @@
 		onSave(getFormData());
 	}
 
-	function handleKeydown(e: KeyboardEvent) {
-		if (e.key === 'Escape') {
-			onClose();
-		}
-	}
 </script>
 
-<svelte:window onkeydown={handleKeydown} />
-
-{#if open}
-	<div class="modal-open modal">
-		<div class="modal-box max-h-[90vh] max-w-3xl overflow-y-auto">
-			<!-- Header -->
-			<div class="mb-6 flex items-center justify-between">
-				<h3 class="text-xl font-bold">{modalTitle}</h3>
+<ModalWrapper {open} {onClose} maxWidth="3xl" labelledBy="subtitle-provider-modal-title">
+	<!-- Header -->
+	<div class="mb-6 flex items-center justify-between">
+		<h3 id="subtitle-provider-modal-title" class="text-xl font-bold">{modalTitle}</h3>
 				<button class="btn btn-circle btn-ghost btn-sm" onclick={onClose}>
 					<X class="h-4 w-4" />
 				</button>
@@ -254,8 +246,8 @@
 					</div>
 				{/if}
 
-				<!-- Main Form - Two Column Layout -->
-				<div class="grid grid-cols-2 gap-6">
+				<!-- Main Form - Responsive Two Column Layout -->
+				<div class="grid grid-cols-1 gap-4 sm:grid-cols-2 sm:gap-6">
 					<!-- Left Column: Basic Settings -->
 					<div class="space-y-4">
 						<SectionHeader title="Basic Settings" />
@@ -273,7 +265,7 @@
 							/>
 						</div>
 
-						<div class="grid grid-cols-2 gap-3">
+						<div class="grid grid-cols-2 gap-2 sm:gap-3">
 							<div class="form-control">
 								<label class="label py-1" for="priority">
 									<span class="label-text">Priority</span>
@@ -362,7 +354,7 @@
 						{/if}
 
 						{#if requiresCredentials}
-							<div class="grid grid-cols-2 gap-3">
+							<div class="grid grid-cols-2 gap-2 sm:gap-3">
 								<div class="form-control">
 									<label class="label py-1" for="username">
 										<span class="label-text">Username</span>
@@ -455,12 +447,4 @@
 					</button>
 				</div>
 			{/if}
-		</div>
-		<button
-			type="button"
-			class="modal-backdrop cursor-default border-none bg-black/50"
-			onclick={onClose}
-			aria-label="Close modal"
-		></button>
-	</div>
-{/if}
+</ModalWrapper>

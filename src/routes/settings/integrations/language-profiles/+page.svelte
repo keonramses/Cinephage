@@ -335,7 +335,7 @@
 <!-- Add/Edit Modal -->
 {#if modalOpen}
 	<div class="modal-open modal">
-		<div class="modal-box max-w-2xl">
+		<div class="modal-box w-full max-w-[min(42rem,calc(100vw-2rem))] break-words">
 			<h3 class="mb-4 text-lg font-bold">
 				{modalMode === 'add' ? 'Add Language Profile' : 'Edit Language Profile'}
 			</h3>
@@ -418,7 +418,7 @@
 					</button>
 				</div>
 
-				<div class="grid grid-cols-2 gap-4">
+				<div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
 					<div class="form-control">
 						<label class="label" for="cutoffIndex">
 							<span class="label-text">Cutoff Index</span>
@@ -489,7 +489,7 @@
 <!-- Delete Confirmation Modal -->
 {#if confirmDeleteOpen}
 	<div class="modal-open modal">
-		<div class="modal-box">
+		<div class="modal-box w-full max-w-[min(28rem,calc(100vw-2rem))] break-words">
 			<h3 class="text-lg font-bold">Confirm Delete</h3>
 			<p class="py-4">
 				Are you sure you want to delete <strong>{deleteTarget?.name}</strong>? This action cannot be

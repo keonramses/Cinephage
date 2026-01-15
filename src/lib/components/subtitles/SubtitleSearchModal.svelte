@@ -2,6 +2,7 @@
 	import { SvelteSet, SvelteMap } from 'svelte/reactivity';
 	import { X, Search, Loader2, RefreshCw, Filter, Subtitles } from 'lucide-svelte';
 	import SubtitleSearchResultRow from './SubtitleSearchResultRow.svelte';
+	import ModalWrapper from '$lib/components/ui/modal/ModalWrapper.svelte';
 
 	interface SubtitleResult {
 		providerId: string;
@@ -208,15 +209,11 @@
 	}
 </script>
 
-<svelte:window onkeydown={handleKeydown} />
-
-{#if open}
-	<div class="modal-open modal">
-		<div class="modal-box flex max-h-[90vh] max-w-4xl flex-col">
-			<!-- Header -->
+<ModalWrapper {open} onClose={onClose} maxWidth="4xl" labelledBy="subtitle-search-modal-title">
+	<!-- Header -->
 			<div class="mb-4 flex items-center justify-between">
 				<div>
-					<h3 class="flex items-center gap-2 text-lg font-bold">
+					<h3 id="subtitle-search-modal-title" class="flex items-center gap-2 text-lg font-bold">
 						<Subtitles size={20} class="text-primary" />
 						Subtitle Search
 					</h3>
@@ -255,7 +252,7 @@
 						<input
 							type="text"
 							placeholder="Filter results..."
-							class="input-bordered input input-sm w-48"
+							class="input-bordered input input-sm w-full sm:w-48"
 							bind:value={filterQuery}
 						/>
 					</div>
@@ -287,6 +284,7 @@
 						</p>
 					</div>
 				{:else}
+					<div class="overflow-x-auto">
 					<table class="table table-sm">
 						<thead class="sticky top-0 z-10 bg-base-100">
 							<tr>
@@ -317,19 +315,12 @@
 							{/each}
 						</tbody>
 					</table>
+					</div>
 				{/if}
 			</div>
 
-			<!-- Footer -->
-			<div class="modal-action">
-				<button class="btn" onclick={onClose}>Close</button>
-			</div>
-		</div>
-		<button
-			type="button"
-			class="modal-backdrop border-none bg-black/50"
-			onclick={onClose}
-			aria-label="Close modal"
-		></button>
+		<!-- Footer -->
+	<div class="modal-action">
+		<button class="btn" onclick={onClose}>Close</button>
 	</div>
-{/if}
+</ModalWrapper>

@@ -823,7 +823,7 @@
 <!-- Save Preset Modal -->
 {#if showSavePresetModal}
 	<div class="modal-open modal">
-		<div class="modal-box">
+		<div class="modal-box w-full max-w-[min(28rem,calc(100vw-2rem))] break-words">
 			<h3 class="mb-4 text-lg font-bold">Save Current Settings as Preset</h3>
 			<div class="form-control mb-4">
 				<label class="label" for="newPresetName">

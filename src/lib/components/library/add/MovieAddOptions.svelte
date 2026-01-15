@@ -56,36 +56,34 @@
 </script>
 
 <!-- Minimum Availability -->
-<div class="form-control">
+<div class="form-control min-w-0">
 	<label class="label" for="minimum-availability">
 		<span class="label-text flex items-center gap-2 font-medium">
-			<Calendar class="h-4 w-4" />
+			<Calendar class="h-4 w-4 shrink-0" />
 			Minimum Availability
 		</span>
 	</label>
 	<select
 		id="minimum-availability"
-		class="select-bordered select w-full"
+		class="select-bordered select w-full max-w-full"
 		bind:value={minimumAvailability}
 	>
 		{#each availabilityOptions as option (option.value)}
 			<option value={option.value}>{option.label}</option>
 		{/each}
 	</select>
-	<div class="label">
-		<span class="label-text-alt text-base-content/60">
-			{availabilityOptions.find((o) => o.value === minimumAvailability)?.description}
-		</span>
-	</div>
+	<p class="mt-1 text-xs text-base-content/60">
+		{availabilityOptions.find((o) => o.value === minimumAvailability)?.description}
+	</p>
 </div>
 
 <!-- Collection Option -->
 {#if collection && missingCollectionMovies.length > 0}
-	<div class="form-control">
+	<div class="form-control min-w-0">
 		<label class="label cursor-pointer justify-start gap-4 rounded-lg bg-base-300/50 p-4">
-			<input type="checkbox" class="checkbox checkbox-primary" bind:checked={addEntireCollection} />
-			<div class="flex-1">
-				<span class="label-text font-medium">
+			<input type="checkbox" class="checkbox checkbox-primary shrink-0" bind:checked={addEntireCollection} />
+			<div class="min-w-0 flex-1">
+				<span class="label-text block truncate font-medium" title="Add entire {collection.name}">
 					Add entire {collection.name}
 				</span>
 				<span class="label-text-alt block text-base-content/60">
@@ -99,19 +97,17 @@
 {/if}
 
 <!-- Monitored Toggle -->
-<div class="form-control">
-	<label class="label cursor-pointer justify-start gap-4">
-		<input type="checkbox" class="toggle toggle-primary" bind:checked={monitored} />
-		<div>
-			<span class="label-text flex items-center gap-2 font-medium">
-				<Eye class="h-4 w-4" />
-				Monitored
-			</span>
-			<span class="label-text-alt text-base-content/60">
-				{monitored
-					? 'Will search for releases and upgrades automatically'
-					: 'Will not search for releases automatically'}
-			</span>
-		</div>
-	</label>
-</div>
+<label class="flex cursor-pointer items-start gap-4 py-2">
+	<input type="checkbox" class="toggle toggle-primary mt-0.5 shrink-0" bind:checked={monitored} />
+	<div class="min-w-0">
+		<span class="flex items-center gap-2 text-sm font-medium">
+			<Eye class="h-4 w-4 shrink-0" />
+			Monitored
+		</span>
+		<p class="text-xs text-base-content/60">
+			{monitored
+				? 'Will search for releases and upgrades automatically'
+				: 'Will not search for releases automatically'}
+		</p>
+	</div>
+</label>

@@ -83,22 +83,25 @@
 	}
 </script>
 
-<div class="rounded-lg border border-base-300 bg-base-100 p-4">
+<div class="rounded-lg border border-base-300 bg-base-100 p-3 md:p-4">
 	<!-- File name row -->
-	<div class="flex items-start justify-between gap-4">
-		<div class="flex items-start gap-3 overflow-hidden">
+	<div class="flex flex-wrap items-start justify-between gap-2 md:gap-4">
+		<div class="flex min-w-0 flex-1 items-start gap-3">
 			<File size={20} class="mt-0.5 shrink-0 text-base-content/50" />
 			<div class="min-w-0 flex-1">
-				<div class="truncate font-mono text-sm" title={file.relativePath}>
+				<div class="font-mono text-sm break-all sm:truncate" title={file.relativePath}>
 					{getFileName(file.relativePath)}
 				</div>
-				<div class="mt-1 text-xs text-base-content/50">
+				<div
+					class="mt-1 text-xs break-all text-base-content/50 sm:truncate"
+					title={file.relativePath}
+				>
 					{file.relativePath}
 				</div>
 			</div>
 		</div>
 
-		<div class="flex items-center gap-2">
+		<div class="flex flex-wrap items-center gap-2">
 			{#if file.mediaInfo}
 				<MediaInfoPopover mediaInfo={file.mediaInfo} />
 			{/if}
@@ -115,7 +118,7 @@
 	</div>
 
 	<!-- Info row -->
-	<div class="mt-3 flex flex-wrap items-center gap-x-4 gap-y-2">
+	<div class="mt-3 flex flex-wrap items-center gap-x-2 gap-y-2 md:gap-x-4">
 		<!-- Quality badges -->
 		<QualityBadge quality={file.quality} mediaInfo={file.mediaInfo} size="sm" />
 
@@ -133,19 +136,23 @@
 
 		<!-- Release group -->
 		{#if file.releaseGroup}
-			<span class="badge badge-outline badge-sm">{file.releaseGroup}</span>
+			<span class="badge max-w-full truncate badge-outline badge-sm" title={file.releaseGroup}>
+				{file.releaseGroup}
+			</span>
 		{/if}
 
 		<!-- Edition -->
 		{#if file.edition}
-			<span class="badge badge-ghost badge-sm">{file.edition}</span>
+			<span class="badge max-w-full truncate badge-ghost badge-sm" title={file.edition}>
+				{file.edition}
+			</span>
 		{/if}
 	</div>
 
 	<!-- Video/Audio info preview -->
 	{#if file.mediaInfo}
 		<div
-			class="mt-3 flex flex-wrap gap-x-4 gap-y-1 border-t border-base-300 pt-3 text-xs text-base-content/60"
+			class="mt-3 flex flex-wrap gap-x-2 gap-y-1 border-t border-base-300 pt-3 text-xs text-base-content/60 md:gap-x-4"
 		>
 			{#if file.mediaInfo.videoCodec}
 				<span>
@@ -181,12 +188,12 @@
 
 	<!-- Subtitles section -->
 	<div class="mt-3 flex flex-wrap items-center justify-between gap-2 border-t border-base-300 pt-3">
-		<div class="flex items-center gap-2">
+		<div class="flex min-w-0 flex-1 items-center gap-2">
 			<Subtitles size={14} class="text-base-content/50" />
 			<SubtitleDisplay subtitles={allSubtitles} size="sm" />
 		</div>
 		{#if onSubtitleSearch || onSubtitleAutoSearch}
-			<div class="flex items-center gap-1">
+			<div class="flex flex-wrap items-center gap-1">
 				{#if onSubtitleSearch}
 					<button
 						class="btn gap-1 btn-ghost btn-xs"

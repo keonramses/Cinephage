@@ -140,7 +140,7 @@
 			{/if}
 		</div>
 
-		<div class="grid grid-cols-2 gap-3">
+		<div class="grid grid-cols-1 gap-3 sm:grid-cols-2">
 			<div class="form-control">
 				<label class="label py-1" for="regular-priority">
 					<span class="label-text">Priority</span>
@@ -160,18 +160,16 @@
 				</p>
 			</div>
 
-			<div class="form-control">
-				<span class="label py-1">
-					<span class="label-text">Status</span>
-				</span>
-				<label class="label cursor-pointer justify-start gap-2 py-2">
+			<div>
+				<span class="block py-1 text-sm">Status</span>
+				<label class="flex cursor-pointer items-center gap-2 py-2">
 					<input
 						type="checkbox"
-						class="checkbox checkbox-sm"
+						class="checkbox checkbox-sm shrink-0"
 						checked={enabled}
 						onchange={(e) => onEnabledChange(e.currentTarget.checked)}
 					/>
-					<span class="label-text text-sm">Enabled</span>
+					<span class="text-sm">Enabled</span>
 				</label>
 			</div>
 		</div>
@@ -209,7 +207,7 @@
 		{#if isTorrent}
 			<SectionHeader title="Torrent Settings" class="mt-4" />
 
-			<div class="grid grid-cols-2 gap-3">
+			<div class="grid grid-cols-1 gap-3 sm:grid-cols-2">
 				<div class="form-control">
 					<label class="label py-1" for="minimumSeeders">
 						<span class="label-text">Min Seeders</span>

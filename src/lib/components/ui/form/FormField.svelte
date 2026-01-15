@@ -16,7 +16,7 @@
 </script>
 
 <div class="form-control">
-	<label class="label" for={id}>
+	<label class="label py-1" for={id}>
 		<span class="label-text">
 			{label}
 			{#if required}
@@ -35,12 +35,12 @@
 	{@render children()}
 
 	{#if error}
-		<div class="label">
+		<div class="label py-1">
 			<span class="label-text-alt text-error">{error}</span>
 		</div>
 	{:else if helpText}
-		<div class="label">
-			<span class="label-text-alt text-base-content/60">{helpText}</span>
+		<div class="label py-1">
+			<span class="label-text-alt text-xs text-base-content/60">{helpText}</span>
 		</div>
 	{/if}
 </div>

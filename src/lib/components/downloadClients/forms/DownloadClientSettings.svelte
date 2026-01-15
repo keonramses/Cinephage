@@ -114,7 +114,7 @@
 	{#if definition?.supportsCategories}
 		<SectionHeader title="Categories" />
 
-		<div class="grid grid-cols-2 gap-3">
+		<div class="grid grid-cols-1 gap-3 sm:grid-cols-2">
 			<div class="form-control">
 				<label class="label py-1" for="movieCategory">
 					<span class="label-text">Movies</span>
@@ -208,7 +208,7 @@
 			{isSabnzbd ? 'Completed Download Folder' : 'Download Folder'}
 		</div>
 
-		<div class="grid grid-cols-2 gap-2">
+		<div class="grid grid-cols-1 gap-2 sm:grid-cols-2">
 			<div class="form-control">
 				<label class="label py-0.5" for="downloadPathRemote">
 					<span class="label-text text-xs">Client Path</span>
@@ -252,7 +252,7 @@
 		<div class="rounded-lg bg-base-200/50 p-3">
 			<div class="mb-2 text-xs font-medium text-base-content/80">Temporary Download Folder</div>
 
-			<div class="grid grid-cols-2 gap-2">
+			<div class="grid grid-cols-1 gap-2 sm:grid-cols-2">
 				<div class="form-control">
 					<label class="label py-0.5" for="tempPathRemote">
 						<span class="label-text text-xs">Client Path</span>

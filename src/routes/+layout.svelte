@@ -1,6 +1,6 @@
 <script lang="ts">
 	import './layout.css';
-	import ThemeSelector from '$lib/components/ThemeSelector.svelte';
+	import { ThemeSelector } from '$lib/components/ui';
 	import Toasts from '$lib/components/ui/Toasts.svelte';
 	import { layoutState } from '$lib/layout.svelte';
 	import { page } from '$app/stores';

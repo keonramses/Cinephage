@@ -6,7 +6,8 @@
 		DownloadClientImplementation,
 		ConnectionTestResult
 	} from '$lib/types/downloadClient';
-	import FolderBrowser from '$lib/components/FolderBrowser.svelte';
+	import { FolderBrowser } from '$lib/components/library';
+	import ModalWrapper from '$lib/components/ui/modal/ModalWrapper.svelte';
 	import { SectionHeader, TestResult } from '$lib/components/ui/modal';
 	import { clientDefinitions } from './forms/clientDefinitions';
 	import NntpServerSettings from './forms/NntpServerSettings.svelte';
@@ -281,16 +282,6 @@
 		onSave(getFormData(), isNntpServer);
 	}
 
-	function handleKeydown(e: KeyboardEvent) {
-		if (e.key === 'Escape') {
-			if (showFolderBrowser) {
-				showFolderBrowser = false;
-			} else {
-				onClose();
-			}
-		}
-	}
-
 	function handleFolderSelect(path: string) {
 		if (browsingField === 'tempPathLocal') {
 			tempPathLocal = path;
@@ -306,14 +297,10 @@
 	}
 </script>
 
-<svelte:window onkeydown={handleKeydown} />
-
-{#if open}
-	<div class="modal-open modal">
-		<div class="modal-box max-h-[90vh] max-w-3xl overflow-y-auto">
-			<!-- Header -->
-			<div class="mb-6 flex items-center justify-between">
-				<h3 class="text-xl font-bold">{modalTitle}</h3>
+<ModalWrapper {open} {onClose} maxWidth="3xl" labelledBy="download-client-modal-title">
+	<!-- Header -->
+	<div class="mb-6 flex items-center justify-between">
+		<h3 id="download-client-modal-title" class="text-xl font-bold">{modalTitle}</h3>
 				<button class="btn btn-circle btn-ghost btn-sm" onclick={onClose}>
 					<X class="h-4 w-4" />
 				</button>
@@ -324,7 +311,7 @@
 				<div class="space-y-4">
 					<p class="text-base-content/70">Select the type of download client you want to add:</p>
 
-					<div class="grid grid-cols-2 gap-3">
+					<div class="grid grid-cols-1 gap-2 sm:grid-cols-2 sm:gap-3">
 						{#each clientDefinitions as def (def.id)}
 							<button
 								type="button"
@@ -385,8 +372,8 @@
 						/>
 					</div>
 				{:else}
-					<!-- Main Form - Two Column Layout -->
-					<div class="grid grid-cols-2 gap-6">
+					<!-- Main Form - Responsive Two Column Layout -->
+					<div class="grid grid-cols-1 gap-4 sm:grid-cols-2 sm:gap-6">
 						<!-- Left Column: Connection -->
 						<div class="space-y-4">
 							<SectionHeader title="Connection" />
@@ -404,7 +391,7 @@
 								/>
 							</div>
 
-							<div class="grid grid-cols-2 gap-3">
+							<div class="grid grid-cols-1 gap-2 sm:grid-cols-2 sm:gap-3">
 								<div class="form-control">
 									<label class="label py-1" for="host">
 										<span class="label-text">Host</span>
@@ -472,7 +459,7 @@
 								</div>
 							{:else}
 								<!-- Username/password auth for torrent clients and NZBGet -->
-								<div class="grid grid-cols-2 gap-3">
+								<div class="grid grid-cols-1 gap-2 sm:grid-cols-2 sm:gap-3">
 									<div class="form-control">
 										<label class="label py-1" for="username">
 											<span class="label-text">Username</span>
@@ -603,12 +590,4 @@
 					</div>
 				{/if}
 			{/if}
-		</div>
-		<button
-			type="button"
-			class="modal-backdrop cursor-default border-none bg-black/50"
-			onclick={onClose}
-			aria-label="Close modal"
-		></button>
-	</div>
-{/if}
+</ModalWrapper>

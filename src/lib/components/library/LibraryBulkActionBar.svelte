@@ -37,9 +37,11 @@
 </script>
 
 {#if selectedCount > 0}
-	<div class="fixed bottom-4 left-1/2 z-50 -translate-x-1/2">
+	<div
+		class="fixed right-4 bottom-[max(1rem,env(safe-area-inset-bottom))] left-4 z-50 mx-auto max-w-fit"
+	>
 		<div
-			class="flex items-center gap-3 rounded-full border border-base-content/10 bg-base-300 px-4 py-2.5 shadow-xl"
+			class="flex items-center gap-2 rounded-full border border-base-content/10 bg-base-300 px-3 py-2 shadow-xl sm:gap-3 sm:px-4 sm:py-2.5"
 		>
 			<span class="text-sm font-medium">
 				{selectedCount}

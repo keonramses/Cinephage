@@ -16,16 +16,16 @@
 	}
 </script>
 
-<label class="label cursor-pointer justify-start gap-3 py-2">
+<label class="flex cursor-pointer items-start gap-3 py-2">
 	<input
 		type="checkbox"
-		class="checkbox checkbox-sm"
+		class="checkbox checkbox-sm mt-0.5 shrink-0"
 		bind:checked
 		{disabled}
 		onchange={handleChange}
 	/>
-	<div>
-		<span class="label-text">{label}</span>
+	<div class="min-w-0">
+		<span class="text-sm">{label}</span>
 		{#if description}
 			<p class="text-xs text-base-content/50">{description}</p>
 		{/if}

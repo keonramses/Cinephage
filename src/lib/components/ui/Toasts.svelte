@@ -19,12 +19,15 @@
 	};
 </script>
 
-<!-- Toast Container - Fixed position in bottom-right corner -->
-<div class="fixed right-4 bottom-4 z-[100] flex flex-col gap-2" aria-live="polite">
+<!-- Toast Container - Fixed position, centered on mobile, right-aligned on desktop -->
+<div
+	class="fixed inset-x-4 bottom-[max(1rem,env(safe-area-inset-bottom))] z-[100] flex flex-col gap-2 sm:inset-x-auto sm:right-4 sm:left-auto"
+	aria-live="polite"
+>
 	{#each toasts.toasts as toast (toast.id)}
 		{@const Icon = icons[toast.type]}
 		<div
-			class="alert max-w-sm shadow-lg {alertClasses[toast.type]}"
+			class="alert w-full shadow-lg sm:max-w-sm {alertClasses[toast.type]}"
 			role="alert"
 			transition:fly={{ x: 100, duration: 300 }}
 		>

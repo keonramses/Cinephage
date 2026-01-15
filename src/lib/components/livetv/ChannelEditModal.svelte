@@ -13,6 +13,7 @@
 		Archive,
 		Link
 	} from 'lucide-svelte';
+	import ModalWrapper from '$lib/components/ui/modal/ModalWrapper.svelte';
 	import type {
 		ChannelLineupItemWithDetails,
 		ChannelCategory,
@@ -231,10 +232,6 @@
 		epgSourceChannelId = null;
 	}
 
-	function handleKeydown(e: KeyboardEvent) {
-		if (e.key === 'Escape') onClose();
-	}
-
 	function formatArchiveDuration(hours: number): string {
 		if (hours < 24) return `${hours} hour${hours !== 1 ? 's' : ''}`;
 		const days = Math.floor(hours / 24);
@@ -242,20 +239,17 @@
 	}
 </script>
 
-<svelte:window onkeydown={open ? handleKeydown : undefined} />
+{#if channel}
+<ModalWrapper open={open} onClose={onClose} maxWidth="xl" labelledBy="channel-edit-modal-title">
+	<!-- Header -->
+	<div class="mb-4 flex items-center justify-between">
+		<h3 id="channel-edit-modal-title" class="text-lg font-bold">Edit Channel</h3>
+		<button class="btn btn-circle btn-ghost btn-sm" onclick={onClose}>
+			<X class="h-4 w-4" />
+		</button>
+	</div>
 
-{#if open && channel}
-	<div class="modal-open modal">
-		<div class="modal-box max-h-[90vh] max-w-xl overflow-y-auto">
-			<!-- Header -->
-			<div class="mb-4 flex items-center justify-between">
-				<h3 class="text-lg font-bold">Edit Channel</h3>
-				<button class="btn btn-circle btn-ghost btn-sm" onclick={onClose}>
-					<X class="h-4 w-4" />
-				</button>
-			</div>
-
-			<!-- Channel Info Banner -->
+	<!-- Channel Info Banner -->
 			<div class="mb-6 flex items-center gap-3 rounded-lg bg-base-200 p-3">
 				{#if channel.displayLogo}
 					<img
@@ -627,12 +621,5 @@
 					Save
 				</button>
 			</div>
-		</div>
-		<button
-			type="button"
-			class="modal-backdrop cursor-default border-none bg-black/50"
-			onclick={onClose}
-			aria-label="Close modal"
-		></button>
-	</div>
+</ModalWrapper>
 {/if}

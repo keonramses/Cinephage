@@ -210,39 +210,37 @@
 </script>
 
 <!-- Monitored Toggle -->
-<div class="form-control">
-	<label class="label cursor-pointer justify-start gap-4">
-		<input
-			type="checkbox"
-			class="toggle toggle-primary"
-			checked={monitorType !== 'none'}
-			onchange={(e) => {
-				if (!e.currentTarget.checked) {
-					monitorType = 'none';
-				} else {
-					monitorType = 'all';
-				}
-			}}
-		/>
-		<div>
-			<span class="label-text flex items-center gap-2 font-medium">
-				<Eye class="h-4 w-4" />
-				Monitored
-			</span>
-			<span class="label-text-alt text-base-content/60">
-				{monitorType !== 'none'
-					? 'Will search for releases and upgrades automatically'
-					: 'Will not search for releases automatically'}
-			</span>
-		</div>
-	</label>
-</div>
+<label class="flex cursor-pointer items-start gap-4 py-2">
+	<input
+		type="checkbox"
+		class="toggle toggle-primary mt-0.5 shrink-0"
+		checked={monitorType !== 'none'}
+		onchange={(e) => {
+			if (!e.currentTarget.checked) {
+				monitorType = 'none';
+			} else {
+				monitorType = 'all';
+			}
+		}}
+	/>
+	<div class="min-w-0">
+		<span class="flex items-center gap-2 text-sm font-medium">
+			<Eye class="h-4 w-4 shrink-0" />
+			Monitored
+		</span>
+		<p class="text-xs text-base-content/60">
+			{monitorType !== 'none'
+				? 'Will search for releases and upgrades automatically'
+				: 'Will not search for releases automatically'}
+		</p>
+	</div>
+</label>
 
 <!-- Monitor Type -->
 <div class="form-control">
 	<label class="label" for="monitor-type">
 		<span class="label-text flex items-center gap-2 font-medium">
-			<Tv class="h-4 w-4" />
+			<Tv class="h-4 w-4 shrink-0" />
 			Monitor
 		</span>
 	</label>
@@ -251,18 +249,16 @@
 			<option value={option.value}>{option.label}</option>
 		{/each}
 	</select>
-	<div class="label">
-		<span class="label-text-alt text-base-content/60">
-			{monitorTypeOptions.find((o) => o.value === monitorType)?.description}
-		</span>
-	</div>
+	<p class="mt-1 text-xs text-base-content/60">
+		{monitorTypeOptions.find((o) => o.value === monitorType)?.description}
+	</p>
 </div>
 
 <!-- Monitor New Items dropdown -->
 <div class="form-control">
 	<label class="label" for="monitor-new-items">
 		<span class="label-text flex items-center gap-2 font-medium">
-			<Calendar class="h-4 w-4" />
+			<Calendar class="h-4 w-4 shrink-0" />
 			Monitor New Items
 		</span>
 	</label>
@@ -271,27 +267,23 @@
 			<option value={option.value}>{option.label}</option>
 		{/each}
 	</select>
-	<div class="label">
-		<span class="label-text-alt text-base-content/60">
-			{monitorNewItemsOptions.find((o) => o.value === monitorNewItems)?.description}
-		</span>
-	</div>
+	<p class="mt-1 text-xs text-base-content/60">
+		{monitorNewItemsOptions.find((o) => o.value === monitorNewItems)?.description}
+	</p>
 </div>
 
 <!-- Monitor Specials Toggle -->
-<div class="form-control">
-	<label class="label cursor-pointer justify-start gap-4">
-		<input type="checkbox" class="toggle toggle-primary toggle-sm" bind:checked={monitorSpecials} />
-		<div>
-			<span class="label-text flex items-center gap-2 font-medium"> Monitor Specials </span>
-			<span class="label-text-alt text-base-content/60">
-				{monitorSpecials
-					? 'Specials (Season 0) will be monitored'
-					: 'Specials (Season 0) will not be monitored'}
-			</span>
-		</div>
-	</label>
-</div>
+<label class="flex cursor-pointer items-start gap-4 py-2">
+	<input type="checkbox" class="toggle toggle-primary toggle-sm mt-0.5 shrink-0" bind:checked={monitorSpecials} />
+	<div class="min-w-0">
+		<span class="flex items-center gap-2 text-sm font-medium"> Monitor Specials </span>
+		<p class="text-xs text-base-content/60">
+			{monitorSpecials
+				? 'Specials (Season 0) will be monitored'
+				: 'Specials (Season 0) will not be monitored'}
+		</p>
+	</div>
+</label>
 
 <!-- Season Selection (Expandable) -->
 {#if seasons.length > 0}
@@ -368,7 +360,7 @@
 			Monitoring Preview
 		</h4>
 		<p class="mb-3 text-sm text-base-content/70">{summary.monitorDescription}</p>
-		<div class="grid grid-cols-2 gap-2 text-xs">
+		<div class="grid grid-cols-1 gap-2 text-xs sm:grid-cols-2">
 			<div class="rounded bg-base-200 px-2 py-1">
 				<span class="text-base-content/50">Seasons:</span>
 				<span class="ml-1 font-medium">{summary.monitoredSeasons}/{summary.totalSeasons}</span>
@@ -385,7 +377,7 @@
 				</div>
 			{/if}
 			{#if summary.hasSpecials}
-				<div class="col-span-2 rounded bg-base-200 px-2 py-1">
+				<div class="rounded bg-base-200 px-2 py-1 sm:col-span-2">
 					<span class="text-base-content/50">Specials:</span>
 					<span class="ml-1 font-medium">
 						{summary.specialsMonitored
@@ -427,25 +419,21 @@
 				<option value={option.value}>{option.label}</option>
 			{/each}
 		</select>
-		<div class="label">
-			<span class="label-text-alt text-base-content/60">
-				{seriesTypeOptions.find((o) => o.value === seriesType)?.description}
-			</span>
-		</div>
+		<p class="mt-1 text-xs text-base-content/60">
+			{seriesTypeOptions.find((o) => o.value === seriesType)?.description}
+		</p>
 	</div>
 
 	<!-- Season Folder Toggle -->
-	<div class="form-control">
-		<label class="label cursor-pointer justify-start gap-4">
-			<input type="checkbox" class="toggle toggle-primary toggle-sm" bind:checked={seasonFolder} />
-			<div>
-				<span class="label-text font-medium">Use Season Folders</span>
-				<span class="label-text-alt text-base-content/60">
-					{seasonFolder
-						? 'Episodes organized in Season ## folders'
-						: 'All episodes in series folder'}
-				</span>
-			</div>
-		</label>
-	</div>
+	<label class="flex cursor-pointer items-start gap-4 py-2">
+		<input type="checkbox" class="toggle toggle-primary toggle-sm mt-0.5 shrink-0" bind:checked={seasonFolder} />
+		<div class="min-w-0">
+			<span class="text-sm font-medium">Use Season Folders</span>
+			<p class="text-xs text-base-content/60">
+				{seasonFolder
+					? 'Episodes organized in Season ## folders'
+					: 'All episodes in series folder'}
+			</p>
+		</div>
+	</label>
 {/if}

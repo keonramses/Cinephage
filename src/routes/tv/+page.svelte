@@ -385,9 +385,7 @@
 		{:else}
 			<!-- Series Grid -->
 			<div class="animate-in fade-in slide-in-from-bottom-4 duration-500">
-				<div
-					class="grid grid-cols-2 gap-3 sm:grid-cols-3 sm:gap-4 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-7 2xl:grid-cols-9"
-				>
+				<div class="grid grid-cols-[repeat(auto-fit,minmax(140px,1fr))] gap-3 sm:gap-4">
 					{#each data.series as show (show.id)}
 						<LibraryMediaCard
 							item={show}

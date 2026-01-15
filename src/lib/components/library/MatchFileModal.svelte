@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { Search, X, Clapperboard, Tv, Check, Loader2 } from 'lucide-svelte';
 	import { toasts } from '$lib/stores/toast.svelte';
+	import ModalWrapper from '$lib/components/ui/modal/ModalWrapper.svelte';
 	import TmdbImage from '$lib/components/tmdb/TmdbImage.svelte';
 
 	interface UnmatchedFile {
@@ -154,21 +155,12 @@
 		selectedShow = null;
 	}
 
-	function handleModalKeydown(e: KeyboardEvent) {
-		if (e.key === 'Escape') {
-			close();
-		}
-	}
 </script>
 
-<svelte:window onkeydown={open ? handleModalKeydown : undefined} />
-
-{#if open}
-	<div class="modal-open modal">
-		<div class="modal-box max-w-2xl">
-			<!-- Header -->
-			<div class="mb-4 flex items-center justify-between">
-				<h3 class="text-lg font-bold">Match File to TMDB</h3>
+<ModalWrapper {open} onClose={close} maxWidth="2xl" labelledBy="match-file-modal-title">
+	<!-- Header -->
+	<div class="mb-4 flex items-center justify-between">
+		<h3 id="match-file-modal-title" class="text-lg font-bold">Match File to TMDB</h3>
 				<button class="btn btn-circle btn-ghost btn-sm" onclick={close} aria-label="Close">
 					<X class="h-4 w-4" />
 				</button>
@@ -224,7 +216,7 @@
 						</button>
 					</div>
 
-					<div class="mt-4 grid grid-cols-2 gap-4">
+					<div class="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2">
 						<div class="form-control">
 							<label class="label" for="season-input">
 								<span class="label-text">Season</span>
@@ -335,12 +327,4 @@
 					</div>
 				{/if}
 			{/if}
-		</div>
-		<button
-			type="button"
-			class="modal-backdrop cursor-default border-none bg-black/50"
-			onclick={close}
-			aria-label="Close modal"
-		></button>
-	</div>
-{/if}
+</ModalWrapper>

@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { X, Loader2, Tv, Clock, Calendar } from 'lucide-svelte';
 	import type { ChannelLineupItemWithDetails, EpgProgram } from '$lib/types/livetv';
+	import ModalWrapper from '$lib/components/ui/modal/ModalWrapper.svelte';
 
 	interface Props {
 		open: boolean;
@@ -93,14 +94,11 @@
 	}
 </script>
 
-<svelte:window onkeydown={open ? handleKeydown : undefined} />
-
-{#if open && channel}
-	<div class="modal-open modal">
-		<div class="modal-box max-h-[80vh] max-w-2xl">
-			<!-- Header -->
-			<div class="mb-4 flex items-center justify-between">
-				<div class="flex items-center gap-3">
+<ModalWrapper open={open && !!channel} onClose={onClose} maxWidth="2xl" labelledBy="channel-schedule-modal-title">
+	{#if channel}
+	<!-- Header -->
+	<div class="mb-4 flex items-center justify-between">
+		<div class="flex items-center gap-3">
 					{#if channel.displayLogo}
 						<img
 							src={channel.displayLogo}
@@ -199,16 +197,9 @@
 				{/if}
 			</div>
 
-			<!-- Footer -->
-			<div class="modal-action">
-				<button class="btn btn-ghost" onclick={onClose}>Close</button>
-			</div>
-		</div>
-		<button
-			type="button"
-			class="modal-backdrop cursor-default border-none bg-black/50"
-			onclick={onClose}
-			aria-label="Close modal"
-		></button>
+		<!-- Footer -->
+	<div class="modal-action">
+		<button class="btn btn-ghost" onclick={onClose}>Close</button>
 	</div>
-{/if}
+	{/if}
+</ModalWrapper>

@@ -7,6 +7,7 @@
 		CachedChannel,
 		PaginatedChannelResponse
 	} from '$lib/types/livetv';
+	import ModalWrapper from '$lib/components/ui/modal/ModalWrapper.svelte';
 
 	type BrowserMode = 'add-to-lineup' | 'select-backup';
 
@@ -362,15 +363,11 @@
 	}
 </script>
 
-<svelte:window onkeydown={handleKeydown} />
-
-{#if open}
-	<div class="modal-open modal">
-		<div class="modal-box flex max-h-[90vh] max-w-5xl flex-col">
-			<!-- Header -->
+<ModalWrapper {open} onClose={onClose} maxWidth="5xl" labelledBy="channel-browser-modal-title">
+	<!-- Header -->
 			<div class="mb-4 flex items-center justify-between">
 				<div>
-					<h3 class="text-lg font-bold">
+					<h3 id="channel-browser-modal-title" class="text-lg font-bold">
 						{isBackupMode ? 'Select Backup Channel' : 'Browse Channels'}
 					</h3>
 					<p class="text-sm text-base-content/60">
@@ -388,7 +385,7 @@
 			<div class="mb-4 flex flex-wrap items-center gap-3">
 				<!-- Account Filter -->
 				<select
-					class="select-bordered select w-48 select-sm"
+					class="select-bordered select w-full select-sm sm:w-48"
 					bind:value={selectedAccountId}
 					onchange={handleFilterChange}
 				>
@@ -403,7 +400,7 @@
 
 				<!-- Category Filter -->
 				<select
-					class="select-bordered select w-48 select-sm"
+					class="select-bordered select w-full select-sm sm:w-48"
 					bind:value={selectedCategoryId}
 					onchange={handleFilterChange}
 					disabled={!selectedAccountId}
@@ -621,17 +618,8 @@
 				</div>
 			{/if}
 
-			<!-- Footer -->
-			<div class="modal-action">
-				<button class="btn" onclick={onClose}>Done</button>
-			</div>
-		</div>
-
-		<button
-			type="button"
-			class="modal-backdrop cursor-default border-none bg-black/50"
-			onclick={onClose}
-			aria-label="Close modal"
-		></button>
+		<!-- Footer -->
+	<div class="modal-action">
+		<button class="btn" onclick={onClose}>Done</button>
 	</div>
-{/if}
+</ModalWrapper>

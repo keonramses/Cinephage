@@ -109,7 +109,7 @@
 			<input
 				type="text"
 				placeholder="Search channels..."
-				class="input-bordered input input-sm w-48"
+				class="input-bordered input input-sm w-full sm:w-48"
 				bind:value={searchQuery}
 			/>
 			<select class="select-bordered select select-sm" bind:value={filter}>

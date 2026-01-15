@@ -110,10 +110,10 @@
 
 <!-- Enabled & Priority Row -->
 <div class="flex gap-4">
-	<div class="form-control flex-1">
-		<label class="label cursor-pointer justify-start gap-2">
-			<input type="checkbox" class="toggle toggle-primary" bind:checked={enabled} />
-			<span class="label-text">Enabled</span>
+	<div class="flex-1">
+		<label class="flex cursor-pointer items-center gap-2 py-2">
+			<input type="checkbox" class="toggle toggle-primary shrink-0" bind:checked={enabled} />
+			<span class="text-sm">Enabled</span>
 		</label>
 	</div>
 
