@@ -237,14 +237,11 @@ export interface GrabResponse {
 		category: string;
 		wasDuplicate?: boolean;
 		isUpgrade?: boolean;
-		/** True if NZB content requires extraction before streaming */
-		requiresExtraction?: boolean;
-		/** Mount ID for extraction (when requiresExtraction is true) */
+		/** Mount ID for NZB streaming */
 		mountId?: string;
 		/** Streamability info for NZB content */
 		streamability?: {
 			canStream: boolean;
-			requiresExtraction: boolean;
 			archiveType?: 'rar' | '7z' | 'zip' | 'none';
 			error?: string;
 		};

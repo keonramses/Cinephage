@@ -24,8 +24,6 @@ export type MountStatus = 'pending' | 'parsing' | 'ready' | 'downloading' | 'err
 export interface StreamabilityInfo {
 	/** Whether content can be streamed directly */
 	canStream: boolean;
-	/** Whether extraction is required */
-	requiresExtraction: boolean;
 	/** Detected archive type */
 	archiveType?: 'rar' | '7z' | 'zip' | 'none';
 	/** Compression method (0 = stored, >0 = compressed) */

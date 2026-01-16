@@ -1,8 +1,8 @@
 /**
  * GET /api/streaming/usenet/[mountId]/check
  *
- * Check if a mount's content can be streamed directly or requires extraction.
- * This fetches RAR headers to detect compression without starting a full stream.
+ * Check if a mount's content can be streamed directly.
+ * RAR-compressed content is not supported for streaming.
  */
 
 import type { RequestHandler } from './$types';
@@ -40,7 +40,6 @@ export const GET: RequestHandler = async ({ params }) => {
 		logger.info('[UsenetCheck] Checked streamability', {
 			mountId,
 			canStream: streamability.canStream,
-			requiresExtraction: streamability.requiresExtraction,
 			archiveType: streamability.archiveType
 		});
 

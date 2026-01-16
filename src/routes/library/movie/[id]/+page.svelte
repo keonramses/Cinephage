@@ -10,7 +10,6 @@
 	import type { FileScoreResponse } from '$lib/types/score';
 	import { InteractiveSearchModal } from '$lib/components/search';
 	import { SubtitleSearchModal } from '$lib/components/subtitles';
-	import ExtractionProgressModal from '$lib/components/streaming/ExtractionProgressModal.svelte';
 	import DeleteConfirmationModal from '$lib/components/ui/modal/DeleteConfirmationModal.svelte';
 	import { toasts } from '$lib/stores/toast.svelte';
 	import type { MovieEditData } from '$lib/components/library/MovieEditModal.svelte';
@@ -33,10 +32,7 @@
 	let isSubtitleSearchModalOpen = $state(false);
 	let isRenameModalOpen = $state(false);
 	let isDeleteModalOpen = $state(false);
-	let isExtractionModalOpen = $state(false);
 	let isScoreModalOpen = $state(false);
-	let extractionMountId = $state<string | null>(null);
-	let extractionTitle = $state('');
 	let isSaving = $state(false);
 	let isDeleting = $state(false);
 	let subtitleAutoSearching = $state(false);
@@ -180,16 +176,6 @@
 			});
 
 			const result = await response.json();
-
-			// Check if extraction is required for this NZB stream
-			if (result.success && result.data?.requiresExtraction && result.data?.mountId) {
-				// Close search modal and open extraction modal
-				isSearchModalOpen = false;
-				extractionMountId = result.data.mountId;
-				extractionTitle = release.title;
-				isExtractionModalOpen = true;
-				return { success: true };
-			}
 
 			return { success: result.success, error: result.error };
 		} catch (error) {
@@ -537,25 +523,6 @@
 	onConfirm={performDelete}
 	onCancel={() => (isDeleteModalOpen = false)}
 />
-
-<!-- Extraction Progress Modal -->
-{#if extractionMountId}
-	<ExtractionProgressModal
-		open={isExtractionModalOpen}
-		mountId={extractionMountId}
-		title={extractionTitle}
-		onClose={() => {
-			isExtractionModalOpen = false;
-			extractionMountId = null;
-		}}
-		onComplete={() => {
-			isExtractionModalOpen = false;
-			extractionMountId = null;
-			toasts.success('Extraction complete - content is ready to stream');
-			location.reload();
-		}}
-	/>
-{/if}
 
 <!-- Score Detail Modal -->
 <ScoreDetailModal open={isScoreModalOpen} onClose={() => (isScoreModalOpen = false)} {scoreData} />

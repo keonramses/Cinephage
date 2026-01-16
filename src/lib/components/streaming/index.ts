@@ -1,2 +1,2 @@
 // Streaming components
-export { default as ExtractionProgressModal } from './ExtractionProgressModal.svelte';
+// (ExtractionProgressModal removed - RAR extraction no longer supported)

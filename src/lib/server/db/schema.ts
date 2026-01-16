@@ -2153,7 +2153,6 @@ export const nzbStreamMounts = sqliteTable(
 		// Streamability info (populated after checkStreamability is called)
 		streamability: text('streamability', { mode: 'json' }).$type<{
 			canStream: boolean;
-			requiresExtraction: boolean;
 			archiveType?: 'rar' | '7z' | 'zip' | 'none';
 			compressionMethod?: number;
 			requiresPassword?: boolean;

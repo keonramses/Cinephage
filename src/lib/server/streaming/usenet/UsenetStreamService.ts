@@ -51,7 +51,6 @@ interface MountStreamState {
  */
 export interface StreamabilityResult {
 	canStream: boolean;
-	requiresExtraction: boolean;
 	archiveType?: 'rar' | '7z' | 'zip' | 'none';
 	error?: string;
 	estimatedSize?: number;
@@ -177,7 +176,6 @@ class UsenetStreamService {
 			return {
 				canStream: false,
 				error: 'Mount not found',
-				requiresExtraction: false,
 				archiveType: 'none'
 			};
 		}
@@ -216,7 +214,6 @@ class UsenetStreamService {
 						canStream: false,
 						error:
 							'This release is RAR compressed and cannot be streamed. Try a different release or use a download client instead.',
-						requiresExtraction: false,
 						archiveType: 'rar'
 					};
 				}
@@ -224,14 +221,12 @@ class UsenetStreamService {
 				return {
 					canStream: false,
 					error: 'No streamable media files found in this release.',
-					requiresExtraction: false,
 					archiveType: 'none'
 				};
 			}
 
 			return {
 				canStream: true,
-				requiresExtraction: false,
 				archiveType: 'none',
 				estimatedSize: bestFile.size
 			};
@@ -239,7 +234,6 @@ class UsenetStreamService {
 			return {
 				canStream: false,
 				error: error instanceof Error ? error.message : 'Unknown error',
-				requiresExtraction: false,
 				archiveType: 'none'
 			};
 		}
@@ -255,7 +249,6 @@ class UsenetStreamService {
 		return {
 			canStream: false,
 			error: 'RAR-compressed releases cannot be streamed. Use a download client instead.',
-			requiresExtraction: false,
 			archiveType: 'rar'
 		};
 	}
