@@ -25,7 +25,12 @@
 			cacheHits: number;
 			avgSolveTimeMs: number;
 			cacheSize: number;
+			fetchAttempts: number;
+			fetchSuccessCount: number;
+			fetchFailureCount: number;
+			avgFetchTimeMs: number;
 			lastSolveAt?: string;
+			lastFetchAt?: string;
 			lastError?: string;
 		};
 	}
@@ -214,18 +219,26 @@
 		const rate = (health.stats.successCount / health.stats.totalAttempts) * 100;
 		return `${rate.toFixed(1)}%`;
 	}
+
+	function getFetchSuccessRate(): string {
+		if (!health?.stats.fetchAttempts) return '0%';
+		const rate = (health.stats.fetchSuccessCount / health.stats.fetchAttempts) * 100;
+		return `${rate.toFixed(1)}%`;
+	}
 </script>
 
 <svelte:head>
 	<title>Captcha Solver - Cinephage</title>
 </svelte:head>
 
-<div class="container mx-auto max-w-4xl p-6">
-	<div class="mb-6 flex items-center gap-3">
-		<Shield size={28} class="text-primary" />
-		<div>
-			<h1 class="text-2xl font-bold">Captcha Solver</h1>
-			<p class="text-base-content/70">Automated anti-bot protection bypass for indexers</p>
+<div class="w-full p-4">
+	<div class="mb-6">
+		<div class="flex items-center gap-3">
+			<Shield size={28} class="text-primary" />
+			<div>
+				<h1 class="text-2xl font-bold">Captcha Solver</h1>
+				<p class="mt-1 text-base-content/60">Automated anti-bot protection bypass for indexers</p>
+			</div>
 		</div>
 	</div>
 
@@ -234,374 +247,388 @@
 			<RefreshCw size={24} class="animate-spin text-primary" />
 		</div>
 	{:else}
-		<!-- Status Banner -->
-		<div class="mb-6">
-			{#if health?.status === 'initializing'}
-				<div class="alert flex items-center gap-2 alert-info">
-					<RefreshCw size={20} class="animate-spin" />
-					<div>
-						<span class="font-medium">Initializing</span>
-						<p class="text-sm">Captcha solver is starting up, please wait...</p>
+		<div class="space-y-6">
+			<!-- Status Banner -->
+			<div>
+				{#if health?.status === 'initializing'}
+					<div class="alert flex items-center gap-2 alert-info">
+						<RefreshCw size={20} class="animate-spin" />
+						<div>
+							<span class="font-medium">Initializing</span>
+							<p class="text-sm">Captcha solver is starting up, please wait...</p>
+						</div>
 					</div>
-				</div>
-			{:else if health?.available}
-				<div class="alert flex items-center gap-2 alert-success">
-					<CheckCircle size={20} />
-					<span>Captcha solver is enabled and ready</span>
-					{#if health.status === 'busy'}
-						<span class="badge badge-warning">Solving...</span>
-					{/if}
-				</div>
-			{:else if settings.enabled && !health?.browserAvailable}
-				<div class="alert flex items-center gap-2 alert-error">
-					<XCircle size={20} />
-					<div>
-						<span class="font-medium">Browser not available</span>
-						<p class="text-sm">
-							{health?.error || 'Camoufox browser is not installed or failed to start'}
-						</p>
+				{:else if health?.available}
+					<div class="alert flex items-center gap-2 alert-success">
+						<CheckCircle size={20} />
+						<span>Captcha solver is enabled and ready</span>
+						{#if health.status === 'busy'}
+							<span class="badge badge-warning">Solving...</span>
+						{/if}
 					</div>
-				</div>
-			{:else}
-				<div class="alert flex items-center gap-2 alert-warning">
-					<AlertCircle size={20} />
-					<span>Captcha solver is disabled</span>
-				</div>
-			{/if}
-		</div>
+				{:else if settings.enabled && !health?.browserAvailable}
+					<div class="alert flex items-center gap-2 alert-error">
+						<XCircle size={20} />
+						<div>
+							<span class="font-medium">Browser not available</span>
+							<p class="text-sm">
+								{health?.error || 'Camoufox browser is not installed or failed to start'}
+							</p>
+						</div>
+					</div>
+				{:else}
+					<div class="alert flex items-center gap-2 alert-warning">
+						<AlertCircle size={20} />
+						<span>Captcha solver is disabled</span>
+					</div>
+				{/if}
+			</div>
 
-		<!-- Statistics -->
-		{#if health?.stats}
-			<div class="card mb-6 bg-base-200">
+			<!-- Settings -->
+			<div class="card bg-base-100 shadow-xl">
 				<div class="card-body">
 					<h2 class="card-title">
-						<Activity size={20} />
-						Statistics
+						<Settings2 size={20} />
+						Settings
 					</h2>
 
-					<div class="stats stats-vertical bg-base-100 shadow lg:stats-horizontal">
-						<div class="stat">
-							<div class="stat-figure text-primary">
-								<Activity size={24} />
-							</div>
-							<div class="stat-title">Success Rate</div>
-							<div class="stat-value text-primary">{getSuccessRate()}</div>
-							<div class="stat-desc">{health.stats.totalAttempts} total attempts</div>
+					{#if saveError}
+						<div class="alert alert-error">
+							<XCircle size={16} />
+							<span>{saveError}</span>
+						</div>
+					{/if}
+
+					{#if saveSuccess}
+						<div class="alert alert-success">
+							<CheckCircle size={16} />
+							<span>Settings saved successfully</span>
+						</div>
+					{/if}
+
+					<div class="mt-4 space-y-6">
+						<!-- Enable Toggle -->
+						<div class="form-control">
+							<label class="label cursor-pointer justify-start gap-4">
+								<input
+									type="checkbox"
+									bind:checked={settings.enabled}
+									class="toggle toggle-primary"
+								/>
+								<div>
+									<span class="label-text font-medium">Enable Captcha Solver</span>
+									<p class="text-sm text-base-content/60">
+										Automatically solve Cloudflare and other anti-bot challenges
+									</p>
+								</div>
+							</label>
 						</div>
 
-						<div class="stat">
-							<div class="stat-figure text-secondary">
-								<Clock size={24} />
-							</div>
-							<div class="stat-title">Avg Solve Time</div>
-							<div class="stat-value text-secondary">
-								{formatDuration(health.stats.avgSolveTimeMs)}
+						<!-- Headless Mode -->
+						<div class="form-control">
+							<label class="label cursor-pointer justify-start gap-4">
+								<input
+									type="checkbox"
+									bind:checked={settings.headless}
+									class="toggle toggle-secondary"
+									disabled={!settings.enabled}
+								/>
+								<div>
+									<span class="label-text font-medium">Headless Mode</span>
+									<p class="text-sm text-base-content/60">
+										Run browser in background without visible window (recommended)
+									</p>
+								</div>
+							</label>
+						</div>
+
+						<div class="divider">Timing</div>
+
+						<!-- Timeout -->
+						<div class="form-control w-full max-w-xs">
+							<label class="label" for="timeout">
+								<span class="label-text">Solve Timeout</span>
+							</label>
+							<select
+								id="timeout"
+								bind:value={settings.timeoutSeconds}
+								class="select-bordered select"
+								disabled={!settings.enabled}
+							>
+								<option value={30}>30 seconds</option>
+								<option value={60}>60 seconds (default)</option>
+								<option value={90}>90 seconds</option>
+								<option value={120}>2 minutes</option>
+								<option value={180}>3 minutes</option>
+							</select>
+							<div class="label">
+								<span class="label-text-alt text-base-content/50">
+									Maximum time to wait for challenge resolution
+								</span>
 							</div>
 						</div>
 
-						<div class="stat">
-							<div class="stat-figure text-accent">
-								<Shield size={24} />
+						<!-- Cache TTL -->
+						<div class="form-control w-full max-w-xs">
+							<label class="label" for="cacheTtl">
+								<span class="label-text">Cache Duration</span>
+							</label>
+							<select
+								id="cacheTtl"
+								bind:value={settings.cacheTtlSeconds}
+								class="select-bordered select"
+								disabled={!settings.enabled}
+							>
+								<option value={1800}>30 minutes</option>
+								<option value={3600}>1 hour (default)</option>
+								<option value={7200}>2 hours</option>
+								<option value={14400}>4 hours</option>
+								<option value={28800}>8 hours</option>
+								<option value={86400}>24 hours</option>
+							</select>
+							<div class="label">
+								<span class="label-text-alt text-base-content/50">
+									How long to cache solved cookies before re-solving
+								</span>
 							</div>
-							<div class="stat-title">Cache Hits</div>
-							<div class="stat-value text-accent">{health.stats.cacheHits}</div>
-							<div class="stat-desc">{health.stats.cacheSize} domains cached</div>
 						</div>
+
+						<div class="divider">
+							<Globe size={16} />
+							Proxy (Optional)
+						</div>
+
+						<!-- Proxy URL -->
+						<div class="form-control w-full">
+							<label class="label" for="proxyUrl">
+								<span class="label-text">Proxy URL</span>
+							</label>
+							<input
+								id="proxyUrl"
+								type="text"
+								bind:value={settings.proxyUrl}
+								placeholder="http://proxy.example.com:8080"
+								class="input-bordered input"
+								disabled={!settings.enabled}
+							/>
+							<div class="label">
+								<span class="label-text-alt text-base-content/50">
+									HTTP/SOCKS5 proxy for browser connections
+								</span>
+							</div>
+						</div>
+
+						<!-- Proxy Auth -->
+						{#if settings.proxyUrl}
+							<div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
+								<div class="form-control">
+									<label class="label" for="proxyUsername">
+										<span class="label-text">Proxy Username</span>
+									</label>
+									<input
+										id="proxyUsername"
+										type="text"
+										bind:value={settings.proxyUsername}
+										placeholder="Optional"
+										class="input-bordered input"
+										disabled={!settings.enabled}
+									/>
+								</div>
+								<div class="form-control">
+									<label class="label" for="proxyPassword">
+										<span class="label-text">Proxy Password</span>
+									</label>
+									<input
+										id="proxyPassword"
+										type="password"
+										bind:value={settings.proxyPassword}
+										placeholder="Optional"
+										class="input-bordered input"
+										disabled={!settings.enabled}
+									/>
+								</div>
+							</div>
+						{/if}
 					</div>
 
-					<div class="mt-4 flex items-center justify-between">
-						<div class="text-sm text-base-content/60">
-							{#if health.stats.lastSolveAt}
-								Last solve: {new Date(health.stats.lastSolveAt).toLocaleString()}
+					<div class="mt-6 card-actions justify-end">
+						<button class="btn gap-2 btn-primary" onclick={saveSettings} disabled={saving}>
+							{#if saving}
+								<RefreshCw size={16} class="animate-spin" />
+								Saving...
 							{:else}
-								No solves recorded yet
+								<CheckCircle size={16} />
+								Save Settings
 							{/if}
-						</div>
+						</button>
+					</div>
+				</div>
+			</div>
+
+			<!-- Test Solver -->
+			<div class="card bg-base-100 shadow-xl">
+				<div class="card-body">
+					<h2 class="card-title">
+						<Play size={20} />
+						Test Solver
+					</h2>
+					<p class="mb-4 text-sm text-base-content/70">
+						Test the captcha solver with a specific URL to verify it can handle the site's
+						protection.
+					</p>
+
+					<div class="flex flex-col gap-2 sm:flex-row">
+						<input
+							type="url"
+							bind:value={testUrl}
+							placeholder="https://example.com"
+							class="input-bordered input flex-1"
+							disabled={testing || !settings.enabled}
+						/>
 						<button
-							class="btn gap-2 btn-outline btn-sm"
-							onclick={clearCache}
-							disabled={clearing || health.stats.cacheSize === 0}
+							class="btn gap-2 btn-primary"
+							onclick={testSolver}
+							disabled={testing || !testUrl || !settings.enabled}
 						>
-							{#if clearing}
-								<RefreshCw size={14} class="animate-spin" />
+							{#if testing}
+								<RefreshCw size={16} class="animate-spin" />
+								Testing...
 							{:else}
-								<Trash2 size={14} />
+								<Play size={16} />
+								Test
 							{/if}
-							Clear Cache
 						</button>
 					</div>
 
-					{#if health.stats.lastError}
-						<div class="alert-sm mt-2 alert alert-error">
-							<span class="text-sm">Last error: {health.stats.lastError}</span>
+					{#if testResult}
+						<div class="mt-4 alert {testResult.success ? 'alert-success' : 'alert-error'}">
+							{#if testResult.success}
+								<CheckCircle size={16} />
+							{:else}
+								<XCircle size={16} />
+							{/if}
+							<span>{testResult.message}</span>
 						</div>
 					{/if}
 				</div>
 			</div>
-		{/if}
 
-		<!-- Test Solver -->
-		<div class="card mb-6 bg-base-200">
-			<div class="card-body">
-				<h2 class="card-title">
-					<Play size={20} />
-					Test Solver
-				</h2>
-				<p class="mb-4 text-sm text-base-content/70">
-					Test the captcha solver with a specific URL to verify it can handle the site's protection.
-				</p>
+			<!-- Statistics -->
+			{#if health?.stats}
+				<div class="card bg-base-100 shadow-xl">
+					<div class="card-body">
+						<h2 class="card-title">
+							<Activity size={20} />
+							Statistics
+						</h2>
 
-				<div class="flex gap-2">
-					<input
-						type="url"
-						bind:value={testUrl}
-						placeholder="https://example.com"
-						class="input-bordered input flex-1"
-						disabled={testing || !settings.enabled}
-					/>
-					<button
-						class="btn gap-2 btn-primary"
-						onclick={testSolver}
-						disabled={testing || !testUrl || !settings.enabled}
-					>
-						{#if testing}
-							<RefreshCw size={16} class="animate-spin" />
-							Testing...
-						{:else}
-							<Play size={16} />
-							Test
+						<div class="stats stats-vertical bg-base-100 shadow lg:stats-horizontal">
+							<div class="stat">
+								<div class="stat-figure text-primary">
+									<Activity size={24} />
+								</div>
+								<div class="stat-title">Solve Success Rate</div>
+								<div class="stat-value text-primary">{getSuccessRate()}</div>
+								<div class="stat-desc">{health.stats.totalAttempts} solves attempted</div>
+							</div>
+
+							<div class="stat">
+								<div class="stat-figure text-secondary">
+									<Clock size={24} />
+								</div>
+								<div class="stat-title">Avg Solve Time</div>
+								<div class="stat-value text-secondary">
+									{formatDuration(health.stats.avgSolveTimeMs)}
+								</div>
+							</div>
+
+							<div class="stat">
+								<div class="stat-figure text-secondary">
+									<Globe size={24} />
+								</div>
+								<div class="stat-title">Fetch Success Rate</div>
+								<div class="stat-value text-secondary">{getFetchSuccessRate()}</div>
+								<div class="stat-desc">{health.stats.fetchAttempts} fetches attempted</div>
+							</div>
+
+							<div class="stat">
+								<div class="stat-figure text-accent">
+									<Shield size={24} />
+								</div>
+								<div class="stat-title">Cache Hits</div>
+								<div class="stat-value text-accent">{health.stats.cacheHits}</div>
+								<div class="stat-desc">{health.stats.cacheSize} domains cached</div>
+							</div>
+						</div>
+
+						<div class="mt-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+							<div class="text-sm text-base-content/60">
+								{#if health.stats.lastSolveAt}
+									Last solve: {new Date(health.stats.lastSolveAt).toLocaleString()}
+								{:else if health.stats.lastFetchAt}
+									Last fetch: {new Date(health.stats.lastFetchAt).toLocaleString()}
+								{:else}
+									No activity recorded yet
+								{/if}
+							</div>
+							<button
+								class="btn gap-2 btn-outline btn-sm"
+								onclick={clearCache}
+								disabled={clearing || health.stats.cacheSize === 0}
+							>
+								{#if clearing}
+									<RefreshCw size={14} class="animate-spin" />
+								{:else}
+									<Trash2 size={14} />
+								{/if}
+								Clear Cache
+							</button>
+						</div>
+
+						{#if health.stats.lastError}
+							<div class="alert-sm mt-2 alert alert-error">
+								<span class="text-sm">Last error: {health.stats.lastError}</span>
+							</div>
 						{/if}
-					</button>
+					</div>
 				</div>
+			{/if}
 
-				{#if testResult}
-					<div class="mt-4 alert {testResult.success ? 'alert-success' : 'alert-error'}">
-						{#if testResult.success}
-							<CheckCircle size={16} />
-						{:else}
-							<XCircle size={16} />
-						{/if}
-						<span>{testResult.message}</span>
-					</div>
-				{/if}
-			</div>
-		</div>
-
-		<!-- Settings -->
-		<div class="card bg-base-200">
-			<div class="card-body">
-				<h2 class="card-title">
-					<Settings2 size={20} />
-					Settings
-				</h2>
-
-				{#if saveError}
-					<div class="alert alert-error">
-						<XCircle size={16} />
-						<span>{saveError}</span>
-					</div>
-				{/if}
-
-				{#if saveSuccess}
-					<div class="alert alert-success">
-						<CheckCircle size={16} />
-						<span>Settings saved successfully</span>
-					</div>
-				{/if}
-
-				<div class="mt-4 space-y-6">
-					<!-- Enable Toggle -->
-					<div class="form-control">
-						<label class="label cursor-pointer justify-start gap-4">
-							<input
-								type="checkbox"
-								bind:checked={settings.enabled}
-								class="toggle toggle-primary"
-							/>
-							<div>
-								<span class="label-text font-medium">Enable Captcha Solver</span>
-								<p class="text-sm text-base-content/60">
-									Automatically solve Cloudflare and other anti-bot challenges
-								</p>
-							</div>
-						</label>
+			<!-- Info Card -->
+			<div class="card bg-base-100 shadow-xl">
+				<div class="card-body">
+					<h2 class="card-title">How It Works</h2>
+					<div class="prose-sm prose max-w-none">
+						<ol class="space-y-2">
+							<li>
+								<strong>Detection:</strong> When an indexer returns a challenge page (Cloudflare, DDoS-Guard,
+								etc.), the solver is triggered.
+							</li>
+							<li>
+								<strong>Browser Launch:</strong> A stealth browser instance is launched with fingerprint
+								randomization to avoid detection.
+							</li>
+							<li>
+								<strong>Challenge Solving:</strong> The browser navigates to the protected page and waits
+								for the challenge to be solved (usually automatic).
+							</li>
+							<li>
+								<strong>Cookie Extraction:</strong> Once solved, the clearance cookies are extracted and
+								cached.
+							</li>
+							<li>
+								<strong>Reuse:</strong> Subsequent requests to the same domain use the cached cookies
+								until they expire.
+							</li>
+						</ol>
 					</div>
 
-					<!-- Headless Mode -->
-					<div class="form-control">
-						<label class="label cursor-pointer justify-start gap-4">
-							<input
-								type="checkbox"
-								bind:checked={settings.headless}
-								class="toggle toggle-secondary"
-								disabled={!settings.enabled}
-							/>
-							<div>
-								<span class="label-text font-medium">Headless Mode</span>
-								<p class="text-sm text-base-content/60">
-									Run browser in background without visible window (recommended)
-								</p>
-							</div>
-						</label>
+					<div class="mt-4 alert alert-info">
+						<span class="text-sm">
+							The solver supports Cloudflare (JS Challenge, Turnstile), DDoS-Guard, and generic
+							JavaScript challenges. CAPTCHA puzzles requiring human interaction are not supported.
+						</span>
 					</div>
-
-					<div class="divider">Timing</div>
-
-					<!-- Timeout -->
-					<div class="form-control w-full max-w-xs">
-						<label class="label" for="timeout">
-							<span class="label-text">Solve Timeout</span>
-						</label>
-						<select
-							id="timeout"
-							bind:value={settings.timeoutSeconds}
-							class="select-bordered select"
-							disabled={!settings.enabled}
-						>
-							<option value={30}>30 seconds</option>
-							<option value={60}>60 seconds (default)</option>
-							<option value={90}>90 seconds</option>
-							<option value={120}>2 minutes</option>
-							<option value={180}>3 minutes</option>
-						</select>
-						<div class="label">
-							<span class="label-text-alt text-base-content/50">
-								Maximum time to wait for challenge resolution
-							</span>
-						</div>
-					</div>
-
-					<!-- Cache TTL -->
-					<div class="form-control w-full max-w-xs">
-						<label class="label" for="cacheTtl">
-							<span class="label-text">Cache Duration</span>
-						</label>
-						<select
-							id="cacheTtl"
-							bind:value={settings.cacheTtlSeconds}
-							class="select-bordered select"
-							disabled={!settings.enabled}
-						>
-							<option value={1800}>30 minutes</option>
-							<option value={3600}>1 hour (default)</option>
-							<option value={7200}>2 hours</option>
-							<option value={14400}>4 hours</option>
-							<option value={28800}>8 hours</option>
-							<option value={86400}>24 hours</option>
-						</select>
-						<div class="label">
-							<span class="label-text-alt text-base-content/50">
-								How long to cache solved cookies before re-solving
-							</span>
-						</div>
-					</div>
-
-					<div class="divider">
-						<Globe size={16} />
-						Proxy (Optional)
-					</div>
-
-					<!-- Proxy URL -->
-					<div class="form-control w-full">
-						<label class="label" for="proxyUrl">
-							<span class="label-text">Proxy URL</span>
-						</label>
-						<input
-							id="proxyUrl"
-							type="text"
-							bind:value={settings.proxyUrl}
-							placeholder="http://proxy.example.com:8080"
-							class="input-bordered input"
-							disabled={!settings.enabled}
-						/>
-						<div class="label">
-							<span class="label-text-alt text-base-content/50">
-								HTTP/SOCKS5 proxy for browser connections
-							</span>
-						</div>
-					</div>
-
-					<!-- Proxy Auth -->
-					{#if settings.proxyUrl}
-						<div class="grid grid-cols-2 gap-4">
-							<div class="form-control">
-								<label class="label" for="proxyUsername">
-									<span class="label-text">Proxy Username</span>
-								</label>
-								<input
-									id="proxyUsername"
-									type="text"
-									bind:value={settings.proxyUsername}
-									placeholder="Optional"
-									class="input-bordered input"
-									disabled={!settings.enabled}
-								/>
-							</div>
-							<div class="form-control">
-								<label class="label" for="proxyPassword">
-									<span class="label-text">Proxy Password</span>
-								</label>
-								<input
-									id="proxyPassword"
-									type="password"
-									bind:value={settings.proxyPassword}
-									placeholder="Optional"
-									class="input-bordered input"
-									disabled={!settings.enabled}
-								/>
-							</div>
-						</div>
-					{/if}
-				</div>
-
-				<div class="mt-6 card-actions justify-end">
-					<button class="btn gap-2 btn-primary" onclick={saveSettings} disabled={saving}>
-						{#if saving}
-							<RefreshCw size={16} class="animate-spin" />
-							Saving...
-						{:else}
-							<CheckCircle size={16} />
-							Save Settings
-						{/if}
-					</button>
-				</div>
-			</div>
-		</div>
-
-		<!-- Info Card -->
-		<div class="card mt-6 bg-base-200">
-			<div class="card-body">
-				<h2 class="card-title">How It Works</h2>
-				<div class="prose-sm prose max-w-none">
-					<ol class="space-y-2">
-						<li>
-							<strong>Detection:</strong> When an indexer returns a challenge page (Cloudflare, DDoS-Guard,
-							etc.), the solver is triggered.
-						</li>
-						<li>
-							<strong>Browser Launch:</strong> A stealth browser instance is launched with fingerprint
-							randomization to avoid detection.
-						</li>
-						<li>
-							<strong>Challenge Solving:</strong> The browser navigates to the protected page and waits
-							for the challenge to be solved (usually automatic).
-						</li>
-						<li>
-							<strong>Cookie Extraction:</strong> Once solved, the clearance cookies are extracted and
-							cached.
-						</li>
-						<li>
-							<strong>Reuse:</strong> Subsequent requests to the same domain use the cached cookies until
-							they expire.
-						</li>
-					</ol>
-				</div>
-
-				<div class="mt-4 alert alert-info">
-					<span class="text-sm">
-						The solver supports Cloudflare (JS Challenge, Turnstile), DDoS-Guard, and generic
-						JavaScript challenges. CAPTCHA puzzles requiring human interaction are not supported.
-					</span>
 				</div>
 			</div>
 		</div>
