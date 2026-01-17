@@ -99,7 +99,7 @@ When using Docker, configure via `.env` or environment variables:
 ### Docker-Specific Variables
 
 > [!NOTE]
-> The variables listed below are Docker/Compose helper variables, not application configuration keys used directly by Cinephage. They are used by Docker and docker-compose to control things like port mappings, volume paths, and container user IDs, and may optionally be defined in a .env file for convenience. The variable names themselves are not required or hard-coded — they are provided as a documented convention to make Docker setups clearer and easier to manage.
+> The variables listed below are helper variables for Docker and Docker Compose. They are not application configuration keys used directly by Cinephage. Docker and Docker Compose use them to control things like port mappings, volume paths, and container user IDs. You can optionally define them in a `.env` file for convenience. The variable names themselves are not required or hard-coded — they are provided as a documented convention to make Docker setups clearer and easier to manage.
 
 <br>
 
