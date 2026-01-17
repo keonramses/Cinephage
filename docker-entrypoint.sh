@@ -30,7 +30,7 @@ fi
 CAMOUFOX_MARKER="/app/data/.camoufox-installed"
 if [ ! -f "$CAMOUFOX_MARKER" ]; then
   echo "Downloading Camoufox browser (first run only, ~80MB)..."
-  if npx camoufox-js fetch --path /app/data/camoufox 2>/dev/null; then
+  if ./node_modules/.bin/camoufox-js fetch --path /app/data/camoufox 2>/dev/null; then
     touch "$CAMOUFOX_MARKER"
     echo "Camoufox browser installed successfully"
   else
