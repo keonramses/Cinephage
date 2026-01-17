@@ -13,6 +13,7 @@ import { TemplateEngine } from '../engine/TemplateEngine';
 import { FilterEngine } from '../engine/FilterEngine';
 import { SelectorEngine } from '../engine/SelectorEngine';
 import { CookieStore } from '../auth/CookieStore';
+import { cloudflareFetch } from '../http/cloudflare-fetch';
 
 export interface DownloadContext {
 	baseUrl: string;
@@ -204,13 +205,12 @@ export class DownloadHandler {
 
 		// If pathselector is defined, fetch the page and extract the path
 		if (before.pathselector) {
-			const response = await fetch(downloadUrl, {
+			const response = await cloudflareFetch(downloadUrl, {
 				method: 'GET',
 				headers,
-				redirect: 'follow'
+				timeout: 30000
 			});
-			const content = await response.text();
-			const $ = cheerio.load(content);
+			const $ = cheerio.load(response.body);
 
 			const pathResult = this.selectorEngine.selectHtml($, $.root(), before.pathselector, false);
 			if (pathResult.value) {
@@ -237,15 +237,20 @@ export class DownloadHandler {
 			requestHeaders['Content-Type'] = 'application/x-www-form-urlencoded';
 		}
 
-		const response = await fetch(beforeUrl, {
-			method,
+		const response = await cloudflareFetch(beforeUrl, {
+			method: method as 'GET' | 'POST',
 			headers: requestHeaders,
-			body: method === 'POST' ? body : undefined,
-			redirect: 'follow'
+			body: method === 'POST' ? body?.toString() : undefined,
+			timeout: 30000
 		});
 
-		const content = await response.text();
-		return { content, response };
+		return {
+			content: response.body,
+			response: new Response(response.body, {
+				status: response.status,
+				headers: response.headers
+			})
+		};
 	}
 
 	/**
@@ -264,19 +269,17 @@ export class DownloadHandler {
 		}
 
 		let content: string;
-		let response: Response;
 
 		// Use before response if specified, otherwise fetch the page
 		if (infohash.usebeforeresponse && beforeResponse) {
 			content = beforeResponse.content;
-			response = beforeResponse.response;
 		} else {
-			response = await fetch(downloadUrl, {
+			const cfResponse = await cloudflareFetch(downloadUrl, {
 				method: 'GET',
 				headers,
-				redirect: 'follow'
+				timeout: 30000
 			});
-			content = await response.text();
+			content = cfResponse.body;
 		}
 
 		const $ = cheerio.load(content);
@@ -335,12 +338,12 @@ export class DownloadHandler {
 				if (selector.usebeforeresponse && beforeResponse) {
 					content = beforeResponse.content;
 				} else {
-					const response = await fetch(downloadUrl, {
+					const response = await cloudflareFetch(downloadUrl, {
 						method: 'GET',
 						headers,
-						redirect: 'follow'
+						timeout: 30000
 					});
-					content = await response.text();
+					content = response.body;
 				}
 
 				const $ = cheerio.load(content);
