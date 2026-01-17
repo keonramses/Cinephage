@@ -37,6 +37,7 @@
 		imported: { label: 'Imported', variant: 'badge-success', icon: CheckCircle2 },
 		failed: { label: 'Failed', variant: 'badge-error', icon: AlertCircle },
 		seeding: { label: 'Seeding', variant: 'badge-success', icon: Upload },
+		'seeding-imported': { label: 'Imported + Seeding', variant: 'badge-success', icon: Upload },
 		removed: { label: 'Removed', variant: 'badge-ghost', icon: Trash2 }
 	};
 

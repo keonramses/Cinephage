@@ -54,15 +54,15 @@ async function main() {
 		console.log(`  Available: ${solver.isAvailable()}`);
 
 		// Test challenge detection
-		console.log('\n[TEST 1] Testing challenge detection on 1337x.to...');
-		const testResult = await solver.test('https://1337x.to');
+		console.log('\n[TEST 1] Testing challenge detection on cloudflare-protected site...');
+		const testResult = await solver.test('https://nowsecure.nl');
 		console.log(`  Has challenge: ${testResult.hasChallenge}`);
 		console.log(`  Type: ${testResult.type}`);
 		console.log(`  Confidence: ${testResult.confidence}`);
 
 		// Solve the challenge
-		console.log('\n[TEST 2] Solving challenge on 1337x.to...');
-		const solveResult = await solver.solve({ url: 'https://1337x.to' });
+		console.log('\n[TEST 2] Solving challenge on cloudflare-protected site...');
+		const solveResult = await solver.solve({ url: 'https://nowsecure.nl' });
 
 		console.log(`  Success: ${solveResult.success}`);
 		console.log(`  Time: ${solveResult.solveTimeMs}ms`);
@@ -90,7 +90,7 @@ async function main() {
 
 		// Test cache
 		console.log('\n[TEST 3] Testing cache...');
-		const cachedResult = await solver.solve({ url: 'https://1337x.to' });
+		const cachedResult = await solver.solve({ url: 'https://nowsecure.nl' });
 		console.log(`  Cache hit: ${cachedResult.solveTimeMs === 0}`);
 		console.log(`  Time: ${cachedResult.solveTimeMs}ms`);
 

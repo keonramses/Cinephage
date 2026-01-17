@@ -123,6 +123,35 @@ export const EXCLUDED_FILE_PATTERNS = [
 ] as const;
 
 /**
+ * Dangerous file extensions that indicate malware or unwanted content.
+ * If a download folder contains files with these extensions, the import should be rejected.
+ * @see https://github.com/Radarr/Radarr/blob/develop/src/NzbDrone.Core/MediaFiles/MediaFileExtensions.cs
+ */
+export const DANGEROUS_EXTENSIONS = [
+	'.arj',
+	'.lnk',
+	'.lzh',
+	'.ps1',
+	'.scr',
+	'.vbs',
+	'.zipx'
+] as const;
+
+/**
+ * Executable file extensions.
+ * Downloads containing executables are suspicious and likely malware.
+ * @see https://github.com/Radarr/Radarr/blob/develop/src/NzbDrone.Core/MediaFiles/MediaFileExtensions.cs
+ */
+export const EXECUTABLE_EXTENSIONS = ['.bat', '.cmd', '.exe', '.sh'] as const;
+
+/**
+ * Archive file extensions.
+ * Used to detect nested archives that may need extraction.
+ * @see https://github.com/Radarr/Radarr/blob/develop/src/NzbDrone.Core/MediaFiles/MediaFileExtensions.cs
+ */
+export const ARCHIVE_EXTENSIONS = ['.7z', '.bz2', '.gz', '.r00', '.rar', '.tar', '.zip'] as const;
+
+/**
  * HTTP and API configuration.
  */
 export const HTTP = {
