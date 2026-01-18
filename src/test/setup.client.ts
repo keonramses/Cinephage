@@ -1,6 +1,6 @@
 /**
  * Client (browser) test setup
- * 
+ *
  * This file is used for Svelte component tests that run in the browser.
  * It should NOT use any Node.js-specific APIs like 'process'.
  */

@@ -173,7 +173,7 @@ describe('Live Validation Tests', () => {
 				const result = await validator.validateStream(tvSource, {
 					timeout: VALIDATION_TIMEOUT_MS
 				});
-				
+
 				// Always assert that we got a result
 				expect(result).toBeDefined();
 
@@ -214,7 +214,7 @@ describe('Live Validation Tests', () => {
 				const result = await strictValidator.validateStream(movieSource, {
 					timeout: VALIDATION_TIMEOUT_MS * 2
 				});
-				
+
 				// Always assert we got a result
 				expect(result).toBeDefined();
 
@@ -302,7 +302,7 @@ describe('Live Validation Tests', () => {
 					},
 					...sources
 				];
-				
+
 				// Assert that we have sources to test
 				expect(fakeSources.length).toBeGreaterThan(1);
 

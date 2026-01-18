@@ -27,7 +27,10 @@
  */
 
 import { describe, it, expect, beforeAll } from 'vitest';
-import { getSubtitleProviderFactory, initializeProviderFactory } from '../providers/SubtitleProviderFactory';
+import {
+	getSubtitleProviderFactory,
+	initializeProviderFactory
+} from '../providers/SubtitleProviderFactory';
 import type { ISubtitleProvider } from '../providers/interfaces';
 import type {
 	SubtitleSearchCriteria,
@@ -219,7 +222,7 @@ describe('Live Subtitle Provider Tests', () => {
 		// Initialize provider factory to register all built-in providers
 		await initializeProviderFactory();
 		factory = getSubtitleProviderFactory();
-		
+
 		testMovie = getPrimaryTestMovie(); // Inception
 		testTvShow = getPrimaryTestTvShow(); // Breaking Bad S01E01
 	});

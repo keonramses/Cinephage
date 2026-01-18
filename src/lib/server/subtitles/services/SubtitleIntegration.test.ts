@@ -35,7 +35,8 @@ vi.mock('$lib/server/db', async () => {
 const { SubtitleProviderManager } = await import('./SubtitleProviderManager');
 const { SubtitleSearchService } = await import('./SubtitleSearchService');
 const { SubtitleScoringService } = await import('./SubtitleScoringService');
-const { getSubtitleProviderFactory, initializeProviderFactory } = await import('../providers/SubtitleProviderFactory');
+const { getSubtitleProviderFactory, initializeProviderFactory } =
+	await import('../providers/SubtitleProviderFactory');
 
 describe('Subtitle System Integration', () => {
 	let providerManager: ReturnType<typeof SubtitleProviderManager.getInstance>;
@@ -46,7 +47,7 @@ describe('Subtitle System Integration', () => {
 	beforeAll(async () => {
 		// Initialize provider factory to register all built-in providers
 		await initializeProviderFactory();
-		
+
 		providerManager = SubtitleProviderManager.getInstance();
 		searchService = SubtitleSearchService.getInstance();
 		scoringService = SubtitleScoringService.getInstance();

@@ -169,7 +169,9 @@ describe('Audio Format Matching', () => {
 			it(`BTN Atmos ${tc.shouldMatch ? 'matches' : 'does not match'}: ${tc.desc}`, () => {
 				expect(atmosMissing).toBeDefined();
 				if (!atmosMissing) return;
-				const pattern = atmosMissing.conditions.find((c) => c.name === 'BTN Atmos Convention')?.pattern;
+				const pattern = atmosMissing.conditions.find(
+					(c) => c.name === 'BTN Atmos Convention'
+				)?.pattern;
 				expect(pattern).toBeDefined();
 				if (!pattern) return;
 				const regex = new RegExp(pattern, 'i');
