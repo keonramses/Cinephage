@@ -240,21 +240,47 @@ export class ReleaseEnricher {
 		}
 
 		// Build enhanced result
+		// Consolidate all rejection reasons into an array (Radarr-style)
+		const rejections: string[] = [];
+
+		// Add quality-related rejections
+		if (!quality.accepted) {
+			if (quality.scoringResult?.sizeRejectionReason) {
+				rejections.push(quality.scoringResult.sizeRejectionReason);
+			}
+			if (quality.scoringResult?.isBanned && quality.scoringResult.bannedReasons?.length) {
+				rejections.push(...quality.scoringResult.bannedReasons.map((r: string) => `Banned: ${r}`));
+			}
+			if (rejections.length === 0) {
+				rejections.push('Quality requirements not met');
+			}
+		}
+
+		// Add protocol rejection
+		if (!protocolAllowed) {
+			rejections.push(
+				`Protocol '${release.protocol}' not allowed for profile '${profile?.name || 'default'}' (allowed: ${allowedProtocols.join(', ')})`
+			);
+		}
+
+		// Add protocol-specific rejection (dead torrents, seeder minimums, etc.)
+		if (protocolRejectionReason) {
+			rejections.push(protocolRejectionReason);
+		}
+
 		const enhanced: EnhancedReleaseResult = {
 			...release,
 			parsed,
 			quality,
 			totalScore,
 			scoreComponents: components,
-			rejected: !quality.accepted || !protocolAllowed || !!protocolRejectionReason,
-			rejectionReason: !quality.accepted
-				? quality.scoringResult?.sizeRejectionReason ||
-					(quality.scoringResult?.isBanned
-						? `Banned: ${quality.scoringResult.bannedReasons?.join(', ')}`
-						: 'Quality requirements not met')
-				: !protocolAllowed
-					? `Protocol '${release.protocol}' not allowed for profile '${profile?.name || 'default'}' (allowed: ${allowedProtocols.join(', ')})`
-					: protocolRejectionReason
+			rejected: rejections.length > 0,
+			rejections,
+			rejectionCount: rejections.length,
+			// Keep rejectionReason for backwards compatibility (primary reason)
+			rejectionReason: rejections.length > 0 ? rejections[0] : undefined,
+			// qualityWeight is the normalized quality score (for debugging/display)
+			qualityWeight: components.normalizedQualityScore
 		};
 
 		// Add scoring result and matched formats if available

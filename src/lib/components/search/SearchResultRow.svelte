@@ -40,6 +40,8 @@
 		grabbed?: boolean;
 		error?: string | null;
 		streaming?: boolean;
+		onClick?: () => void;
+		clickable?: boolean;
 	}
 
 	let {
@@ -48,7 +50,9 @@
 		grabbing = false,
 		grabbed = false,
 		error = null,
-		streaming = false
+		streaming = false,
+		onClick = undefined,
+		clickable = false
 	}: Props = $props();
 
 	function formatAge(date: string | Date): string {
@@ -83,7 +87,14 @@
 	}
 </script>
 
-<tr class="hover" class:opacity-50={release.rejected}>
+<!-- svelte-ignore a11y_click_events_have_key_events -->
+<!-- svelte-ignore a11y_no_static_element_interactions -->
+<tr
+	class="hover"
+	class:opacity-50={release.rejected}
+	class:cursor-pointer={clickable}
+	onclick={onClick}
+>
 	<!-- Title -->
 	<td class="max-w-md">
 		<div class="flex flex-col gap-1">

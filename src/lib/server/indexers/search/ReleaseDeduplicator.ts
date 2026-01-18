@@ -1,4 +1,4 @@
-import type { ReleaseResult } from '../types';
+import type { ReleaseResult, EnhancedReleaseResult } from '../types';
 import { logger } from '$lib/logging';
 
 /**
@@ -6,6 +6,14 @@ import { logger } from '$lib/logging';
  */
 export interface DeduplicationResult {
 	releases: ReleaseResult[];
+	removed: number;
+}
+
+/**
+ * Result of enhanced deduplication operation (post-enrichment).
+ */
+export interface EnhancedDeduplicationResult {
+	releases: EnhancedReleaseResult[];
 	removed: number;
 }
 
@@ -93,6 +101,70 @@ export class ReleaseDeduplicator {
 		return {
 			releases: result,
 			removed: releases.length - seen.size
+		};
+	}
+
+	/**
+	 * Deduplicates enhanced releases using Radarr-style preference logic.
+	 * Called AFTER enrichment when we have rejection counts and scores.
+	 *
+	 * Preference order (like Radarr):
+	 * 1. Fewer rejections wins (non-rejected preferred over rejected)
+	 * 2. Higher indexer priority wins (lower priority number = higher preference)
+	 * 3. Fallback to legacy logic (seeders > size > age)
+	 */
+	deduplicateEnhanced(releases: EnhancedReleaseResult[]): EnhancedDeduplicationResult {
+		const seen = new Map<string, EnhancedReleaseResult>();
+
+		for (const release of releases) {
+			const key = this.getDedupeKey(release);
+			const existing = seen.get(key);
+
+			if (!existing) {
+				// First time seeing this release - initialize sourceIndexers
+				const releaseWithSources = {
+					...release,
+					sourceIndexers: [release.indexerName]
+				};
+				seen.set(key, releaseWithSources);
+			} else {
+				// Duplicate found - track this indexer as another source
+				const currentSources = existing.sourceIndexers ?? [existing.indexerName];
+				if (!currentSources.includes(release.indexerName)) {
+					currentSources.push(release.indexerName);
+				}
+
+				if (this.shouldPreferEnhanced(release, existing)) {
+					// Prefer the new release but keep all source indexers
+					const releaseWithSources = {
+						...release,
+						sourceIndexers: currentSources
+					};
+					seen.set(key, releaseWithSources);
+				} else {
+					// Keep existing but update its sourceIndexers
+					existing.sourceIndexers = currentSources;
+				}
+			}
+		}
+
+		const result = Array.from(seen.values());
+
+		// Log deduplication stats
+		const removed = releases.length - seen.size;
+		if (removed > 0) {
+			logger.debug('[Deduplicator] Enhanced deduplication completed', {
+				input: releases.length,
+				output: result.length,
+				removed,
+				multiSourceCount: result.filter((r) => r.sourceIndexers && r.sourceIndexers.length > 1)
+					.length
+			});
+		}
+
+		return {
+			releases: result,
+			removed
 		};
 	}
 
@@ -185,6 +257,47 @@ export class ReleaseDeduplicator {
 		}
 
 		// If still tied, prefer newer release
+		return candidate.publishDate > existing.publishDate;
+	}
+
+	/**
+	 * Determines if the candidate enhanced release should be preferred over the existing one.
+	 * Uses Radarr-style preference logic:
+	 * 1. Fewer rejections wins (non-rejected over rejected)
+	 * 2. Higher indexer priority wins (lower number = higher preference)
+	 * 3. Fallback to legacy logic (seeders > size > age)
+	 */
+	private shouldPreferEnhanced(
+		candidate: EnhancedReleaseResult,
+		existing: EnhancedReleaseResult
+	): boolean {
+		const candidateRejections = candidate.rejectionCount ?? (candidate.rejected ? 1 : 0);
+		const existingRejections = existing.rejectionCount ?? (existing.rejected ? 1 : 0);
+
+		// 1. Prefer release with fewer rejections (non-rejected wins)
+		if (candidateRejections !== existingRejections) {
+			return candidateRejections < existingRejections;
+		}
+
+		// 2. Prefer higher priority indexer (lower number = higher priority)
+		// Default priority is 25 if not set
+		const candidatePriority = candidate.indexerPriority ?? 25;
+		const existingPriority = existing.indexerPriority ?? 25;
+		if (candidatePriority !== existingPriority) {
+			return candidatePriority < existingPriority;
+		}
+
+		// 3. Fallback to legacy logic: seeders > size > age
+		const candidateSeeders = candidate.seeders ?? 0;
+		const existingSeeders = existing.seeders ?? 0;
+		if (candidateSeeders !== existingSeeders) {
+			return candidateSeeders > existingSeeders;
+		}
+
+		if (candidate.size !== existing.size) {
+			return candidate.size > existing.size;
+		}
+
 		return candidate.publishDate > existing.publishDate;
 	}
 }

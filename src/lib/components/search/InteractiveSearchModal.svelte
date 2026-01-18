@@ -11,7 +11,9 @@
 		CheckCircle2,
 		XCircle,
 		ChevronDown,
-		ChevronUp
+		ChevronUp,
+		Download,
+		Bug
 	} from 'lucide-svelte';
 	import SearchResultRow from './SearchResultRow.svelte';
 	import ModalWrapper from '$lib/components/ui/modal/ModalWrapper.svelte';
@@ -76,6 +78,12 @@
 
 	interface SearchMeta {
 		totalResults: number;
+		/** Results after first deduplication */
+		afterDedup?: number;
+		/** Results after season/category filtering */
+		afterFiltering?: number;
+		/** Results after enrichment and smart dedup */
+		afterEnrichment?: number;
 		rejectedCount?: number;
 		searchTimeMs: number;
 		enrichTimeMs?: number;
@@ -140,6 +148,37 @@
 
 	// Indexer details visibility
 	let showIndexerDetails = $state(false);
+	let showPipelineDetails = $state(false);
+	let showDebugPanel = $state(false);
+	let selectedDebugRelease = $state<Release | null>(null);
+
+	// Download debug JSON
+	function downloadDebugJson() {
+		const debugData = {
+			timestamp: new Date().toISOString(),
+			searchParams: {
+				title,
+				tmdbId,
+				imdbId,
+				year,
+				mediaType,
+				season,
+				episode,
+				scoringProfileId,
+				searchMode
+			},
+			meta,
+			allReleases: releases,
+			filteredReleases: filteredReleases
+		};
+		const blob = new Blob([JSON.stringify(debugData, null, 2)], { type: 'application/json' });
+		const url = URL.createObjectURL(blob);
+		const a = document.createElement('a');
+		a.href = url;
+		a.download = `search-debug-${title.replace(/[^a-z0-9]/gi, '-')}-${Date.now()}.json`;
+		a.click();
+		URL.revokeObjectURL(url);
+	}
 
 	// Helper to check if a release is a multi-season pack
 	function isMultiSeasonPack(release: Release): boolean {
@@ -337,7 +376,10 @@
 	{#if meta}
 		<div class="mb-4 space-y-2">
 			<div class="flex flex-wrap items-center gap-4 text-sm text-base-content/70">
-				<span>{meta.totalResults} results</span>
+				<span
+					>{releases.length} of {meta.afterEnrichment ?? meta.totalResults} results{#if meta.afterEnrichment && meta.afterEnrichment > releases.length}
+						<span class="text-base-content/50">(limited)</span>{/if}</span
+				>
 				{#if meta.rejectedCount}
 					<span class="text-warning">{meta.rejectedCount} rejected</span>
 				{/if}
@@ -358,7 +400,75 @@
 						{/if}
 					</button>
 				{/if}
+				<!-- Pipeline details button -->
+				{#if meta.afterDedup || meta.afterFiltering || meta.afterEnrichment}
+					<button
+						class="btn gap-1 btn-ghost btn-xs"
+						onclick={() => (showPipelineDetails = !showPipelineDetails)}
+					>
+						Pipeline
+						{#if showPipelineDetails}
+							<ChevronUp size={12} />
+						{:else}
+							<ChevronDown size={12} />
+						{/if}
+					</button>
+				{/if}
 			</div>
+
+			<!-- Pipeline breakdown panel -->
+			{#if showPipelineDetails && (meta.afterDedup || meta.afterFiltering || meta.afterEnrichment)}
+				<div class="rounded-lg bg-base-200 p-3 text-sm">
+					<div class="font-medium text-base-content/80 mb-2">Filtering Pipeline:</div>
+					<div class="space-y-1">
+						<div class="flex justify-between">
+							<span>1. Raw from indexers:</span>
+							<span class="font-mono">{meta.totalResults}</span>
+						</div>
+						{#if meta.afterDedup !== undefined}
+							<div class="flex justify-between">
+								<span>2. After deduplication:</span>
+								<span class="font-mono"
+									>{meta.afterDedup}
+									<span class="text-error">(-{meta.totalResults - meta.afterDedup})</span></span
+								>
+							</div>
+						{/if}
+						{#if meta.afterFiltering !== undefined}
+							<div class="flex justify-between">
+								<span>3. After season/category filter:</span>
+								<span class="font-mono"
+									>{meta.afterFiltering}
+									{#if meta.afterDedup !== undefined && meta.afterFiltering < meta.afterDedup}
+										<span class="text-error">(-{meta.afterDedup - meta.afterFiltering})</span>
+									{/if}</span
+								>
+							</div>
+						{/if}
+						{#if meta.afterEnrichment !== undefined}
+							<div class="flex justify-between">
+								<span>4. After quality scoring & smart dedup:</span>
+								<span class="font-mono"
+									>{meta.afterEnrichment}
+									{#if meta.afterFiltering !== undefined && meta.afterEnrichment < meta.afterFiltering}
+										<span class="text-error">(-{meta.afterFiltering - meta.afterEnrichment})</span>
+									{/if}</span
+								>
+							</div>
+						{/if}
+						{#if meta.rejectedCount}
+							<div class="flex justify-between text-warning">
+								<span>└ Quality rejected (hidden by default):</span>
+								<span class="font-mono">{meta.rejectedCount}</span>
+							</div>
+						{/if}
+						<div class="flex justify-between border-t border-base-300 pt-1 mt-1">
+							<span class="font-medium">5. Displayed (after limit):</span>
+							<span class="font-mono font-medium">{releases.length}</span>
+						</div>
+					</div>
+				</div>
+			{/if}
 
 			<!-- Indexer details panel -->
 			{#if showIndexerDetails && (meta.indexerResults || meta.rejectedIndexers?.length)}
@@ -410,6 +520,54 @@
 							</div>
 						</div>
 					{/if}
+				</div>
+			{/if}
+
+			<!-- Debug tools -->
+			<div class="flex gap-2 mt-2">
+				<button
+					class="btn btn-xs btn-ghost gap-1"
+					onclick={downloadDebugJson}
+					title="Download full debug JSON with all release details"
+				>
+					<Download size={12} />
+					Download Debug JSON
+				</button>
+				<button
+					class="btn btn-xs btn-ghost gap-1"
+					onclick={() => (showDebugPanel = !showDebugPanel)}
+					title="View raw JSON data"
+				>
+					<Bug size={12} />
+					{showDebugPanel ? 'Hide' : 'Show'} Debug Panel
+				</button>
+			</div>
+
+			<!-- Debug panel -->
+			{#if showDebugPanel}
+				<div class="mt-2 rounded-lg bg-base-300 p-3">
+					<div class="flex gap-2 mb-2">
+						<button
+							class="btn btn-xs {selectedDebugRelease === null ? 'btn-primary' : 'btn-ghost'}"
+							onclick={() => (selectedDebugRelease = null)}
+						>
+							All Releases ({releases.length})
+						</button>
+						{#if selectedDebugRelease}
+							<span class="text-sm text-base-content/70">
+								Selected: {selectedDebugRelease.title.substring(0, 50)}...
+							</span>
+						{/if}
+					</div>
+					<div class="text-xs text-base-content/60 mb-2">
+						Click on any release row below to view its detailed JSON here
+					</div>
+					<pre
+						class="max-h-96 overflow-auto rounded bg-base-100 p-2 text-xs font-mono whitespace-pre-wrap">{JSON.stringify(
+							selectedDebugRelease ?? { meta, releases: releases.slice(0, 10), note: 'Showing first 10 releases. Download JSON for full data.' },
+							null,
+							2
+						)}</pre>
 				</div>
 			{/if}
 		</div>
@@ -504,6 +662,8 @@
 								grabbed={grabbedIds.has(release.guid)}
 								streaming={streamingIds.has(release.guid)}
 								error={grabErrors.get(release.guid)}
+								onClick={showDebugPanel ? () => (selectedDebugRelease = release) : undefined}
+								clickable={showDebugPanel}
 							/>
 						{/each}
 					</tbody>

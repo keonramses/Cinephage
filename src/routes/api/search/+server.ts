@@ -154,6 +154,9 @@ export const GET: RequestHandler = async ({ url }) => {
 			releases: redactReleaseUrls(searchResult.releases),
 			meta: {
 				totalResults: searchResult.totalResults,
+				afterDedup: searchResult.afterDedup,
+				afterFiltering: searchResult.afterFiltering,
+				afterEnrichment: searchResult.afterEnrichment,
 				rejectedCount: searchResult.rejectedCount,
 				searchTimeMs: searchResult.searchTimeMs,
 				enrichTimeMs: searchResult.enrichTimeMs,

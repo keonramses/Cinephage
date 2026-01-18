@@ -72,8 +72,14 @@ export interface SearchOrchestratorOptions {
 export interface EnhancedSearchResult {
 	/** Enriched releases (parsed, scored, optionally TMDB-matched) */
 	releases: EnhancedReleaseResult[];
-	/** Total results across all indexers before filtering */
+	/** Total results across all indexers before any filtering (raw from indexers) */
 	totalResults: number;
+	/** Results after first deduplication pass (before enrichment) */
+	afterDedup?: number;
+	/** Results after season/category filtering (before enrichment) */
+	afterFiltering?: number;
+	/** Results after enrichment (before limit applied) */
+	afterEnrichment?: number;
 	/** Number of releases rejected by quality filter */
 	rejectedCount: number;
 	/** Total search time in milliseconds */
@@ -305,8 +311,9 @@ export class SearchOrchestrator {
 
 		const searchTimeMs = Date.now() - startTime;
 
-		// Deduplicate
+		// Pass 1: Basic deduplication (by infoHash/title, prefer more seeders)
 		const { releases: deduped } = this.deduplicator.deduplicate(allReleases);
+		const afterDedupCount = deduped.length;
 
 		// Debug: log YTS releases after deduplication
 		const ytsAfterDedup = deduped.filter((r) => r.indexerName === 'YTS');
@@ -325,6 +332,7 @@ export class SearchOrchestrator {
 			const searchType = enrichedCriteria.searchType as 'movie' | 'tv' | 'music' | 'book';
 			filtered = this.filterByCategoryMatch(filtered, searchType);
 		}
+		const afterFilteringCount = filtered.length;
 
 		// Enrich with quality scoring and optional TMDB matching
 		// Determine media type from search criteria for size validation
@@ -382,12 +390,32 @@ export class SearchOrchestrator {
 			});
 		}
 
-		// Apply limit (enricher already sorts by totalScore)
-		const limited = enrichResult.releases.slice(0, enrichedCriteria.limit ?? 100);
+		// Pass 2: Enhanced deduplication using Radarr-style preference logic
+		// Now that we have rejection counts, prefer releases with fewer rejections and higher indexer priority
+		const { releases: smartDeduped } = this.deduplicator.deduplicateEnhanced(enrichResult.releases);
+		const afterEnrichmentCount = smartDeduped.length;
+
+		logger.debug('[SearchOrchestrator] After enhanced deduplication', {
+			beforeDedup: enrichResult.releases.length,
+			afterDedup: smartDeduped.length,
+			removed: enrichResult.releases.length - smartDeduped.length
+		});
+
+		// Apply limit (releases are already sorted by totalScore from enricher)
+		const limited = smartDeduped.slice(0, enrichedCriteria.limit ?? 100);
+
+		// Assign releaseWeight (position in final sorted results, 1 = best)
+		const withWeights = limited.map((release, index) => ({
+			...release,
+			releaseWeight: index + 1
+		}));
 
 		const result: EnhancedSearchResult = {
-			releases: limited,
+			releases: withWeights,
 			totalResults: allReleases.length,
+			afterDedup: afterDedupCount,
+			afterFiltering: afterFilteringCount,
+			afterEnrichment: afterEnrichmentCount,
 			rejectedCount: enrichResult.rejectedCount,
 			searchTimeMs,
 			enrichTimeMs: enrichResult.enrichTimeMs,
@@ -399,6 +427,9 @@ export class SearchOrchestrator {
 
 		logger.info('Enhanced search completed', {
 			totalResults: result.totalResults,
+			afterDedup: result.afterDedup,
+			afterFiltering: result.afterFiltering,
+			afterEnrichment: result.afterEnrichment,
 			returned: result.releases.length,
 			rejected: result.rejectedCount,
 			searchTimeMs: result.searchTimeMs,
@@ -657,10 +688,18 @@ export class SearchOrchestrator {
 			this.hostRateLimiter.recordRequest(indexer.baseUrl);
 			this.statusTracker.recordSuccess(indexer.id, Date.now() - startTime);
 
+			// Attach indexer priority to each release for Radarr-style deduplication
+			// Lower priority number = higher preference (1 is highest priority)
+			const indexerPriority = this.statusTracker.getStatusSync(indexer.id).priority;
+			const releasesWithPriority = releases.map((r) => ({
+				...r,
+				indexerPriority
+			}));
+
 			return {
 				indexerId: indexer.id,
 				indexerName: indexer.name,
-				results: releases,
+				results: releasesWithPriority,
 				searchTimeMs: Date.now() - startTime,
 				searchMethod
 			};

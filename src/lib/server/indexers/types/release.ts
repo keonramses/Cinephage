@@ -75,6 +75,9 @@ export interface ReleaseResult {
 	/** All indexers that returned this release (tracked during deduplication) */
 	sourceIndexers?: string[];
 
+	/** Priority of the source indexer (lower = higher priority, from IndexerStatus) */
+	indexerPriority?: number;
+
 	// Metadata (if indexer provides it)
 	/** IMDB ID if known */
 	imdbId?: string;
@@ -129,8 +132,20 @@ export interface EnhancedReleaseResult extends ReleaseResult {
 	/** Whether this release was rejected by quality filter */
 	rejected: boolean;
 
-	/** Reason for rejection */
+	/** Reason for rejection (primary reason - for backwards compatibility) */
 	rejectionReason?: string;
+
+	/** All rejection reasons (Radarr-style - for complete rejection tracking) */
+	rejections?: string[];
+
+	/** Count of rejections (for deduplication preference) */
+	rejectionCount?: number;
+
+	/** Position in ranked results (1 = best, Radarr-style releaseWeight) */
+	releaseWeight?: number;
+
+	/** Quality-only weight for debugging (resolution + source + codec score) */
+	qualityWeight?: number;
 
 	/** Rejection type for programmatic handling */
 	rejectionType?: string;
