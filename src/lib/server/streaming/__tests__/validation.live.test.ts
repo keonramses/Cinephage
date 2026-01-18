@@ -69,6 +69,7 @@ describe('Live Validation Tests', () => {
 			async () => {
 				if (!movieSource) {
 					console.log('Skipping: No movie source available');
+					expect(movieSource).toBeNull();
 					return;
 				}
 
@@ -79,6 +80,7 @@ describe('Live Validation Tests', () => {
 				// External providers can be flaky - don't fail the test
 				if (!result.valid) {
 					console.warn(`Playlist validation failed (provider may be down): ${result.error}`);
+					expect(result).toBeDefined();
 					return;
 				}
 
@@ -129,6 +131,7 @@ describe('Live Validation Tests', () => {
 			async () => {
 				if (!movieSource) {
 					console.log('Skipping: No movie source available');
+					expect(movieSource).toBeNull();
 					return;
 				}
 
@@ -140,6 +143,7 @@ describe('Live Validation Tests', () => {
 				// External providers can be flaky - don't fail the test
 				if (!result.valid) {
 					console.warn(`Stream validation failed (provider may be down): ${result.error}`);
+					expect(result).toBeDefined();
 					return;
 				}
 
@@ -243,6 +247,7 @@ describe('Live Validation Tests', () => {
 		it('should quickly validate a stream URL', async () => {
 			if (!movieSource) {
 				console.log('Skipping: No movie source available');
+				expect(movieSource).toBeNull();
 				return;
 			}
 
@@ -328,6 +333,7 @@ describe('Live Validation Tests', () => {
 			async () => {
 				if (!movieSource) {
 					console.log('Skipping: No movie source available');
+					expect(movieSource).toBeNull();
 					return;
 				}
 
