@@ -94,7 +94,7 @@ fi
 
 # Verify Camoufox browser is present (downloaded at build time)
 # Cache is stored in /app/camoufox for non-standard UID/GID compatibility
-CAMOUFOX_CACHE_DIR="${CAMOUFOX_CACHE_DIR:-/app/camoufox}"
+CAMOUFOX_CACHE_DIR="${CAMOUFOX_CACHE_DIR:-/app/.cache/camoufox}"
 CAMOUFOX_MARKER="$CAMOUFOX_CACHE_DIR/version.json"
 if [ -f "$CAMOUFOX_MARKER" ]; then
   echo "Camoufox browser ready"
@@ -102,8 +102,9 @@ else
   # Fallback: attempt runtime download if somehow missing
   echo "Warning: Camoufox browser not found, attempting download..."
   mkdir -p "$CAMOUFOX_CACHE_DIR"
-  if ./node_modules/.bin/camoufox-js fetch --path "$CAMOUFOX_CACHE_DIR"; then
+  if ./node_modules/.bin/camoufox-js fetch; then
     echo "Camoufox browser installed successfully"
+    touch "$CAMOUFOX_MARKER"
   else
     echo "Warning: Failed to download Camoufox browser. Captcha solving will be unavailable."
   fi

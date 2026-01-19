@@ -27,12 +27,6 @@ RUN npm run build
 # Remove devDependencies to reduce runtime image size
 RUN npm prune --omit=dev
 
-# Download Camoufox browser at build time (avoids runtime permission issues)
-# Store cache in app directory for non-standard UID/GID compatibility
-ENV HOME=/app
-ENV CAMOUFOX_CACHE_DIR=/app/camoufox
-RUN mkdir -p /app/camoufox && npx camoufox-js fetch
-
 # ==========================================
 # Runtime Stage
 # ==========================================
@@ -80,25 +74,23 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 RUN npx playwright install-deps firefox
 
 # Create necessary directories with correct ownership (node user is UID 1000)
-RUN mkdir -p data logs camoufox && chown -R node:node data logs camoufox
-
-# Set HOME to /app for consistent cache location regardless of runtime UID
-# This ensures camoufox-js finds the browser at /app/camoufox
-ENV HOME=/app
-ENV CAMOUFOX_CACHE_DIR=/app/camoufox
-
-# Copy pre-downloaded Camoufox browser from builder
-COPY --from=builder --chown=node:node /app/camoufox ./camoufox
+RUN mkdir -p data logs .cache && chown -R node:node data logs .cache
 
 # Copy production dependencies and built artifacts from builder
 COPY --from=builder --chown=node:node /app/node_modules ./node_modules
 COPY --from=builder --chown=node:node /app/build ./build
 COPY --from=builder --chown=node:node /app/package.json ./package.json
 COPY --from=builder --chown=node:node /app/server.js ./server.js
-# COPY --from=builder --chown=node:node /app/src ./src
 
 # Copy bundled indexers to separate location (not shadowed by volume mount)
 COPY --from=builder --chown=node:node /app/data/indexers ./bundled-indexers
+
+# Set HOME to /app for consistent cache location regardless of runtime UID
+# This ensures camoufox-js finds the browser at /app/camoufox
+ENV HOME=/app
+ENV CAMOUFOX_CACHE_DIR=/app/.cache/camoufox
+USER node
+RUN ./node_modules/.bin/camoufox-js fetch
 
 # Copy and set up entrypoint script
 COPY --chown=node:node docker-entrypoint.sh ./docker-entrypoint.sh

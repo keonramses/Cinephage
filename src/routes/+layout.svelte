@@ -189,7 +189,7 @@
 			<!-- Sidebar Footer -->
 			<div class="flex flex-col items-center border-t border-base-300 p-2">
 				{#if appVersion}
-					<div class="mb-2 text-xs text-base-content/50">v{appVersion}</div>
+					<div class="mb-2 text-xs text-base-content/50">{appVersion}</div>
 				{/if}
 				<ThemeSelector
 					class={layoutState.isSidebarExpanded ? 'dropdown-top' : 'dropdown-right'}
