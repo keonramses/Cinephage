@@ -33,6 +33,7 @@ WORKDIR /app
 # - wget: for health check
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ffmpeg \
+    xvfb \
     wget \
     libgtk-3-0 \
     libx11-xcb1 \
@@ -52,6 +53,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     fonts-liberation \
     libdbus-glib-1-2 \
     libxt6 \
+    # GLX/Mesa libraries for Camoufox GPU detection (glxtest)
+    libgl1-mesa-dri \
+    libgl1-mesa-glx \
     && rm -rf /var/lib/apt/lists/*
 
 # Create necessary directories with correct ownership (node user is UID 1000)
