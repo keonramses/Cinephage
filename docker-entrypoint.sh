@@ -19,7 +19,8 @@ if [ "$(id -u)" = "0" ] && [ -z "${CINEPHAGE_REEXEC:-}" ]; then
     usermod -o -u "$TARGET_UID" -g "$TARGET_GID" node
   fi
 
-  chown -R node:node /app/data /app/logs 2>/dev/null || true
+  mkdir -p /home/node/.cache
+  chown -R node:node /app/data /app/logs /home/node/.cache 2>/dev/null || true
 
   export CINEPHAGE_REEXEC=1
   exec gosu node "$0" "$@"
