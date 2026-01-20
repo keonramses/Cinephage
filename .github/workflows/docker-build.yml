@@ -34,6 +34,8 @@ jobs:
   prepare:
     name: Prepare Build Variables
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     outputs:
       dev_tag_date: ${{ steps.set-vars.outputs.dev_tag_date }}
     
