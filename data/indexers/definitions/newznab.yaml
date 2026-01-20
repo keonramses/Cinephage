@@ -55,6 +55,7 @@ search:
       categories: [Movies]
       inputs:
         t: movie
+        cat: '{{ join .Categories "," }}'
         imdbid: '{{ .Query.IMDBID }}'
         tmdbid: '{{ .Query.TMDBID }}'
         q: '{{ .Keywords }}'
@@ -67,6 +68,7 @@ search:
       categories: [TV]
       inputs:
         t: tvsearch
+        cat: '{{ join .Categories "," }}'
         imdbid: '{{ .Query.IMDBID }}'
         tvdbid: '{{ .Query.TVDBID }}'
         season: '{{ .Query.Season }}'
@@ -75,11 +77,12 @@ search:
         apikey: '{{ .Config.apikey }}'
         limit: '100'
 
-    # General search
+    # General search (includes cat for category filtering)
     - path: /api
       method: get
       inputs:
         t: search
+        cat: '{{ join .Categories "," }}'
         q: '{{ .Keywords }}'
         apikey: '{{ .Config.apikey }}'
         limit: '100'
