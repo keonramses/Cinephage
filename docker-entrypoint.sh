@@ -1,6 +1,27 @@
 #!/bin/sh
 set -e
 
+# ==========================================
+# Fix for custom UID support (e.g., Synology)
+# ==========================================
+# Node.js os.homedir() uses $HOME if set, otherwise looks up UID in /etc/passwd.
+# When running with arbitrary UIDs (user: '1026:100'), the UID doesn't exist in
+# /etc/passwd, causing os.homedir() to return '/' or fail.
+# camoufox-js uses os.homedir() to find its cache, so we must ensure HOME is set.
+
+# Explicitly export HOME to /app (this is also set in Dockerfile but we ensure it here)
+export HOME="${HOME:-/app}"
+
+# Create /etc/passwd entry for current UID if it doesn't exist
+# This helps libraries that use getpwuid() instead of $HOME
+CURRENT_UID=$(id -u)
+if ! getent passwd "$CURRENT_UID" > /dev/null 2>&1; then
+  # Try to add entry (may fail in read-only /etc, that's OK since we have $HOME)
+  if [ -w /etc/passwd ]; then
+    echo "cinephage:x:$CURRENT_UID:$(id -g):Cinephage User:$HOME:/bin/sh" >> /etc/passwd 2>/dev/null || true
+  fi
+fi
+
 # Ensure we're in the app directory
 cd /app
 

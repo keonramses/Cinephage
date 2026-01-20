@@ -71,7 +71,9 @@ RUN mkdir -p data logs && chown -R node:node data logs
 
 # Set HOME to /app for consistent cache location regardless of runtime UID
 # This ensures camoufox-js finds the browser at /app/.cache/camoufox
+# XDG_CACHE_HOME is set for libraries that respect XDG Base Directory spec
 ENV HOME=/app
+ENV XDG_CACHE_HOME=/app/.cache
 
 # Copy pre-downloaded Camoufox browser from builder
 COPY --from=builder --chown=node:node /app/.cache ./.cache
