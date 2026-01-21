@@ -140,8 +140,8 @@ describe('EpisodeMonitoredSpecification', () => {
 			episode: { monitored: true, seasonId: 'season-1' } as any
 		};
 
-		// Mock the season query to return null (season not found)
-		vi.mocked(db.query.seasons.findFirst).mockResolvedValue(null);
+		// Mock the season query to return undefined (season not found)
+		vi.mocked(db.query.seasons.findFirst).mockResolvedValue(undefined);
 
 		const result = await spec.isSatisfied(context);
 
