@@ -15,6 +15,7 @@ import {
 	series,
 	episodes,
 	episodeFiles,
+	seasons,
 	scoringProfiles,
 	downloadQueue,
 	downloadHistory
@@ -462,30 +463,28 @@ export class MonitoringSearchService {
 				lte(episodes.airDate, new Date().toISOString()) // Only aired episodes
 			);
 
+			// Use a single query with joins to efficiently fetch all related data
 			const missingEpisodesRaw = await db
-				.select()
+				.select({
+					episode: episodes,
+					series: series,
+					season: seasons,
+					scoringProfile: scoringProfiles
+				})
 				.from(episodes)
 				.innerJoin(series, eq(episodes.seriesId, series.id))
+				.leftJoin(seasons, eq(episodes.seasonId, seasons.id))
+				.leftJoin(scoringProfiles, eq(series.scoringProfileId, scoringProfiles.id))
 				.where(query);
 
 			// Transform to match the original structure with relational data
-			const missingEpisodes = await Promise.all(
-				missingEpisodesRaw.map(async (row) => {
-					// Fetch the related data we need (scoringProfile and season)
-					const episodeWithRelations = await db.query.episodes.findFirst({
-						where: eq(episodes.id, row.episodes.id),
-						with: {
-							series: {
-								with: {
-									scoringProfile: true
-								}
-							},
-							season: true
-						}
-					});
-					return episodeWithRelations!;
-				})
-			);
+			const missingEpisodes = missingEpisodesRaw.map((row) => ({
+				...row.episode,
+				series: row.scoringProfile
+					? { ...row.series, scoringProfile: row.scoringProfile }
+					: { ...row.series, scoringProfile: null },
+				season: row.season
+			}));
 
 			logger.info('[MonitoringSearch] Found missing episodes', { count: missingEpisodes.length });
 
