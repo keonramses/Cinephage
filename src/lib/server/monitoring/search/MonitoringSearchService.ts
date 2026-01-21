@@ -454,23 +454,38 @@ export class MonitoringSearchService {
 			}
 
 			// Query monitored episodes without files
+			// Only include episodes where BOTH the episode AND the series are monitored
 			const query = and(
 				eq(episodes.monitored, true),
+				eq(series.monitored, true), // Series must be monitored for auto-download
 				eq(episodes.hasFile, false),
 				lte(episodes.airDate, new Date().toISOString()) // Only aired episodes
 			);
 
-			const missingEpisodes = await db.query.episodes.findMany({
-				where: query,
-				with: {
-					series: {
+			const missingEpisodesRaw = await db
+				.select()
+				.from(episodes)
+				.innerJoin(series, eq(episodes.seriesId, series.id))
+				.where(query);
+
+			// Transform to match the original structure with relational data
+			const missingEpisodes = await Promise.all(
+				missingEpisodesRaw.map(async (row) => {
+					// Fetch the related data we need (scoringProfile and season)
+					const episodeWithRelations = await db.query.episodes.findFirst({
+						where: eq(episodes.id, row.episodes.id),
 						with: {
-							scoringProfile: true
+							series: {
+								with: {
+									scoringProfile: true
+								}
+							},
+							season: true
 						}
-					},
-					season: true
-				}
-			});
+					});
+					return episodeWithRelations!;
+				})
+			);
 
 			logger.info('[MonitoringSearch] Found missing episodes', { count: missingEpisodes.length });
 
