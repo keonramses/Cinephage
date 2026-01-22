@@ -4,6 +4,7 @@
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
     flake-parts.url = "github:hercules-ci/flake-parts";
+    treefmt-nix.url = "github:numtide/treefmt-nix";
   };
 
   outputs =
@@ -16,29 +17,11 @@
         "aarch64-darwin"
       ];
 
-      perSystem =
-        {
-          config,
-          self',
-          inputs',
-          pkgs,
-          system,
-          ...
-        }:
-        {
-          packages = {
-            default = self'.packages.cinephage;
-            cinephage = pkgs.callPackage ./nix/package.nix { };
-          };
-
-          devShells = {
-            default = pkgs.mkShell {
-              packages = with pkgs; [
-                nodejs
-                ffmpeg
-              ];
-            };
-          };
-        };
+      imports = [
+        inputs.treefmt-nix.flakeModule
+        ./nix/packages.nix
+        ./nix/test.nix
+        ./nix/nixos-module.nix
+      ];
     };
 }

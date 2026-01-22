@@ -80,6 +80,56 @@ deploy:
 
 ---
 
+## NixOS Deployment
+
+### Prerequisites
+
+- NixOS with flake support
+- [Flake enabled](https://nixos.wiki/wiki/Flakes) (NixOS 23.11+)
+
+### Installation
+
+1. **Add Flake to System Configuration**
+
+   Edit your `/etc/nixos/configuration.nix` to include the Cinephage flake:
+
+   ```nix
+   {
+     description = "My NixOS System";
+
+     inputs = {
+       nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
+       cinephage.url = "github:MoldyTaint/Cinephage";
+     };
+
+     outputs = { self, nixpkgs, ... }: {
+       nixosConfigurations = {
+         my-host = nixpkgs.lib.nixosSystem {
+           system.stateVersion = "24.11";
+
+           # Import the Cinephage NixOS module
+           imports = [ self.inputs.cinephage.nixosModules.default ];
+
+           # Enable Cinephage service
+           services.cinephage = {
+             enable = true;
+             ffmpeg.enable = true;
+
+             # Optional: Configure media paths
+             environment = {
+               MEDIA_PATH = "/path/to/your/media";
+               # Override any default settings if needed
+             };
+           };
+         };
+       };
+     };
+   }
+   ```
+
+
+---
+
 ## Manual Deployment
 
 For installations without Docker.

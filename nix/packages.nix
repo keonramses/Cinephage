@@ -1,11 +1,18 @@
 {
-  lib,
-  buildNpmPackage,
-  pkgs,
-  nodejs
-}:
-
-buildNpmPackage {
+  self,
+  inputs,
+  ...
+}: {
+  imports = [
+  ];
+  perSystem = {
+    pkgs,
+    self',
+    system,
+    lib,
+    ...
+  }: {
+  packages.default = pkgs.buildNpmPackage {
   pname = "cinephage";
   version = "0.0.1";
 
@@ -83,11 +90,32 @@ buildNpmPackage {
 
   npmDepsHash = "sha256-z69FKqg71nmnsZkd+ahTbUSd9hkT/koCnKMQ8P4LwXA=";
 
+  buildPhase = ''
+    runHook preBuild
+    npm run build
+    runHook postBuild
+  '';
+
   installPhase = ''
-              mkdir -p $out/dist
-              cp -r * $out/dist
-              makeWrapper ${pkgs.lib.getExe pkgs.nodejs} $out/bin/cinephage --add-flags $out/dist/server.js
-            '';
+    runHook preInstall
+
+    # Install the built application
+    mkdir -p $out/lib
+    cp -r build $out/lib/
+    cp -r static $out/lib/
+    cp -r data $out/lib/
+    cp server.js $out/lib/
+    cp -r node_modules $out/lib/
+
+    # Create the wrapper script
+    mkdir -p $out/bin
+    makeWrapper ${pkgs.nodejs}/bin/node $out/bin/cinephage \
+      --add-flags "$out/lib/server.js" \
+      --chdir "$out/lib" \
+      --set NODE_PATH "$out/lib/node_modules"
+
+    runHook postInstall
+  '';
 
   meta = with lib; {
     description = "A media management application";
@@ -95,5 +123,7 @@ buildNpmPackage {
     license = licenses.gpl3Plus;
     platforms = platforms.linux ++ platforms.darwin;
     mainProgram = "cinephage";
+  };
+  };
   };
 }

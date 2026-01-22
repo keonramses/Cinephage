@@ -6,12 +6,12 @@ import { logger } from '$lib/logging';
 import { syncSchema } from './schema-sync';
 
 // Ensure data directory exists before creating database connection
-const DATA_DIR = 'data';
+const DATA_DIR = process.env.DATA_DIR || 'data';
 if (!existsSync(DATA_DIR)) {
 	mkdirSync(DATA_DIR, { recursive: true });
 }
 
-const sqlite = new Database('data/cinephage.db');
+const sqlite = new Database(`${DATA_DIR}/cinephage.db`);
 export const db = drizzle(sqlite, { schema });
 
 // Export sqlite for direct access when needed (schema sync uses it)
