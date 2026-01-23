@@ -486,7 +486,11 @@ export class SubtitleDownloadService {
 			});
 
 			if (file) {
-				const mediaDir = this.resolveEpisodeMediaDir(rootPath, seriesData[0].path, file.relativePath);
+				const mediaDir = this.resolveEpisodeMediaDir(
+					rootPath,
+					seriesData[0].path,
+					file.relativePath
+				);
 				return join(mediaDir, subtitle.relativePath);
 			}
 

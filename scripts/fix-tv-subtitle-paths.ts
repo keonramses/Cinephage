@@ -2,7 +2,13 @@ import { existsSync } from 'node:fs';
 import { mkdir, rename } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { db } from '../src/lib/server/db';
-import { episodes, episodeFiles, rootFolders, series, subtitles } from '../src/lib/server/db/schema';
+import {
+	episodes,
+	episodeFiles,
+	rootFolders,
+	series,
+	subtitles
+} from '../src/lib/server/db/schema';
 import { eq, isNotNull } from 'drizzle-orm';
 
 type EpisodeRow = typeof episodes.$inferSelect;
@@ -26,10 +32,7 @@ function resolveEpisodeMediaDir(
 	return join(rootPath, fileDir);
 }
 
-async function getEpisodeFile(
-	episodeId: string,
-	seriesId: string
-): Promise<EpisodeFileRow | null> {
+async function getEpisodeFile(episodeId: string, seriesId: string): Promise<EpisodeFileRow | null> {
 	const files = await db.select().from(episodeFiles).where(eq(episodeFiles.seriesId, seriesId));
 	const match = files.find((f) => {
 		const ids = f.episodeIds as string[] | null;
@@ -56,10 +59,7 @@ async function main() {
 	let skipped = 0;
 	let missing = 0;
 
-	const subtitleRows = await db
-		.select()
-		.from(subtitles)
-		.where(isNotNull(subtitles.episodeId));
+	const subtitleRows = await db.select().from(subtitles).where(isNotNull(subtitles.episodeId));
 
 	for (const subtitle of subtitleRows) {
 		checked += 1;
@@ -69,11 +69,7 @@ async function main() {
 			continue;
 		}
 
-		const episode = await db
-			.select()
-			.from(episodes)
-			.where(eq(episodes.id, episodeId))
-			.limit(1);
+		const episode = await db.select().from(episodes).where(eq(episodes.id, episodeId)).limit(1);
 		const episodeRow = episode[0] as EpisodeRow | undefined;
 		if (!episodeRow) {
 			skipped += 1;
