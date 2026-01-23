@@ -141,8 +141,7 @@ export class SubtitleDownloadService {
 		}
 
 		const rootPath = rootFolder?.[0]?.path || '';
-		// file.relativePath is already relative to the root folder (includes series folder)
-		const mediaPath = join(rootPath, dirname(file.relativePath));
+		const mediaPath = this.resolveEpisodeMediaDir(rootPath, seriesData[0].path, file.relativePath);
 
 		// Download and save
 		return this.downloadAndSave(result, {
@@ -487,8 +486,8 @@ export class SubtitleDownloadService {
 			});
 
 			if (file) {
-				// Use the episode file's directory path
-				return join(rootPath, dirname(file.relativePath), subtitle.relativePath);
+				const mediaDir = this.resolveEpisodeMediaDir(rootPath, seriesData[0].path, file.relativePath);
+				return join(mediaDir, subtitle.relativePath);
 			}
 
 			// Fallback: use series path if no file found
@@ -496,6 +495,21 @@ export class SubtitleDownloadService {
 		}
 
 		return null;
+	}
+
+	private resolveEpisodeMediaDir(
+		rootPath: string,
+		seriesPath: string | null,
+		fileRelativePath: string
+	): string {
+		const seriesRel = (seriesPath ?? '').replace(/^[/\\]+/, '');
+		let fileDir = dirname(fileRelativePath).replace(/^[/\\]+/, '');
+
+		if (seriesRel && !(fileDir === seriesRel || fileDir.startsWith(`${seriesRel}/`))) {
+			fileDir = join(seriesRel, fileDir);
+		}
+
+		return join(rootPath, fileDir);
 	}
 }
 
