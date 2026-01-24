@@ -33,6 +33,42 @@ npm ci
 npm run build
 ```
 
+### npm memory leaks or high memory usage
+
+**Symptoms**: npm install/ci processes consuming excessive memory, system running out of memory, or build failures due to OOM.
+
+**Solutions**:
+
+1. **Use npm configuration** (already configured in `.npmrc`):
+   - Limits concurrent connections (`maxsockets=5`)
+   - Reduces retry attempts and timeouts
+   - Disables progress bars and audit checks
+
+2. **Set Node.js memory limit**:
+
+   ```bash
+   export NODE_OPTIONS="--max-old-space-size=4096"
+   npm ci
+   ```
+
+3. **Clear npm cache**:
+
+   ```bash
+   npm cache clean --force
+   ```
+
+4. **Use npm ci instead of npm install** (already in use):
+   - More memory-efficient for CI/CD and Docker builds
+   - Ensures reproducible installs
+
+5. **For Docker builds**: Memory limits are automatically configured in the Dockerfile.
+
+6. **If still having issues**, reduce memory limit further:
+   ```bash
+   export NODE_OPTIONS="--max-old-space-size=2048"
+   npm ci
+   ```
+
 ### Application won't start
 
 Check if port is in use:

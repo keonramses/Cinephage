@@ -24,7 +24,9 @@
 
 	// Determine the title and link
 	const title = $derived(credit.title || credit.name || 'Unknown');
-	const link = $derived(credit.media_type === 'movie' ? `/movie/${credit.id}` : `/tv/${credit.id}`);
+	const link = $derived(
+		credit.media_type === 'movie' ? `/discover/movie/${credit.id}` : `/discover/tv/${credit.id}`
+	);
 	const date = $derived(credit.release_date || credit.first_air_date || '');
 	const year = $derived(date ? new Date(date).getFullYear() : null);
 

@@ -239,7 +239,7 @@
 				if (removeFromLibrary) {
 					toasts.success('Movie removed from library');
 					// Navigate to library since the movie no longer exists
-					window.location.href = '/library';
+					window.location.href = '/library/movies';
 				} else {
 					toasts.success('Movie files deleted');
 					// Reload to show updated state (movie now missing)
@@ -270,8 +270,15 @@
 
 			if (result.success) {
 				toasts.success('File deleted');
-				data.movie.files = data.movie.files.filter((f) => f.id !== fileId);
-				data.movie.hasFile = data.movie.files.length > 0;
+				const updatedFiles = data.movie.files.filter((f) => f.id !== fileId);
+				data = {
+					...data,
+					movie: {
+						...data.movie,
+						files: updatedFiles,
+						hasFile: updatedFiles.length > 0
+					}
+				};
 			} else {
 				toasts.error('Failed to delete file', { description: result.error });
 			}
@@ -355,6 +362,21 @@
 </svelte:head>
 
 <div class="flex w-full flex-col gap-4 overflow-x-hidden px-4 pb-20 md:gap-6 md:px-6 lg:px-8">
+	<div
+		class="rounded-lg px-3 py-2 text-sm font-medium text-base-100 md:px-4 md:py-3 {data.movie
+			.monitored
+			? 'bg-success/80'
+			: 'bg-error/80'}"
+	>
+		{#if data.movie.monitored}
+			Monitoring enabled.
+		{:else}
+			Monitoring is disabled.
+			<span class="block text-xs font-normal text-base-100/90">
+				Automatic downloads and upgrades will not occur.
+			</span>
+		{/if}
+	</div>
 	<!-- Header -->
 	<LibraryMovieHeader
 		movie={data.movie}

@@ -6,6 +6,7 @@
 		Search,
 		Eye,
 		EyeOff,
+		Lock,
 		Info,
 		Download,
 		ChevronDown,
@@ -140,6 +141,15 @@
 		return combined;
 	});
 
+	const monitorDisabled = $derived.by(() => !seriesMonitored);
+	const monitorTooltip = $derived.by(() =>
+		seriesMonitored
+			? episode.monitored
+				? 'Monitored'
+				: 'Not monitored'
+			: 'Series is unmonitored. Enable series monitoring to monitor episodes.'
+	);
+
 	function formatAirDate(dateString: string | null): string {
 		if (!dateString) return 'TBA';
 		const date = new Date(dateString);
@@ -174,6 +184,7 @@
 	}
 
 	function handleMonitorClick() {
+		if (!seriesMonitored) return;
 		if (onMonitorToggle) {
 			onMonitorToggle(episode.id, !episode.monitored);
 		}
@@ -244,20 +255,23 @@
 				>
 					{episode.title || 'TBA'}
 				</span>
-				<div class="ml-auto flex shrink-0 items-center gap-1 sm:hidden">
+				<div class="ml-auto flex shrink-0 items-center gap-1 sm:hidden" title={monitorTooltip}>
 					<button
 						class="btn btn-ghost btn-xs {episode.monitored
 							? 'text-success'
-							: 'text-base-content/40'}"
+							: 'text-base-content/40'} {monitorDisabled ? 'opacity-40' : ''}"
 						onclick={handleMonitorClick}
-						title={episode.monitored ? 'Monitored' : 'Not monitored'}
+						disabled={monitorDisabled}
 					>
-						{#if episode.monitored}
+						{#if monitorDisabled}
+							<Lock size={14} />
+						{:else if episode.monitored}
 							<Eye size={14} />
 						{:else}
 							<EyeOff size={14} />
 						{/if}
 					</button>
+
 					<AutoSearchStatus
 						status={autoSearchStatus}
 						releaseName={autoSearchResult?.releaseName}
@@ -375,7 +389,7 @@
 			</div>
 			{#if episode.file}
 				<span
-					class="block max-w-full text-xs break-words text-base-content/50 sm:truncate"
+					class="block max-w-full text-xs break-words text-base-content/50 sm:whitespace-normal"
 					title={episode.file.relativePath}
 				>
 					{episode.file.relativePath.split('/').pop()}
@@ -462,15 +476,18 @@
 
 	<!-- Actions -->
 	<td class="hidden sm:table-cell">
-		<div class="flex flex-wrap items-center gap-1">
+		<div class="flex flex-wrap items-center gap-1" title={monitorTooltip}>
 			<!-- Monitor toggle -->
 			<button
-				class="btn btn-ghost btn-xs {episode.monitored ? 'text-success' : 'text-base-content/40'}"
+				class="btn btn-ghost btn-xs {episode.monitored
+					? 'text-success'
+					: 'text-base-content/40'} {monitorDisabled ? 'opacity-40' : ''}"
 				onclick={handleMonitorClick}
-				disabled={!seriesMonitored}
-				title={episode.monitored ? 'Monitored' : 'Not monitored'}
+				disabled={monitorDisabled}
 			>
-				{#if episode.monitored}
+				{#if monitorDisabled}
+					<Lock size={14} />
+				{:else if episode.monitored}
 					<Eye size={14} />
 				{:else}
 					<EyeOff size={14} />

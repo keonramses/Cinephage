@@ -37,8 +37,8 @@
 			label: 'Library',
 			icon: Library,
 			children: [
-				{ href: '/movies', label: 'Movies', icon: Clapperboard },
-				{ href: '/tv', label: 'TV Shows', icon: Tv }
+				{ href: '/library/movies', label: 'Movies', icon: Clapperboard },
+				{ href: '/library/tv', label: 'TV Shows', icon: Tv }
 			]
 		},
 		{ href: '/queue', label: 'Queue', icon: Download },

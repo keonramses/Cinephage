@@ -12,7 +12,7 @@
 </script>
 
 <a
-	href={resolvePath(`/person/${person.id}`)}
+	href={resolvePath(`/discover/person/${person.id}`)}
 	class="card w-32 shrink-0 bg-base-200 shadow-sm transition-all hover:shadow-md hover:ring-2 hover:ring-primary/50 sm:w-36 md:w-44"
 >
 	<figure class="aspect-[2/3] w-full overflow-hidden">

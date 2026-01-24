@@ -10,6 +10,10 @@ RUN apt-get update && apt-get install -y python3 make g++ && rm -rf /var/lib/apt
 
 # Copy package files first to leverage Docker cache
 COPY package*.json ./
+COPY .npmrc ./
+
+# Set Node.js memory limits to prevent npm memory leaks during build
+ENV NODE_OPTIONS="--max-old-space-size=4096"
 
 # Install all dependencies (including devDependencies for building)
 RUN npm ci
@@ -78,6 +82,9 @@ COPY --from=builder --chown=node:node /app/node_modules ./node_modules
 COPY --from=builder --chown=node:node /app/build ./build
 COPY --from=builder --chown=node:node /app/package.json ./package.json
 COPY --from=builder --chown=node:node /app/server.js ./server.js
+
+# Copy script to fix TV subtitle paths to be used with cmd 'npm run fix:tv-subtitles' - Temporary fix
+COPY --from=builder --chown=node:node /app/scripts/fix-tv-subtitle-paths.js ./scripts/fix-tv-subtitle-paths.js
 
 # Copy bundled indexers to separate location (not shadowed by volume mount)
 COPY --from=builder --chown=node:node /app/data/indexers ./bundled-indexers

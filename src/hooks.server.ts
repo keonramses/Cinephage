@@ -1,5 +1,5 @@
 import type { Handle, HandleServerError } from '@sveltejs/kit';
-import { json } from '@sveltejs/kit';
+import { json, redirect } from '@sveltejs/kit';
 import { randomUUID } from 'node:crypto';
 
 import { logger } from '$lib/logging';
@@ -375,6 +375,44 @@ export const handle: Handle = async ({ event, resolve }) => {
 
 	// Attach to locals for use in routes
 	event.locals.correlationId = correlationId;
+
+	// Route standardization redirects
+	const pathname = event.url.pathname;
+
+	if (
+		pathname === '/movies' ||
+		pathname === '/movies/' ||
+		pathname === '/library/movie' ||
+		pathname === '/library/movie/'
+	) {
+		throw redirect(308, '/library/movies');
+	}
+	if (pathname === '/tv' || pathname === '/tv/') {
+		throw redirect(308, '/library/tv');
+	}
+	if (
+		pathname === '/movie' ||
+		pathname === '/movie/' ||
+		pathname === '/discover/movie' ||
+		pathname === '/discover/movie/' ||
+		pathname === '/discover/tv' ||
+		pathname === '/discover/tv/' ||
+		pathname === '/discover/person' ||
+		pathname === '/discover/person/' ||
+		pathname === '/person' ||
+		pathname === '/person/'
+	) {
+		throw redirect(308, '/discover');
+	}
+	if (pathname.startsWith('/movie/')) {
+		throw redirect(308, `/discover/movie/${pathname.slice('/movie/'.length)}`);
+	}
+	if (pathname.startsWith('/tv/')) {
+		throw redirect(308, `/discover/tv/${pathname.slice('/tv/'.length)}`);
+	}
+	if (pathname.startsWith('/person/')) {
+		throw redirect(308, `/discover/person/${pathname.slice('/person/'.length)}`);
+	}
 
 	// Check if this is a streaming route - these handle their own errors
 	const isStreamingRoute = event.url.pathname.startsWith('/api/streaming/');

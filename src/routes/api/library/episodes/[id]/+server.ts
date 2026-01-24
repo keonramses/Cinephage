@@ -51,6 +51,20 @@ export const PATCH: RequestHandler = async ({ params, request }) => {
 			const settings = await monitoringScheduler.getSettings();
 
 			if (settings.searchOnMonitorEnabled) {
+				const [seriesRecord] = await db
+					.select({ monitored: series.monitored })
+					.from(series)
+					.where(eq(series.id, episode.seriesId))
+					.limit(1);
+
+				if (seriesRecord && !seriesRecord.monitored) {
+					logger.info('[API] Skipping search for episode in unmonitored series', {
+						episodeId: params.id,
+						seriesId: episode.seriesId
+					});
+					return json({ success: true });
+				}
+
 				// Fire and forget - don't block the response
 				searchOnAdd.searchForEpisode({ episodeId: params.id }).catch((err) => {
 					logger.error('[API] Background search on episode monitor enable failed', {

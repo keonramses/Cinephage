@@ -75,9 +75,9 @@ export function getMediaPoster(item: TmdbMediaItem): string | null {
  * Get the appropriate link path for a media item.
  */
 export function getMediaLink(item: TmdbMediaItem): string {
-	if (isMovie(item)) return `/movie/${item.id}`;
-	if (isTVShow(item)) return `/tv/${item.id}`;
-	return `/person/${item.id}`;
+	if (isMovie(item)) return `/discover/movie/${item.id}`;
+	if (isTVShow(item)) return `/discover/tv/${item.id}`;
+	return `/discover/person/${item.id}`;
 }
 
 /**

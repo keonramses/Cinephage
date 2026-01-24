@@ -418,6 +418,14 @@ class SearchOnAddService {
 				return { success: false, error: 'Series not found' };
 			}
 
+			if (!seriesData.monitored) {
+				logger.info('[SearchOnAdd] Skipping episode search for unmonitored series', {
+					episodeId,
+					seriesId: seriesData.id
+				});
+				return { success: true };
+			}
+
 			// Check if episode already has a file
 			// Episode files use episodeIds array, so we need to check if our episode is in any file
 			const allEpisodeFiles = await db.query.episodeFiles.findMany({

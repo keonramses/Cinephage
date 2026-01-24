@@ -64,9 +64,9 @@
 	// Get media link
 	function getMediaLink(activity: UnifiedActivity): string {
 		if (activity.mediaType === 'movie') {
-			return resolvePath(`/movies/${activity.mediaId}`);
+			return resolvePath(`/library/movie/${activity.mediaId}`);
 		}
-		return resolvePath(`/tv/${activity.seriesId || activity.mediaId}`);
+		return resolvePath(`/library/tv/${activity.seriesId || activity.mediaId}`);
 	}
 </script>
 
@@ -88,7 +88,10 @@
 	<!-- Stats Grid - Auto-fit for fluid column count based on available space -->
 	<div class="grid grid-cols-[repeat(auto-fit,minmax(160px,1fr))] gap-3 sm:gap-4">
 		<!-- Movies -->
-		<a href={resolve('/movies')} class="card bg-base-200 transition-colors hover:bg-base-300">
+		<a
+			href={resolve('/library/movies')}
+			class="card bg-base-200 transition-colors hover:bg-base-300"
+		>
 			<div class="card-body p-4">
 				<div class="flex items-center gap-3">
 					<div class="rounded-lg bg-primary/10 p-2">
@@ -109,7 +112,7 @@
 		</a>
 
 		<!-- TV Shows -->
-		<a href={resolve('/tv')} class="card bg-base-200 transition-colors hover:bg-base-300">
+		<a href={resolve('/library/tv')} class="card bg-base-200 transition-colors hover:bg-base-300">
 			<div class="card-body p-4">
 				<div class="flex items-center gap-3">
 					<div class="rounded-lg bg-secondary/10 p-2">
@@ -217,7 +220,7 @@
 								<Clapperboard class="h-5 w-5" />
 								Recently Added Movies
 							</h2>
-							<a href={resolve('/movies')} class="btn btn-ghost btn-sm">View All</a>
+							<a href={resolve('/library/movies')} class="btn btn-ghost btn-sm">View All</a>
 						</div>
 						<div
 							class="grid grid-cols-3 gap-2 sm:grid-cols-3 sm:gap-3 md:grid-cols-4 lg:grid-cols-6"
@@ -262,7 +265,7 @@
 								<Tv class="h-5 w-5" />
 								Recently Added TV Shows
 							</h2>
-							<a href={resolve('/tv')} class="btn btn-ghost btn-sm">View All</a>
+							<a href={resolve('/library/tv')} class="btn btn-ghost btn-sm">View All</a>
 						</div>
 						<div
 							class="grid grid-cols-3 gap-2 sm:grid-cols-3 sm:gap-3 md:grid-cols-4 lg:grid-cols-6"

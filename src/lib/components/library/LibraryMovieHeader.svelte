@@ -102,7 +102,7 @@
 				path={movie.backdropPath}
 				size="w780"
 				alt={movie.title}
-				class="h-full w-full object-cover opacity-20"
+				class="h-full w-full object-cover opacity-40"
 			/>
 		{/if}
 		<div

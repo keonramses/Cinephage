@@ -4,6 +4,7 @@
 		ChevronRight,
 		Eye,
 		EyeOff,
+		Lock,
 		Search,
 		Download,
 		Loader2,
@@ -156,6 +157,14 @@
 		if (autoSearchSeasonResult?.error) return 'failed';
 		return 'idle';
 	});
+	const seasonMonitorDisabled = $derived.by(() => !seriesMonitored);
+	const seasonMonitorTooltip = $derived.by(() =>
+		seriesMonitored
+			? season.monitored
+				? 'Season monitored'
+				: 'Season not monitored'
+			: 'Series is unmonitored. Enable series monitoring to monitor seasons.'
+	);
 
 	function getSeasonName(): string {
 		if (season.seasonNumber === 0) return 'Specials';
@@ -163,6 +172,7 @@
 	}
 
 	function handleSeasonMonitorToggle() {
+		if (!seriesMonitored) return;
 		if (onSeasonMonitorToggle) {
 			onSeasonMonitorToggle(season.id, !season.monitored);
 		}
@@ -200,7 +210,7 @@
 		class="flex w-full flex-col gap-3 p-4 transition-colors hover:bg-base-200 sm:flex-row sm:items-center sm:justify-between"
 	>
 		<!-- Clickable area for expand/collapse -->
-		<div class="flex flex-wrap items-start justify-between gap-3 sm:flex-nowrap">
+		<div class="flex w-full flex-wrap items-start gap-3 sm:flex-nowrap sm:items-center">
 			<button
 				class="flex min-w-0 flex-1 items-center gap-3 text-left"
 				onclick={() => (isOpen = !isOpen)}
@@ -214,7 +224,7 @@
 				<div class="min-w-0">
 					<h3 class="font-semibold">{getSeasonName()}</h3>
 					<div class="mt-1 flex flex-wrap items-center gap-2 text-sm text-base-content/60">
-						<span>{downloadedCount}/{totalCount} episodes</span>
+						<span class="whitespace-nowrap">{downloadedCount}/{totalCount} episodes</span>
 						{#if percentComplete === 100}
 							<span class="badge badge-xs badge-success">Complete</span>
 						{:else if percentComplete > 0}
@@ -225,14 +235,18 @@
 			</button>
 
 			<!-- Action buttons -->
-			<div class="flex shrink-0 items-center gap-2">
+			<div class="flex shrink-0 items-center gap-2 sm:ml-auto" title={seasonMonitorTooltip}>
 				<!-- Season monitor toggle -->
 				<button
-					class="btn btn-ghost btn-sm {season.monitored ? 'text-success' : 'text-base-content/40'}"
+					class="btn btn-ghost btn-sm {season.monitored
+						? 'text-success'
+						: 'text-base-content/40'} {seasonMonitorDisabled ? 'opacity-40' : ''}"
 					onclick={handleSeasonMonitorToggle}
-					title={season.monitored ? 'Season monitored' : 'Season not monitored'}
+					disabled={seasonMonitorDisabled}
 				>
-					{#if season.monitored}
+					{#if seasonMonitorDisabled}
+						<Lock size={16} />
+					{:else if season.monitored}
 						<Eye size={16} />
 					{:else}
 						<EyeOff size={16} />
