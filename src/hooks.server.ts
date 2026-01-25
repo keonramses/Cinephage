@@ -24,6 +24,7 @@ import { getNntpManager } from '$lib/server/streaming/usenet/NntpManager';
 import { getExtractionCacheManager } from '$lib/server/streaming/nzb/extraction/ExtractionCacheManager';
 import { getMediaBrowserNotifier } from '$lib/server/notifications/mediabrowser';
 import { getEpgScheduler } from '$lib/server/livetv/epg';
+import { initializeProviderFactory } from '$lib/server/subtitles/providers/SubtitleProviderFactory.js';
 
 /**
  * Content Security Policy header.
@@ -270,6 +271,11 @@ setImmediate(async () => {
 
 		// 1c. Warm the stream cache from database (fast, improves first playback)
 		initPersistentStreamCache().catch((e) => logger.error('Stream cache warming failed', e));
+
+		// 1d. Initialize subtitle provider registry (no provider warm-up)
+		initializeProviderFactory().catch((e) =>
+			logger.error('Subtitle provider registry init failed', e)
+		);
 
 		// 2. Register all services with ServiceManager for centralized lifecycle management
 		const serviceManager = getServiceManager();
