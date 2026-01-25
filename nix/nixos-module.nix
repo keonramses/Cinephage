@@ -68,14 +68,13 @@
 
       config = mkIf cfg.enable {
         # Create user and group
-        users.users.cinephage = {
-          name = cfg.user;
+        users.users."${cfg.user}" = {
           group = cfg.group;
           isSystemUser = true;
           description = "Cinephage service user";
         };
 
-        users.groups.cinephage = {
+        users.groups."${cfg.group}" = {
           name = cfg.group;
         };
 
