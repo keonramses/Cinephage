@@ -93,18 +93,12 @@
             DEFINITIONS_DIR="/var/lib/cinephage/data/indexers/definitions"
             BUNDLED_DIR="${cfg.package}/lib/data/indexers"
 
-            if [ -d "$BUNDLED_DIR" ]; then
-              # Check if definitions directory is missing or empty
-              if [ ! -d "$DEFINITIONS_DIR" ] || [ -z "$(ls -A "$DEFINITIONS_DIR" 2>/dev/null)" ]; then
-                echo "Initializing indexer definitions from bundled files..."
-                # Copy contents of bundled-indexers to data/indexers
-                cp -r "$BUNDLED_DIR"/* "$DEFINITIONS_DIR/"
-                echo "Copied indexer definitions from package"
-              else
-                echo "Indexer definitions already present ($(ls -1 "$DEFINITIONS_DIR" 2>/dev/null) files)"
-              fi
-            else
-              echo "Warning: Bundled indexers directory not found at $BUNDLED_DIR"
+            # Check if definitions directory is missing or empty
+            if [ ! -d "$DEFINITIONS_DIR" ] || [ -z "$(ls -A "$DEFINITIONS_DIR" 2>/dev/null)" ]; then
+              echo "Initializing indexer definitions from bundled files..."
+              # Copy contents of bundled-indexers to data/indexers
+              cp -r "$BUNDLED_DIR"/* "$DEFINITIONS_DIR/"
+              echo "Copied indexer definitions from package"
             fi
 
             # Set correct ownership
@@ -116,7 +110,7 @@
             User = cfg.user;
             Group = cfg.group;
             StateDirectory = "cinephage";
-            StateDirectoryMode = "0755";
+            StateDirectoryMode = "0750";
             WorkingDirectory = "/var/lib/cinephage";
             Restart = "on-failure";
             RestartSec = 5;
