@@ -64,6 +64,17 @@
             PORT = "3000";
           };
         };
+
+        media = mkOption {
+          type = types.listOf types.str;
+          default = [ ];
+          description = "List of media directories that Cinephage needs to access. These will be added to the service's ReadWritePaths.";
+          example = [
+            "/media/movies"
+            "/media/tv"
+            "/media/downloads"
+          ];
+        };
       };
 
       config = mkIf cfg.enable {
@@ -133,7 +144,7 @@
             # Security settings
             PrivateTmp = true;
             ProtectSystem = "strict";
-            ReadWritePaths = [ "/var/lib/cinephage" ];
+            ReadWritePaths = [ "/var/lib/cinephage" ] ++ cfg.media;
             NoNewPrivileges = true;
           };
         };
