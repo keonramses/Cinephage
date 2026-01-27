@@ -152,6 +152,13 @@
 							{#if list.autoAddBehavior !== 'disabled'}
 								<div class="badge badge-outline badge-info">Auto-add</div>
 							{/if}
+							{#if list.listSourceType === 'external-json'}
+								<div class="badge badge-outline badge-secondary">External</div>
+							{:else if list.listSourceType === 'trakt-list'}
+								<div class="badge badge-outline badge-accent">Trakt</div>
+							{:else if list.listSourceType === 'custom-manual'}
+								<div class="badge badge-outline badge-warning">Custom</div>
+							{/if}
 						</div>
 
 						<div class="divider my-2"></div>
