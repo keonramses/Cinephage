@@ -1346,6 +1346,14 @@ export class SmartListService {
 					...externalSourceConfig
 				};
 
+				// Merge user settings from presetSettings (for custom presets like tmdb-list:custom)
+				if (list.presetSettings) {
+					externalSourceConfig = {
+						...externalSourceConfig,
+						...list.presetSettings
+					};
+				}
+
 				// Add URL if preset has one (for external-json provider)
 				if (preset.url) {
 					externalSourceConfig.url = preset.url;

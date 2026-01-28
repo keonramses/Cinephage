@@ -1,5 +1,5 @@
 ---
-provider: stevenlu
+provider: external-json
 name: StevenLu Popular Movies
 description: Popular movies curated by Steven Lu using LLM-based evaluation
 icon: globe
