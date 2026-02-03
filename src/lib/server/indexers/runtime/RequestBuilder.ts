@@ -14,6 +14,7 @@ import { isMovieSearch } from '../types';
 import { TemplateEngine } from '../engine/TemplateEngine';
 import { FilterEngine } from '../engine/FilterEngine';
 import { logger } from '$lib/logging';
+import { encodeUrlParam } from '../http/EncodingUtils';
 
 /**
  * HTTP request representation.
@@ -444,6 +445,7 @@ export class RequestBuilder {
 			'query_term',
 			'name', // UNIT3D trackers use 'name' for keyword search
 			'search',
+			'nm', // RuTracker uses 'nm' for keyword search
 			'imdb', // Some trackers use 'imdb' instead of 'imdbid'
 			'imdbid',
 			'imdb_id',
@@ -485,23 +487,30 @@ export class RequestBuilder {
 		}
 
 		// Build request
+		const encoding = this.definition.encoding;
 		if (method === 'GET') {
-			// Add inputs as query parameters
-			const params = new URLSearchParams();
+			// Add inputs as query parameters with proper encoding
+			const queryParts: string[] = [];
 			for (const [key, value] of Object.entries(filteredInputs)) {
 				if (key === '$raw') {
 					// Raw query string, parse and add
 					const rawParts = value.split('&');
 					for (const part of rawParts) {
 						const [k, v] = part.split('=');
-						if (k) params.append(k, v ?? '');
+						if (k) {
+							const encodedK = encodeUrlParam(k, encoding);
+							const encodedV = v ? encodeUrlParam(v, encoding) : '';
+							queryParts.push(`${encodedK}=${encodedV}`);
+						}
 					}
 				} else {
-					params.append(key, value);
+					const encodedKey = encodeUrlParam(key, encoding);
+					const encodedValue = encodeUrlParam(value, encoding);
+					queryParts.push(`${encodedKey}=${encodedValue}`);
 				}
 			}
 
-			const queryString = params.toString();
+			const queryString = queryParts.join('&');
 			if (queryString) {
 				url += (url.includes('?') ? '&' : '?') + queryString;
 			}
@@ -524,19 +533,26 @@ export class RequestBuilder {
 				}
 				return { url, method, headers, body: JSON.stringify(jsonBody), searchPath: path };
 			} else {
-				// Form-encoded body (default)
-				const body = new URLSearchParams();
+				// Form-encoded body (default) with proper encoding
+				const bodyParts: string[] = [];
 				for (const [key, value] of Object.entries(filteredInputs)) {
 					if (key === '$raw') {
 						const rawParts = value.split('&');
 						for (const part of rawParts) {
 							const [k, v] = part.split('=');
-							if (k) body.append(k, v ?? '');
+							if (k) {
+								const encodedK = encodeUrlParam(k, encoding);
+								const encodedV = v ? encodeUrlParam(v, encoding) : '';
+								bodyParts.push(`${encodedK}=${encodedV}`);
+							}
 						}
 					} else {
-						body.append(key, value);
+						const encodedKey = encodeUrlParam(key, encoding);
+						const encodedValue = encodeUrlParam(value, encoding);
+						bodyParts.push(`${encodedKey}=${encodedValue}`);
 					}
 				}
+				const body = bodyParts.join('&');
 				return { url, method, headers, body, searchPath: path };
 			}
 		}

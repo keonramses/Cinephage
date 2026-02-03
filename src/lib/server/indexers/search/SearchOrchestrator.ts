@@ -226,8 +226,8 @@ export class SearchOrchestrator {
 		// Rank
 		const ranked = this.ranker.rank(filtered);
 
-		// Apply limit
-		const limited = ranked.slice(0, criteria.limit ?? 100);
+		// Apply limit (only if explicitly specified)
+		const limited = criteria.limit ? ranked.slice(0, criteria.limit) : ranked;
 
 		// Cache results (use enriched criteria for cache key consistency)
 		if (opts.useCache && limited.length > 0) {
@@ -408,7 +408,9 @@ export class SearchOrchestrator {
 		});
 
 		// Apply limit (releases are already sorted by totalScore from enricher)
-		const limited = smartDeduped.slice(0, enrichedCriteria.limit ?? 100);
+		const limited = enrichedCriteria.limit
+			? smartDeduped.slice(0, enrichedCriteria.limit)
+			: smartDeduped;
 
 		// Assign releaseWeight (position in final sorted results, 1 = best)
 		const withWeights = limited.map((release, index) => ({

@@ -19,6 +19,7 @@ export interface DownloadContext {
 	baseUrl: string;
 	cookies: Record<string, string>;
 	settings: Record<string, unknown>;
+	encoding?: string;
 }
 
 export interface DownloadRequest {
@@ -208,7 +209,8 @@ export class DownloadHandler {
 			const response = await cloudflareFetch(downloadUrl, {
 				method: 'GET',
 				headers,
-				timeout: 30000
+				timeout: 30000,
+				encoding: context.encoding
 			});
 			const $ = cheerio.load(response.body);
 
@@ -241,7 +243,8 @@ export class DownloadHandler {
 			method: method as 'GET' | 'POST',
 			headers: requestHeaders,
 			body: method === 'POST' ? body?.toString() : undefined,
-			timeout: 30000
+			timeout: 30000,
+			encoding: context.encoding
 		});
 
 		return {
@@ -277,7 +280,8 @@ export class DownloadHandler {
 			const cfResponse = await cloudflareFetch(downloadUrl, {
 				method: 'GET',
 				headers,
-				timeout: 30000
+				timeout: 30000,
+				encoding: context.encoding
 			});
 			content = cfResponse.body;
 		}
@@ -341,7 +345,8 @@ export class DownloadHandler {
 					const response = await cloudflareFetch(downloadUrl, {
 						method: 'GET',
 						headers,
-						timeout: 30000
+						timeout: 30000,
+						encoding: context.encoding
 					});
 					content = response.body;
 				}
