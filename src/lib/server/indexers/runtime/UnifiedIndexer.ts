@@ -197,7 +197,8 @@ export class UnifiedIndexer implements IIndexer {
 				? record.alternateUrls
 				: definition.links.slice(1),
 			userAgent: 'Cinephage/1.0',
-			rateLimit: rateLimit ?? { requests: 30, periodMs: 60_000 }
+			rateLimit: rateLimit ?? { requests: 30, periodMs: 60_000 },
+			encoding: definition.encoding
 		});
 
 		// Create database executor for internal streaming indexers
@@ -452,6 +453,12 @@ export class UnifiedIndexer implements IIndexer {
 	}): Promise<ReleaseResult[]> {
 		this.http.setCookies(this.cookies);
 
+		this.log.info('Executing search request', {
+			url: request.url,
+			method: request.method,
+			indexer: this.name
+		});
+
 		const response =
 			request.method === 'POST'
 				? await this.http.post(request.url, request.body!, {
@@ -462,6 +469,14 @@ export class UnifiedIndexer implements IIndexer {
 						headers: request.headers,
 						followRedirects: this.definition.followredirect ?? true
 					});
+
+		this.log.info('Search response received', {
+			status: response.status,
+			url: response.url,
+			bodyLength: response.body.length,
+			bodyPreview: response.body.substring(0, 500),
+			indexer: this.name
+		});
 
 		this.http.parseAndStoreCookies(response.headers);
 
@@ -498,6 +513,12 @@ export class UnifiedIndexer implements IIndexer {
 	 * Parse a response into release results
 	 */
 	private parseResponse(content: string, searchPath: unknown): ReleaseResult[] {
+		this.log.info('Parsing search response', {
+			indexer: this.name,
+			contentLength: content.length,
+			contentPreview: content.substring(0, 200)
+		});
+
 		const parseResult = this.responseParser.parse(
 			content,
 			searchPath as Parameters<typeof this.responseParser.parse>[1],
@@ -508,6 +529,12 @@ export class UnifiedIndexer implements IIndexer {
 				protocol: this.protocol
 			}
 		);
+
+		this.log.info('Parse complete', {
+			indexer: this.name,
+			releasesFound: parseResult.releases.length,
+			errors: parseResult.errors?.length ?? 0
+		});
 
 		if (parseResult.errors && parseResult.errors.length > 0) {
 			this.log.warn('Parse had errors', { errors: parseResult.errors });
@@ -531,29 +558,41 @@ export class UnifiedIndexer implements IIndexer {
 		const context = {
 			indexerId: this.id,
 			baseUrl: this.requestBuilder.getBaseUrl(),
-			settings: this.settings
+			settings: this.settings,
+			encoding: this.definition.encoding
 		};
 
 		const hasStoredCookies = await this.authManager.loadCookies(context);
 		if (hasStoredCookies) {
 			this.cookies = this.authManager.getCookies();
 			this.isLoggedIn = true;
-			this.log.debug('Loaded stored cookies');
+			this.log.info('Loaded stored cookies', {
+				indexer: this.name,
+				cookieCount: Object.keys(this.cookies).length,
+				cookieNames: Object.keys(this.cookies)
+			});
 			return;
 		}
 
-		this.log.info('Performing login');
+		this.log.info('Performing login', { indexer: this.name });
 		const loginResult = await this.authManager.login(context);
 
 		if (!loginResult.success) {
+			this.log.error('Login failed', { indexer: this.name, error: loginResult.error });
 			throw new Error(`Login failed: ${loginResult.error}`);
 		}
 
 		this.cookies = loginResult.cookies;
 		this.isLoggedIn = true;
 
+		this.log.info('Login successful', {
+			indexer: this.name,
+			cookieCount: Object.keys(this.cookies).length,
+			cookieNames: Object.keys(this.cookies)
+		});
+
 		await this.authManager.saveCookies(context);
-		this.log.debug('Login successful, cookies saved');
+		this.log.debug('Cookies saved', { indexer: this.name });
 	}
 
 	/**
@@ -618,7 +657,8 @@ export class UnifiedIndexer implements IIndexer {
 		const context = {
 			baseUrl: this.requestBuilder.getBaseUrl(),
 			cookies: this.cookies,
-			settings: this.settings
+			settings: this.settings,
+			encoding: this.definition.encoding
 		};
 
 		const result = await this.downloadHandler.resolveDownload(downloadUrl, context);
@@ -724,7 +764,8 @@ export class UnifiedIndexer implements IIndexer {
 				const context = {
 					baseUrl: this.requestBuilder.getBaseUrl(),
 					cookies: this.cookies,
-					settings: this.settings
+					settings: this.settings,
+					encoding: this.definition.encoding
 				};
 
 				this.log.debug('Calling resolveDownload', {

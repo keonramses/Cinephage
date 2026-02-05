@@ -376,10 +376,7 @@
 	{#if meta}
 		<div class="mb-4 space-y-2">
 			<div class="flex flex-wrap items-center gap-4 text-sm text-base-content/70">
-				<span
-					>{releases.length} of {meta.afterEnrichment ?? meta.totalResults} results{#if meta.afterEnrichment && meta.afterEnrichment > releases.length}
-						<span class="text-base-content/50">(limited)</span>{/if}</span
-				>
+				<span>{releases.length} of {meta.afterEnrichment ?? meta.totalResults} results</span>
 				{#if meta.rejectedCount}
 					<span class="text-warning">{meta.rejectedCount} rejected</span>
 				{/if}

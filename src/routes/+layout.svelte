@@ -18,7 +18,6 @@
 		Library,
 		User,
 		Filter,
-		Download,
 		Shield,
 		ListTodo,
 		FileSignature,
@@ -41,7 +40,6 @@
 				{ href: '/library/tv', label: 'TV Shows', icon: Tv }
 			]
 		},
-		{ href: '/queue', label: 'Queue', icon: Download },
 		{ href: '/activity', label: 'Activity', icon: Activity },
 		{
 			label: 'Live TV',

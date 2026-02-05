@@ -9,11 +9,13 @@ import { TemplateEngine } from '../engine/TemplateEngine';
 import { FilterEngine } from '../engine/FilterEngine';
 import { SelectorEngine } from '../engine/SelectorEngine';
 import { CookieStore } from './CookieStore';
+import { decodeBuffer } from '../http/EncodingUtils';
 
 export interface AuthContext {
 	indexerId: string;
 	baseUrl: string;
 	settings: Record<string, unknown>;
+	encoding?: string;
 }
 
 export interface LoginResult {
@@ -225,8 +227,10 @@ export class AuthManager {
 		const extracted = CookieStore.extractCookiesFromResponse(response);
 		this.cookies = CookieStore.mergeCookies(requestCookies, extracted.cookies);
 
-		// Check for errors
-		const content = await response.text();
+		// Check for errors - decode with proper encoding
+		const arrayBuffer = await response.arrayBuffer();
+		const buffer = Buffer.from(arrayBuffer);
+		const { text: content } = decodeBuffer(buffer, context.encoding);
 		const error = this.checkLoginError(response, content, login);
 		if (error) {
 			return { success: false, cookies: this.cookies, error };
@@ -270,7 +274,10 @@ export class AuthManager {
 		const pageExtracted = CookieStore.extractCookiesFromResponse(pageResponse);
 		this.cookies = CookieStore.mergeCookies(requestCookies, pageExtracted.cookies);
 
-		const pageContent = await pageResponse.text();
+		// Decode page content with proper encoding
+		const pageArrayBuffer = await pageResponse.arrayBuffer();
+		const pageBuffer = Buffer.from(pageArrayBuffer);
+		const { text: pageContent } = decodeBuffer(pageBuffer, context.encoding);
 		const $ = cheerio.load(pageContent);
 
 		// Find form
@@ -375,21 +382,42 @@ export class AuthManager {
 			}
 		}
 
-		// Submit form
+		// Submit form - DON'T follow redirects so we can capture cookies from 302 response
 		const submitResponse = await fetch(submitUrl, {
 			method: 'POST',
 			headers: submitHeaders,
 			body: formData,
-			redirect: 'follow'
+			redirect: 'manual'
 		});
 
-		// Update cookies from submit response
+		// Update cookies from submit response (BEFORE following redirect)
 		const submitExtracted = CookieStore.extractCookiesFromResponse(submitResponse);
 		this.cookies = CookieStore.mergeCookies(this.cookies, submitExtracted.cookies);
 
-		// Check for errors
-		const submitContent = await submitResponse.text();
-		const error = this.checkLoginError(submitResponse, submitContent, login);
+		// If we got a redirect, follow it manually
+		let finalResponse = submitResponse;
+		if (submitResponse.status >= 300 && submitResponse.status < 400) {
+			const redirectUrl = submitResponse.headers.get('location');
+			if (redirectUrl) {
+				const resolvedRedirectUrl = this.resolveUrl(redirectUrl, submitUrl);
+				finalResponse = await fetch(resolvedRedirectUrl, {
+					method: 'GET',
+					headers: {
+						Referer: submitUrl,
+						Cookie: CookieStore.buildCookieHeader(this.cookies)
+					}
+				});
+				// Extract any additional cookies from the redirect target
+				const redirectExtracted = CookieStore.extractCookiesFromResponse(finalResponse);
+				this.cookies = CookieStore.mergeCookies(this.cookies, redirectExtracted.cookies);
+			}
+		}
+
+		// Check for errors - decode with proper encoding
+		const finalArrayBuffer = await finalResponse.arrayBuffer();
+		const finalBuffer = Buffer.from(finalArrayBuffer);
+		const { text: finalContent } = decodeBuffer(finalBuffer, context.encoding);
+		const error = this.checkLoginError(finalResponse, finalContent, login);
 		if (error) {
 			return { success: false, cookies: this.cookies, error };
 		}
@@ -479,8 +507,10 @@ export class AuthManager {
 		const getExtracted = CookieStore.extractCookiesFromResponse(response);
 		this.cookies = getExtracted.cookies;
 
-		// Check for errors
-		const content = await response.text();
+		// Check for errors - decode with proper encoding
+		const arrayBuffer = await response.arrayBuffer();
+		const buffer = Buffer.from(arrayBuffer);
+		const { text: content } = decodeBuffer(buffer, context.encoding);
 		const error = this.checkLoginError(response, content, login);
 		if (error) {
 			return { success: false, cookies: this.cookies, error };
@@ -527,8 +557,10 @@ export class AuthManager {
 		const oneUrlExtracted = CookieStore.extractCookiesFromResponse(response);
 		this.cookies = oneUrlExtracted.cookies;
 
-		// Check for errors
-		const content = await response.text();
+		// Check for errors - decode with proper encoding
+		const arrayBuffer = await response.arrayBuffer();
+		const buffer = Buffer.from(arrayBuffer);
+		const { text: content } = decodeBuffer(buffer, context.encoding);
 		const error = this.checkLoginError(response, content, login);
 		if (error) {
 			return { success: false, cookies: this.cookies, error };

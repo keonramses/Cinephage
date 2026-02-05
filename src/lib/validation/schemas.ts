@@ -86,7 +86,7 @@ const baseSearchCriteriaSchema = z.object({
 	query: z.string().optional(),
 	categories: z.array(z.number().int()).optional(),
 	indexerIds: z.array(z.string()).optional(),
-	limit: z.number().int().min(1).max(500).default(100),
+	limit: z.number().int().min(1).optional(),
 	offset: z.number().int().min(0).default(0)
 });
 
@@ -199,7 +199,7 @@ export const searchQuerySchema = z.object({
 		.optional()
 		.transform((v) => v?.split(',')),
 	minSeeders: z.coerce.number().int().min(0).optional(),
-	limit: z.coerce.number().int().min(1).max(500).default(100),
+	limit: z.coerce.number().int().min(1).optional(),
 	// Movie/TV specific
 	imdbId: z.string().optional(),
 	tmdbId: z.coerce.number().int().positive().optional(),

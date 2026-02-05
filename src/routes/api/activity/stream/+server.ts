@@ -1,10 +1,28 @@
 import type { RequestHandler } from './$types';
 import { downloadMonitor } from '$lib/server/downloadClients/monitoring';
-import { db } from '$lib/server/db';
-import { movies, series, episodes } from '$lib/server/db/schema';
-import { eq } from 'drizzle-orm';
+import { mediaResolver } from '$lib/server/activity';
 import { extractReleaseGroup } from '$lib/server/indexers/parser/patterns/releaseGroup';
 import type { UnifiedActivity, ActivityStatus } from '$lib/types/activity';
+
+interface QueueItem {
+	id: string;
+	title: string;
+	movieId?: string | null;
+	seriesId?: string | null;
+	episodeIds?: string[] | null;
+	seasonNumber?: number | null;
+	status: string;
+	progress?: number;
+	size?: number | null;
+	indexerId?: string | null;
+	indexerName?: string | null;
+	protocol?: string | null;
+	quality?: { resolution?: string; source?: string; codec?: string; hdr?: string } | null;
+	addedAt: string;
+	completedAt?: string | null;
+	errorMessage?: string | null;
+	isUpgrade?: boolean;
+}
 
 /**
  * Server-Sent Events endpoint for real-time activity updates
@@ -40,82 +58,14 @@ export const GET: RequestHandler = async ({ request }) => {
 				}
 			}, 30000);
 
-			// Helper to convert queue item to activity
-			const queueItemToActivity = async (item: {
-				id: string;
-				title: string;
-				movieId?: string | null;
-				seriesId?: string | null;
-				episodeIds?: string[] | null;
-				seasonNumber?: number | null;
-				status: string;
-				progress?: number;
-				size?: number | null;
-				indexerId?: string | null;
-				indexerName?: string | null;
-				protocol?: string | null;
-				quality?: { resolution?: string; source?: string; codec?: string; hdr?: string } | null;
-				addedAt: string;
-				completedAt?: string | null;
-				errorMessage?: string | null;
-				isUpgrade?: boolean;
-			}): Promise<Partial<UnifiedActivity>> => {
-				let mediaType: 'movie' | 'episode' = 'movie';
-				let mediaId = item.movieId || '';
-				let mediaTitle = 'Unknown';
-				let mediaYear: number | null = null;
-				let seriesTitle: string | undefined;
-				let seasonNumber: number | undefined;
-				let episodeNumber: number | undefined;
-
-				// Fetch media info
-				if (item.movieId) {
-					const movie = await db
-						.select({ id: movies.id, title: movies.title, year: movies.year })
-						.from(movies)
-						.where(eq(movies.id, item.movieId))
-						.get();
-
-					if (movie) {
-						mediaType = 'movie';
-						mediaId = movie.id;
-						mediaTitle = movie.title;
-						mediaYear = movie.year;
-					}
-				} else if (item.seriesId) {
-					const s = await db
-						.select({ id: series.id, title: series.title, year: series.year })
-						.from(series)
-						.where(eq(series.id, item.seriesId))
-						.get();
-
-					if (s) {
-						mediaType = 'episode';
-						seriesTitle = s.title;
-						mediaYear = s.year;
-						seasonNumber = item.seasonNumber ?? undefined;
-
-						if (item.episodeIds && item.episodeIds.length > 0) {
-							const ep = await db
-								.select({
-									id: episodes.id,
-									episodeNumber: episodes.episodeNumber
-								})
-								.from(episodes)
-								.where(eq(episodes.id, item.episodeIds[0]))
-								.get();
-
-							if (ep) {
-								mediaId = ep.id;
-								episodeNumber = ep.episodeNumber ?? undefined;
-								mediaTitle = `${s.title} S${String(seasonNumber).padStart(2, '0')}E${String(episodeNumber).padStart(2, '0')}`;
-							}
-						} else {
-							mediaId = s.id;
-							mediaTitle = item.seasonNumber ? `${s.title} Season ${item.seasonNumber}` : s.title;
-						}
-					}
-				}
+			// Helper to convert queue item to activity using shared resolver
+			const queueItemToActivity = async (item: QueueItem): Promise<Partial<UnifiedActivity>> => {
+				const mediaInfo = await mediaResolver.resolveDownloadMediaInfo({
+					movieId: item.movieId,
+					seriesId: item.seriesId,
+					episodeIds: item.episodeIds,
+					seasonNumber: item.seasonNumber
+				});
 
 				// Map status
 				let status: ActivityStatus = 'downloading';
@@ -127,13 +77,13 @@ export const GET: RequestHandler = async ({ request }) => {
 
 				return {
 					id: `queue-${item.id}`,
-					mediaType,
-					mediaId,
-					mediaTitle,
-					mediaYear,
-					seriesTitle,
-					seasonNumber,
-					episodeNumber,
+					mediaType: mediaInfo.mediaType,
+					mediaId: mediaInfo.mediaId,
+					mediaTitle: mediaInfo.mediaTitle,
+					mediaYear: mediaInfo.mediaYear,
+					seriesTitle: mediaInfo.seriesTitle,
+					seasonNumber: mediaInfo.seasonNumber,
+					episodeNumber: mediaInfo.episodeNumber,
 					releaseTitle: item.title,
 					quality: item.quality ?? null,
 					releaseGroup: releaseGroup?.group ?? null,
@@ -154,9 +104,7 @@ export const GET: RequestHandler = async ({ request }) => {
 			// Event handlers
 			const onQueueAdded = async (item: unknown) => {
 				try {
-					const activity = await queueItemToActivity(
-						item as Parameters<typeof queueItemToActivity>[0]
-					);
+					const activity = await queueItemToActivity(item as QueueItem);
 					send('activity:new', activity);
 				} catch {
 					// Error converting item
@@ -165,7 +113,7 @@ export const GET: RequestHandler = async ({ request }) => {
 
 			const onQueueUpdated = async (item: unknown) => {
 				try {
-					const typedItem = item as Parameters<typeof queueItemToActivity>[0];
+					const typedItem = item as QueueItem;
 					// For progress updates, send minimal data
 					send('activity:progress', {
 						id: `queue-${typedItem.id}`,
@@ -179,9 +127,7 @@ export const GET: RequestHandler = async ({ request }) => {
 
 			const onQueueCompleted = async (item: unknown) => {
 				try {
-					const activity = await queueItemToActivity(
-						item as Parameters<typeof queueItemToActivity>[0]
-					);
+					const activity = await queueItemToActivity(item as QueueItem);
 					send('activity:updated', { ...activity, status: 'downloading' });
 				} catch {
 					// Error
@@ -190,7 +136,7 @@ export const GET: RequestHandler = async ({ request }) => {
 
 			const onQueueImported = async (data: unknown) => {
 				try {
-					const typedData = data as { queueItem: Parameters<typeof queueItemToActivity>[0] };
+					const typedData = data as { queueItem: QueueItem };
 					const activity = await queueItemToActivity(typedData.queueItem);
 					send('activity:updated', { ...activity, status: 'imported' });
 				} catch {
@@ -200,10 +146,7 @@ export const GET: RequestHandler = async ({ request }) => {
 
 			const onQueueFailed = async (data: unknown) => {
 				try {
-					const typedData = data as {
-						queueItem: Parameters<typeof queueItemToActivity>[0];
-						error: string;
-					};
+					const typedData = data as { queueItem: QueueItem; error: string };
 					const activity = await queueItemToActivity(typedData.queueItem);
 					send('activity:updated', {
 						...activity,

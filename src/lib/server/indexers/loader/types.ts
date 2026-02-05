@@ -138,6 +138,9 @@ export interface IndexerDefinition {
 	/** Request delay in seconds between requests */
 	requestDelay?: number;
 
+	/** Response encoding (e.g., 'UTF-8', 'windows-1251') */
+	encoding?: string;
+
 	// === Metadata ===
 
 	/** When this definition was loaded */
@@ -449,6 +452,7 @@ export function yamlToUnifiedDefinition(
 		supportedCategories,
 		capabilities,
 		requestDelay: def.requestdelay,
+		encoding: def.encoding,
 		loadedAt: new Date(),
 		filePath
 	};
