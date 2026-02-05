@@ -104,12 +104,6 @@
 		return item.title ?? item.name ?? 'Unknown';
 	}
 
-	function _getYear(item: PreviewItem): string {
-		const date = item.release_date ?? item.first_air_date;
-		if (!date) return '';
-		return date.substring(0, 4);
-	}
-
 	function getPosterUrl(path: string | null): string {
 		if (!path) return '';
 		// Check if it's already a full URL (e.g., from IMDb)
