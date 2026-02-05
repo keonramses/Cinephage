@@ -133,7 +133,7 @@
 		</a>
 
 		<!-- Active Downloads -->
-		<a href={resolve('/queue')} class="card bg-base-200 transition-colors hover:bg-base-300">
+		<a href={resolve('/activity')} class="card bg-base-200 transition-colors hover:bg-base-300">
 			<div class="card-body p-4">
 				<div class="flex items-center gap-3">
 					<div class="rounded-lg bg-accent/10 p-2">
@@ -473,9 +473,9 @@
 					<Search class="h-4 w-4" />
 					Discover
 				</a>
-				<a href={resolve('/queue')} class="btn btn-outline btn-sm">
+				<a href={resolve('/activity')} class="btn btn-outline btn-sm">
 					<Download class="h-4 w-4" />
-					View Queue
+					View Activity
 				</a>
 				<a href={resolve('/settings/integrations/indexers')} class="btn btn-outline btn-sm">
 					<TrendingUp class="h-4 w-4" />
