@@ -20,6 +20,7 @@
 		Folder
 	} from 'lucide-svelte';
 	import { toasts } from '$lib/stores/toast.svelte';
+	import { logger } from '$lib/logging';
 
 	interface Props {
 		activity: UnifiedActivity | null;
@@ -75,7 +76,11 @@
 			await onPause(activity.queueItemId);
 			toasts.success('Download paused');
 		} catch (error) {
-			toasts.error('Failed to pause download');
+			logger.error('Failed to pause download', error, {
+				queueItemId: activity?.queueItemId
+			});
+			const message = error instanceof Error ? error.message : 'Failed to pause download';
+			toasts.error(message);
 		} finally {
 			actionLoading = false;
 		}
@@ -88,7 +93,11 @@
 			await onResume(activity.queueItemId);
 			toasts.success('Download resumed');
 		} catch (error) {
-			toasts.error('Failed to resume download');
+			logger.error('Failed to resume download', error, {
+				queueItemId: activity?.queueItemId
+			});
+			const message = error instanceof Error ? error.message : 'Failed to resume download';
+			toasts.error(message);
 		} finally {
 			actionLoading = false;
 		}
@@ -102,7 +111,11 @@
 			toasts.success('Download removed');
 			onClose();
 		} catch (error) {
-			toasts.error('Failed to remove download');
+			logger.error('Failed to remove download', error, {
+				queueItemId: activity?.queueItemId
+			});
+			const message = error instanceof Error ? error.message : 'Failed to remove download';
+			toasts.error(message);
 		} finally {
 			actionLoading = false;
 		}
@@ -115,7 +128,11 @@
 			await onRetry(activity.queueItemId);
 			toasts.success('Download retry initiated');
 		} catch (error) {
-			toasts.error('Failed to retry download');
+			logger.error('Failed to retry download', error, {
+				queueItemId: activity?.queueItemId
+			});
+			const message = error instanceof Error ? error.message : 'Failed to retry download';
+			toasts.error(message);
 		} finally {
 			actionLoading = false;
 		}
@@ -337,7 +354,7 @@
 								<div>
 									<span class="text-sm text-base-content/60">Timeline</span>
 									<div class="mt-2 space-y-2">
-										{#each activity.timeline as event, i}
+										{#each activity.timeline as event, i (event.timestamp + '-' + i)}
 											<div class="flex items-center gap-3">
 												<div
 													class="flex h-6 w-6 items-center justify-center rounded-full bg-base-200 text-xs"
@@ -454,7 +471,7 @@
 								<div>
 									<h4 class="mb-3 font-medium">Custom Formats</h4>
 									<div class="space-y-2">
-										{#each details.scoreBreakdown.customFormats as format}
+										{#each details.scoreBreakdown.customFormats as format (format.name)}
 											<div class="flex items-center justify-between rounded-lg bg-base-200 p-3">
 												<span>{format.name}</span>
 												<div class="flex items-center gap-2">
@@ -524,7 +541,7 @@
 								<div>
 									<h4 class="mb-3 font-medium">Files Imported</h4>
 									<div class="space-y-2">
-										{#each details.filesImported as file}
+										{#each details.filesImported as file (file.path)}
 											<div class="flex items-center justify-between rounded-lg bg-base-200 p-3">
 												<code class="text-sm">{file.path}</code>
 												<span class="text-sm text-base-content/60">{formatBytes(file.size)}</span>
@@ -549,7 +566,7 @@
 							{/if}
 
 							<div class="space-y-2">
-								{#each details.searchResults as result, i}
+								{#each details.searchResults as result (result.title)}
 									<div
 										class="rounded-lg border border-base-300 p-3 {result.rejected
 											? 'opacity-60'
@@ -588,7 +605,7 @@
 								<div class="mt-6">
 									<h4 class="mb-3 font-medium">Import Log</h4>
 									<div class="space-y-2">
-										{#each details.importLog as log}
+										{#each details.importLog as log (log.timestamp + '-' + log.step)}
 											<div class="flex items-start gap-3 rounded-lg bg-base-200 p-3">
 												{#if log.success}
 													<CheckCircle2 class="h-4 w-4 text-success" />

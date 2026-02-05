@@ -18,7 +18,6 @@
 		Library,
 		User,
 		Filter,
-		Download,
 		Shield,
 		ListTodo,
 		FileSignature,

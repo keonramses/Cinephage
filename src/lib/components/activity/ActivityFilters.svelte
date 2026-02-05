@@ -46,8 +46,8 @@
 	];
 
 	function applyDatePreset(days: number) {
-		const end = new Date();
-		const start = new Date();
+		const end = $state(new Date());
+		const start = $state(new Date());
 		start.setDate(start.getDate() - days);
 		// For "Today", set start to beginning of day
 		if (days === 0) {
@@ -171,7 +171,7 @@
 
 			<!-- Date Presets -->
 			<div class="join">
-				{#each datePresets as preset}
+				{#each datePresets as preset (preset.label)}
 					<button
 						class="btn join-item btn-ghost btn-sm"
 						onclick={() => applyDatePreset(preset.days)}
@@ -202,7 +202,7 @@
 						value={filters.status}
 						onchange={(e) => updateFilter('status', e.currentTarget.value)}
 					>
-						{#each statusOptions as option}
+						{#each statusOptions as option (option.value)}
 							<option value={option.value}>{option.label}</option>
 						{/each}
 					</select>
@@ -219,7 +219,7 @@
 						value={filters.protocol || 'all'}
 						onchange={(e) => updateFilter('protocol', e.currentTarget.value)}
 					>
-						{#each protocolOptions as option}
+						{#each protocolOptions as option (option.value)}
 							<option value={option.value}>{option.label}</option>
 						{/each}
 					</select>
@@ -237,7 +237,7 @@
 						onchange={(e) => updateFilter('indexer', e.currentTarget.value || undefined)}
 					>
 						<option value="">All Indexers</option>
-						{#each filterOptions.indexers as indexer}
+						{#each filterOptions.indexers as indexer (indexer.name)}
 							<option value={indexer.name}>{indexer.name}</option>
 						{/each}
 					</select>
@@ -255,7 +255,7 @@
 						onchange={(e) => updateFilter('downloadClientId', e.currentTarget.value || undefined)}
 					>
 						<option value="">All Clients</option>
-						{#each filterOptions.downloadClients as client}
+						{#each filterOptions.downloadClients as client (client.id)}
 							<option value={client.id}>{client.name}</option>
 						{/each}
 					</select>
@@ -273,7 +273,7 @@
 						onchange={(e) => updateFilter('resolution', e.currentTarget.value || undefined)}
 					>
 						<option value="">All Resolutions</option>
-						{#each resolutionOptions as res}
+						{#each resolutionOptions as res (res)}
 							<option value={res}>{res}</option>
 						{/each}
 					</select>

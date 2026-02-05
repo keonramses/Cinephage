@@ -12,7 +12,7 @@
 		ActivityDetails,
 		ActivityFilters as FiltersType
 	} from '$lib/types/activity';
-	import { Activity, RefreshCw, Loader2, SlidersHorizontal } from 'lucide-svelte';
+	import { Activity, RefreshCw, Loader2 } from 'lucide-svelte';
 
 	let { data } = $props();
 
@@ -84,8 +84,8 @@
 
 		eventSource.addEventListener('activity:progress', (event) => {
 			const { id, progress, status } = JSON.parse(event.data);
-			activities = activities.map(
-				(a = a.id === id ? { ...a, downloadProgress: progress, status: status || a.status } : a)
+			activities = activities.map((a) =>
+				a.id === id ? { ...a, downloadProgress: progress, status: status || a.status } : a
 			);
 		});
 

@@ -92,7 +92,7 @@
 	<div class="flex flex-wrap items-center gap-2">
 		<span class="text-sm text-base-content/60">Active filters:</span>
 
-		{#each activeFilters as [key, value]}
+		{#each activeFilters as [key, value] (key)}
 			{#if key !== 'startDate' && key !== 'endDate'}
 				{@const Icon = getFilterIcon(key)}
 				<div class="badge gap-1 badge-primary">

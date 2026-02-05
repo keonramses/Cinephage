@@ -1848,7 +1848,7 @@ export const monitoringHistoryRelations = relations(monitoringHistory, ({ one })
 /**
  * Activities Relations
  */
-export const activitiesRelations = relations(activities, ({ one, many }) => ({
+export const activitiesRelations = relations(activities, ({ one }) => ({
 	movie: one(movies, {
 		fields: [activities.movieId],
 		references: [movies.id]
