@@ -4,8 +4,15 @@
 	import { goto, invalidateAll } from '$app/navigation';
 	import { resolvePath } from '$lib/utils/routing';
 	import ActivityTable from '$lib/components/activity/ActivityTable.svelte';
-	import type { UnifiedActivity } from '$lib/types/activity';
-	import { Activity, Search, RefreshCw, Loader2 } from 'lucide-svelte';
+	import ActivityDetailModal from '$lib/components/activity/ActivityDetailModal.svelte';
+	import ActivityFilters from '$lib/components/activity/ActivityFilters.svelte';
+	import ActiveFilters from '$lib/components/activity/ActiveFilters.svelte';
+	import type {
+		UnifiedActivity,
+		ActivityDetails,
+		ActivityFilters as FiltersType
+	} from '$lib/types/activity';
+	import { Activity, RefreshCw, Loader2, SlidersHorizontal } from 'lucide-svelte';
 
 	let { data } = $props();
 
@@ -13,10 +20,12 @@
 	let activities = $state<UnifiedActivity[]>([]);
 	let total = $state(0);
 
-	// Filter state
-	let statusFilter = $state('all');
-	let mediaTypeFilter = $state('all');
-	let searchQuery = $state('');
+	// Filter state - initialize from URL/data
+	let filters = $state<FiltersType>({
+		status: 'all',
+		mediaType: 'all',
+		protocol: 'all'
+	});
 
 	// Sort state
 	let sortField = $state('time');
@@ -31,14 +40,18 @@
 
 	let hasInitialized = $state(false);
 
+	// Detail modal state
+	let selectedActivity = $state<UnifiedActivity | null>(null);
+	let activityDetails = $state<ActivityDetails | null>(null);
+	let detailsLoading = $state(false);
+	let isModalOpen = $state(false);
+
 	// Update activities when data changes (navigation)
 	$effect(() => {
 		activities = data.activities;
 		total = data.total;
-		if (!hasInitialized) {
-			statusFilter = data.filters.status || 'all';
-			mediaTypeFilter = data.filters.mediaType || 'all';
-			searchQuery = data.filters.search || '';
+		if (!hasInitialized && data.filters) {
+			filters = { ...data.filters };
 			hasInitialized = true;
 		}
 	});
@@ -71,8 +84,8 @@
 
 		eventSource.addEventListener('activity:progress', (event) => {
 			const { id, progress, status } = JSON.parse(event.data);
-			activities = activities.map((a) =>
-				a.id === id ? { ...a, downloadProgress: progress, status: status || a.status } : a
+			activities = activities.map(
+				(a = a.id === id ? { ...a, downloadProgress: progress, status: status || a.status } : a)
 			);
 		});
 
@@ -88,12 +101,22 @@
 	}
 
 	// Apply filters via URL navigation
-	async function applyFilters() {
+	async function applyFilters(newFilters: FiltersType) {
+		filters = newFilters;
 		isLoading = true;
+
 		const params = new SvelteURLSearchParams();
-		if (statusFilter !== 'all') params.set('status', statusFilter);
-		if (mediaTypeFilter !== 'all') params.set('mediaType', mediaTypeFilter);
-		if (searchQuery) params.set('search', searchQuery);
+		if (filters.status !== 'all') params.set('status', filters.status!);
+		if (filters.mediaType !== 'all') params.set('mediaType', filters.mediaType!);
+		if (filters.search) params.set('search', filters.search);
+		if (filters.protocol !== 'all') params.set('protocol', filters.protocol!);
+		if (filters.indexer) params.set('indexer', filters.indexer);
+		if (filters.releaseGroup) params.set('releaseGroup', filters.releaseGroup);
+		if (filters.resolution) params.set('resolution', filters.resolution);
+		if (filters.isUpgrade) params.set('isUpgrade', 'true');
+		if (filters.downloadClientId) params.set('downloadClientId', filters.downloadClientId);
+		if (filters.startDate) params.set('startDate', filters.startDate);
+		if (filters.endDate) params.set('endDate', filters.endDate);
 
 		const queryString = params.toString();
 		await goto(resolvePath(`/activity${queryString ? `?${queryString}` : ''}`), {
@@ -102,13 +125,24 @@
 		isLoading = false;
 	}
 
-	// Handle search input
-	let searchTimeout: ReturnType<typeof setTimeout>;
-	function handleSearchInput() {
-		clearTimeout(searchTimeout);
-		searchTimeout = setTimeout(() => {
-			applyFilters();
-		}, 300);
+	// Remove a specific filter
+	async function removeFilter(key: keyof FiltersType) {
+		const newFilters = { ...filters };
+		if (key === 'status' || key === 'mediaType' || key === 'protocol') {
+			newFilters[key] = 'all';
+		} else {
+			delete newFilters[key];
+		}
+		await applyFilters(newFilters);
+	}
+
+	// Clear all filters
+	async function clearAllFilters() {
+		await applyFilters({
+			status: 'all',
+			mediaType: 'all',
+			protocol: 'all'
+		});
 	}
 
 	// Handle sort
@@ -164,9 +198,18 @@
 			const apiUrl = new URL('/api/activity', window.location.origin);
 			apiUrl.searchParams.set('limit', '50');
 			apiUrl.searchParams.set('offset', String(activities.length));
-			if (statusFilter !== 'all') apiUrl.searchParams.set('status', statusFilter);
-			if (mediaTypeFilter !== 'all') apiUrl.searchParams.set('mediaType', mediaTypeFilter);
-			if (searchQuery) apiUrl.searchParams.set('search', searchQuery);
+			if (filters.status !== 'all') apiUrl.searchParams.set('status', filters.status!);
+			if (filters.mediaType !== 'all') apiUrl.searchParams.set('mediaType', filters.mediaType!);
+			if (filters.search) apiUrl.searchParams.set('search', filters.search);
+			if (filters.protocol !== 'all') apiUrl.searchParams.set('protocol', filters.protocol!);
+			if (filters.indexer) apiUrl.searchParams.set('indexer', filters.indexer);
+			if (filters.releaseGroup) apiUrl.searchParams.set('releaseGroup', filters.releaseGroup);
+			if (filters.resolution) apiUrl.searchParams.set('resolution', filters.resolution);
+			if (filters.isUpgrade) apiUrl.searchParams.set('isUpgrade', 'true');
+			if (filters.downloadClientId)
+				apiUrl.searchParams.set('downloadClientId', filters.downloadClientId);
+			if (filters.startDate) apiUrl.searchParams.set('startDate', filters.startDate);
+			if (filters.endDate) apiUrl.searchParams.set('endDate', filters.endDate);
 
 			const response = await fetch(apiUrl.toString());
 			const result = await response.json();
@@ -186,6 +229,59 @@
 		isLoading = true;
 		await invalidateAll();
 		isLoading = false;
+	}
+
+	// Open detail modal
+	async function openDetailModal(activity: UnifiedActivity) {
+		selectedActivity = activity;
+		isModalOpen = true;
+		detailsLoading = true;
+		activityDetails = null;
+
+		// Fetch activity details
+		try {
+			const response = await fetch(`/api/activity/${activity.id}/details`);
+			if (response.ok) {
+				const data = await response.json();
+				activityDetails = data.details;
+			}
+		} catch (error) {
+			console.error('Failed to fetch activity details:', error);
+		}
+
+		detailsLoading = false;
+	}
+
+	function closeModal() {
+		isModalOpen = false;
+		selectedActivity = null;
+		activityDetails = null;
+	}
+
+	// Queue actions
+	async function handlePause(id: string) {
+		const response = await fetch(`/api/queue/${id}/pause`, { method: 'POST' });
+		if (!response.ok) throw new Error('Failed to pause');
+		await invalidateAll();
+	}
+
+	async function handleResume(id: string) {
+		const response = await fetch(`/api/queue/${id}/resume`, { method: 'POST' });
+		if (!response.ok) throw new Error('Failed to resume');
+		await invalidateAll();
+	}
+
+	async function handleRemove(id: string) {
+		const response = await fetch(`/api/queue/${id}`, { method: 'DELETE' });
+		if (!response.ok) throw new Error('Failed to remove');
+		await invalidateAll();
+		closeModal();
+	}
+
+	async function handleRetry(id: string) {
+		const response = await fetch(`/api/queue/${id}/retry`, { method: 'POST' });
+		if (!response.ok) throw new Error('Failed to retry');
+		await invalidateAll();
 	}
 </script>
 
@@ -209,67 +305,16 @@
 		</button>
 	</div>
 
-	<!-- Filters -->
-	<div class="card bg-base-200">
-		<div class="card-body p-4">
-			<div class="flex flex-wrap items-center gap-4">
-				<!-- Media Type Filter -->
-				<div class="form-control">
-					<label class="label py-0" for="activity-media-type">
-						<span class="label-text text-xs">Media Type</span>
-					</label>
-					<select
-						id="activity-media-type"
-						class="select-bordered select select-sm"
-						bind:value={mediaTypeFilter}
-						onchange={applyFilters}
-					>
-						<option value="all">All</option>
-						<option value="movie">Movies</option>
-						<option value="tv">TV Shows</option>
-					</select>
-				</div>
+	<!-- Filters Component -->
+	<ActivityFilters
+		{filters}
+		filterOptions={data.filterOptions}
+		onFiltersChange={applyFilters}
+		onClearFilters={clearAllFilters}
+	/>
 
-				<!-- Status Filter -->
-				<div class="form-control">
-					<label class="label py-0" for="activity-status">
-						<span class="label-text text-xs">Status</span>
-					</label>
-					<select
-						id="activity-status"
-						class="select-bordered select select-sm"
-						bind:value={statusFilter}
-						onchange={applyFilters}
-					>
-						<option value="all">All</option>
-						<option value="success">Success</option>
-						<option value="downloading">Downloading</option>
-						<option value="failed">Failed</option>
-						<option value="rejected">Rejected</option>
-						<option value="no_results">No Results</option>
-					</select>
-				</div>
-
-				<!-- Search -->
-				<div class="form-control flex-1">
-					<label class="label py-0" for="activity-search">
-						<span class="label-text text-xs">Search</span>
-					</label>
-					<div class="relative">
-						<Search class="absolute top-1/2 left-3 h-4 w-4 -translate-y-1/2 text-base-content/50" />
-						<input
-							id="activity-search"
-							type="text"
-							placeholder="Search media or release..."
-							class="input-bordered input input-sm w-full pl-9"
-							bind:value={searchQuery}
-							oninput={handleSearchInput}
-						/>
-					</div>
-				</div>
-			</div>
-		</div>
-	</div>
+	<!-- Active Filters Display -->
+	<ActiveFilters {filters} onFilterRemove={removeFilter} onClearAll={clearAllFilters} />
 
 	<!-- Activity Stats -->
 	<div class="flex items-center gap-4 text-sm text-base-content/70">
@@ -288,7 +333,13 @@
 			<Loader2 class="h-8 w-8 animate-spin" />
 		</div>
 	{:else}
-		<ActivityTable {activities} {sortField} {sortDirection} onSort={handleSort} />
+		<ActivityTable
+			{activities}
+			{sortField}
+			{sortDirection}
+			onSort={handleSort}
+			onRowClick={openDetailModal}
+		/>
 
 		<!-- Load More -->
 		{#if data.hasMore}
@@ -303,3 +354,17 @@
 		{/if}
 	{/if}
 </div>
+
+<!-- Detail Modal -->
+{#if isModalOpen && selectedActivity}
+	<ActivityDetailModal
+		activity={selectedActivity}
+		details={activityDetails}
+		loading={detailsLoading}
+		onClose={closeModal}
+		onPause={handlePause}
+		onResume={handleResume}
+		onRemove={handleRemove}
+		onRetry={handleRetry}
+	/>
+{/if}

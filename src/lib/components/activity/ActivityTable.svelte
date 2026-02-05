@@ -23,6 +23,7 @@
 		sortField?: string;
 		sortDirection?: 'asc' | 'desc';
 		onSort?: (field: string) => void;
+		onRowClick?: (activity: UnifiedActivity) => void;
 		compact?: boolean;
 	}
 
@@ -31,6 +32,7 @@
 		sortField = 'time',
 		sortDirection = 'desc',
 		onSort,
+		onRowClick,
 		compact = false
 	}: Props = $props();
 
@@ -325,7 +327,16 @@
 					{@const config = statusConfig[activity.status] || statusConfig.no_results}
 					{@const StatusIcon = config.icon}
 					{@const isExpanded = expandedRows.has(activity.id)}
-					<tr class="hover cursor-pointer" onclick={() => toggleRow(activity.id)}>
+					<tr
+						class="hover cursor-pointer"
+						onclick={() => {
+							if (onRowClick) {
+								onRowClick(activity);
+							} else {
+								toggleRow(activity.id);
+							}
+						}}
+					>
 						<!-- Expand indicator -->
 						<td class="w-10">
 							{#if activity.timeline.length > 0}
