@@ -1,5 +1,6 @@
 <script lang="ts">
 	import type { PageData } from './$types';
+	import type { EpisodeFileInfo } from './+page.server';
 	import {
 		LibrarySeriesHeader,
 		SeasonAccordion,
@@ -13,26 +14,132 @@
 	import { toasts } from '$lib/stores/toast.svelte';
 	import type { SeriesEditData } from '$lib/components/library/SeriesEditModal.svelte';
 	import type { SearchMode } from '$lib/components/search/InteractiveSearchModal.svelte';
-	import { CheckSquare, FileEdit } from 'lucide-svelte';
+	import { CheckSquare, FileEdit, Radio, WifiOff, Loader2 } from 'lucide-svelte';
 	import { SvelteSet, SvelteMap } from 'svelte/reactivity';
 	import { page } from '$app/stores';
 	import { goto } from '$app/navigation';
+	import { createSSE } from '$lib/sse';
 
 	let { data }: { data: PageData } = $props();
 
+	// Reactive data that will be updated via SSE
+	let series = $state(data.series);
+	let seasons = $state(data.seasons);
+	let queueItems = $state(data.queueItems);
+
+	// SSE Connection for real-time updates
+	const sse = createSSE<{
+		'media:initial': {
+			series: typeof series;
+			seasons: typeof seasons;
+			queueItems: typeof queueItems;
+		};
+		'queue:updated': {
+			id: string;
+			title: string;
+			status: string;
+			progress: number | null;
+			episodeIds?: string[];
+			seasonNumber?: number;
+		};
+		'file:added': {
+			file: EpisodeFileInfo;
+			episodeIds: string[];
+			seasonNumber: number;
+			wasUpgrade: boolean;
+			replacedFileIds?: string[];
+		};
+		'file:removed': { fileId: string; episodeIds: string[] };
+	}>(`/api/library/series/${series.id}/stream`, {
+		'media:initial': (payload) => {
+			series = payload.series;
+			seasons = payload.seasons;
+			queueItems = payload.queueItems;
+		},
+		'queue:updated': (payload) => {
+			if (
+				payload.status === 'imported' ||
+				payload.status === 'removed' ||
+				payload.status === 'failed'
+			) {
+				// Remove from queue if terminal state
+				queueItems = queueItems.filter((q) => q.id !== payload.id);
+			} else {
+				// Update or add queue item
+				const existingIndex = queueItems.findIndex((q) => q.id === payload.id);
+				const newQueueItem = {
+					id: payload.id,
+					title: payload.title,
+					status: payload.status,
+					progress: payload.progress,
+					episodeIds: payload.episodeIds || null,
+					seasonNumber: payload.seasonNumber || null
+				};
+				if (existingIndex >= 0) {
+					queueItems[existingIndex] = newQueueItem;
+				} else {
+					queueItems = [...queueItems, newQueueItem];
+				}
+			}
+		},
+		'file:added': (payload) => {
+			// Find the season
+			const seasonIndex = seasons.findIndex((s) => s.seasonNumber === payload.seasonNumber);
+			if (seasonIndex === -1) return;
+
+			// Update episodes with the new file
+			for (const episodeId of payload.episodeIds) {
+				const episodeIndex = seasons[seasonIndex].episodes.findIndex((e) => e.id === episodeId);
+				if (episodeIndex !== -1) {
+					seasons[seasonIndex].episodes[episodeIndex].file = payload.file;
+					seasons[seasonIndex].episodes[episodeIndex].hasFile = true;
+				}
+			}
+
+			// Update season stats
+			seasons[seasonIndex].episodeFileCount = seasons[seasonIndex].episodes.filter(
+				(e) => e.hasFile
+			).length;
+
+			// Update series stats
+			const totalEpisodes = seasons.reduce((acc, s) => acc + (s.episodeCount || 0), 0);
+			const totalFiles = seasons.reduce((acc, s) => acc + (s.episodeFileCount || 0), 0);
+			series.episodeFileCount = totalFiles;
+			series.percentComplete =
+				totalEpisodes > 0 ? Math.round((totalFiles / totalEpisodes) * 100) : 0;
+		},
+		'file:removed': (payload) => {
+			// Update episodes that had this file
+			for (const season of seasons) {
+				for (const episode of season.episodes) {
+					if (episode.file?.id === payload.fileId) {
+						episode.file = null;
+						episode.hasFile = false;
+					}
+				}
+				// Update season stats
+				season.episodeFileCount = season.episodes.filter((e) => e.hasFile).length;
+			}
+
+			// Update series stats
+			const totalEpisodes = seasons.reduce((acc, s) => acc + (s.episodeCount || 0), 0);
+			const totalFiles = seasons.reduce((acc, s) => acc + (s.episodeFileCount || 0), 0);
+			series.episodeFileCount = totalFiles;
+			series.percentComplete =
+				totalEpisodes > 0 ? Math.round((totalFiles / totalEpisodes) * 100) : 0;
+		}
+	});
+
 	// Prefetch stream for first episode when page loads (warms cache for faster playback)
 	$effect(() => {
-		if (data.series?.tmdbId && data.seasons?.length > 0) {
+		if (series?.tmdbId && seasons?.length > 0) {
 			// Find first season with episodes (skip specials/season 0)
-			const firstSeason = data.seasons.find((s) => s.seasonNumber > 0 && s.episodes?.length > 0);
+			const firstSeason = seasons.find((s) => s.seasonNumber > 0 && s.episodes?.length > 0);
 			if (firstSeason && firstSeason.episodes?.[0]) {
 				const ep = firstSeason.episodes[0];
-				fetch(
-					`/api/streaming/resolve/tv/${data.series.tmdbId}/${ep.seasonNumber}/${ep.episodeNumber}`,
-					{
-						signal: AbortSignal.timeout(5000)
-					}
-				).catch(() => {});
+				fetch(`/api/streaming/resolve/tv/${series.tmdbId}/${ep.seasonNumber}/${ep.episodeNumber}`, {
+					signal: AbortSignal.timeout(5000)
+				}).catch(() => {});
 			}
 		}
 	});
@@ -103,8 +210,8 @@
 
 	// Find quality profile name (use default if none set)
 	const qualityProfileName = $derived.by(() => {
-		if (data.series.scoringProfileId) {
-			return data.qualityProfiles.find((p) => p.id === data.series.scoringProfileId)?.name ?? null;
+		if (series.scoringProfileId) {
+			return data.qualityProfiles.find((p) => p.id === series.scoringProfileId)?.name ?? null;
 		}
 		// No profile set - show the default
 		const defaultProfile = data.qualityProfiles.find((p) => p.isDefault);
@@ -114,7 +221,7 @@
 	// Build a set of episode IDs that are currently downloading
 	const downloadingEpisodeIds = $derived.by(() => {
 		const ids = new SvelteSet<string>();
-		for (const item of data.queueItems) {
+		for (const item of queueItems) {
 			if (item.episodeIds) {
 				for (const epId of item.episodeIds) {
 					ids.add(epId);
@@ -127,7 +234,7 @@
 	// Build a set of season numbers that have a season pack downloading
 	const downloadingSeasons = $derived.by(() => {
 		const seasons = new SvelteSet<number>();
-		for (const item of data.queueItems) {
+		for (const item of queueItems) {
 			// Season pack: has seasonNumber but no specific episodeIds
 			if (item.seasonNumber !== null && (!item.episodeIds || item.episodeIds.length === 0)) {
 				seasons.add(item.seasonNumber);
@@ -140,7 +247,7 @@
 	const missingEpisodeCount = $derived.by(() => {
 		const now = new Date().toISOString().split('T')[0];
 		let count = 0;
-		for (const season of data.seasons) {
+		for (const season of seasons) {
 			for (const episode of season.episodes) {
 				if (episode.monitored && !episode.hasFile && episode.airDate && episode.airDate <= now) {
 					// Don't count as missing if it's downloading
@@ -157,7 +264,7 @@
 	});
 
 	// Calculate downloading count
-	const downloadingCount = $derived(data.queueItems.length);
+	const downloadingCount = $derived(queueItems.length);
 
 	// Derive selection count
 	const selectedCount = $derived(selectedEpisodes.size);
@@ -166,7 +273,7 @@
 	async function handleMonitorToggle(newValue: boolean) {
 		isSaving = true;
 		try {
-			const response = await fetch(`/api/library/series/${data.series.id}`, {
+			const response = await fetch(`/api/library/series/${series.id}`, {
 				method: 'PUT',
 				headers: { 'Content-Type': 'application/json' },
 				body: JSON.stringify({ monitored: newValue })
@@ -175,7 +282,7 @@
 			if (response.ok) {
 				data = {
 					...data,
-					series: { ...data.series, monitored: newValue }
+					series: { ...series, monitored: newValue }
 				};
 			}
 		} catch (error) {
@@ -188,7 +295,7 @@
 	function handleSearch() {
 		// Top-level search is for multi-season packs / complete series only
 		searchContext = {
-			title: data.series.title,
+			title: series.title,
 			searchMode: 'multiSeasonPack'
 		};
 		isSearchModalOpen = true;
@@ -210,7 +317,7 @@
 		refreshProgress = null;
 
 		try {
-			const response = await fetch(`/api/library/series/${data.series.id}/refresh`, {
+			const response = await fetch(`/api/library/series/${series.id}/refresh`, {
 				method: 'POST'
 			});
 
@@ -282,21 +389,21 @@
 	async function handleEditSave(editData: SeriesEditData) {
 		isSaving = true;
 		try {
-			const response = await fetch(`/api/library/series/${data.series.id}`, {
+			const response = await fetch(`/api/library/series/${series.id}`, {
 				method: 'PUT',
 				headers: { 'Content-Type': 'application/json' },
 				body: JSON.stringify(editData)
 			});
 
 			if (response.ok) {
-				data.series.monitored = editData.monitored;
-				data.series.scoringProfileId = editData.scoringProfileId;
-				data.series.rootFolderId = editData.rootFolderId;
-				data.series.seasonFolder = editData.seasonFolder;
-				data.series.wantsSubtitles = editData.wantsSubtitles;
+				series.monitored = editData.monitored;
+				series.scoringProfileId = editData.scoringProfileId;
+				series.rootFolderId = editData.rootFolderId;
+				series.seasonFolder = editData.seasonFolder;
+				series.wantsSubtitles = editData.wantsSubtitles;
 
 				const newFolder = data.rootFolders.find((f) => f.id === editData.rootFolderId);
-				data.series.rootFolderPath = newFolder?.path ?? null;
+				series.rootFolderPath = newFolder?.path ?? null;
 
 				isEditModalOpen = false;
 			}
@@ -315,7 +422,7 @@
 		isDeleting = true;
 		try {
 			const response = await fetch(
-				`/api/library/series/${data.series.id}?deleteFiles=${deleteFiles}&removeFromLibrary=${removeFromLibrary}`,
+				`/api/library/series/${series.id}?deleteFiles=${deleteFiles}&removeFromLibrary=${removeFromLibrary}`,
 				{ method: 'DELETE' }
 			);
 			const result = await response.json();
@@ -369,7 +476,7 @@
 			if (result.success) {
 				toasts.success('Season files deleted');
 				// Mark all episodes in this season as missing
-				data.seasons = data.seasons.map((s) =>
+				seasons = seasons.map((s) =>
 					s.id === deletingSeasonId
 						? {
 								...s,
@@ -423,7 +530,7 @@
 			if (result.success) {
 				toasts.success('Episode files deleted');
 				// Mark episode as missing (hasFile: false) instead of removing it
-				const updatedSeasons = data.seasons.map((season) => {
+				const updatedSeasons = seasons.map((season) => {
 					const hasEpisode = season.episodes.some((e) => e.id === deletingEpisodeId);
 					if (!hasEpisode) {
 						return season;
@@ -457,7 +564,7 @@
 					...data,
 					seasons: updatedSeasons,
 					series: {
-						...data.series,
+						...series,
 						episodeCount: totalEpisodes,
 						episodeFileCount: totalFiles
 					}
@@ -486,7 +593,7 @@
 			if (response.ok) {
 				data = {
 					...data,
-					seasons: data.seasons.map((season) =>
+					seasons: seasons.map((season) =>
 						season.id === seasonId
 							? {
 									...season,
@@ -513,7 +620,7 @@
 			if (response.ok) {
 				data = {
 					...data,
-					seasons: data.seasons.map((season) => ({
+					seasons: seasons.map((season) => ({
 						...season,
 						episodes: season.episodes.map((ep) =>
 							ep.id === episodeId ? { ...ep, monitored: newValue } : ep
@@ -538,7 +645,7 @@
 
 	function handleSeasonSearch(season: Season) {
 		searchContext = {
-			title: data.series.title,
+			title: series.title,
 			season: season.seasonNumber
 		};
 		isSearchModalOpen = true;
@@ -546,7 +653,7 @@
 
 	function handleEpisodeSearch(episode: Episode) {
 		searchContext = {
-			title: data.series.title,
+			title: series.title,
 			season: episode.seasonNumber,
 			episode: episode.episodeNumber
 		};
@@ -558,7 +665,7 @@
 		autoSearchingEpisodes.add(episode.id);
 
 		try {
-			const response = await fetch(`/api/library/series/${data.series.id}/auto-search`, {
+			const response = await fetch(`/api/library/series/${series.id}/auto-search`, {
 				method: 'POST',
 				headers: { 'Content-Type': 'application/json' },
 				body: JSON.stringify({
@@ -596,7 +703,7 @@
 		autoSearchingSeasons.add(season.id);
 
 		try {
-			const response = await fetch(`/api/library/series/${data.series.id}/auto-search`, {
+			const response = await fetch(`/api/library/series/${series.id}/auto-search`, {
 				method: 'POST',
 				headers: { 'Content-Type': 'application/json' },
 				body: JSON.stringify({
@@ -636,7 +743,7 @@
 		missingSearchResult = null;
 
 		try {
-			const response = await fetch(`/api/library/series/${data.series.id}/auto-search`, {
+			const response = await fetch(`/api/library/series/${series.id}/auto-search`, {
 				method: 'POST',
 				headers: { 'Content-Type': 'application/json' },
 				body: JSON.stringify({ type: 'missing' })
@@ -672,7 +779,7 @@
 		}
 
 		try {
-			const response = await fetch(`/api/library/series/${data.series.id}/auto-search`, {
+			const response = await fetch(`/api/library/series/${series.id}/auto-search`, {
 				method: 'POST',
 				headers: { 'Content-Type': 'application/json' },
 				body: JSON.stringify({
@@ -724,7 +831,7 @@
 		const episodeTitle = episode.title || `Episode ${episode.episodeNumber}`;
 		subtitleSearchContext = {
 			episodeId: episode.id,
-			title: `${data.series.title} S${String(episode.seasonNumber).padStart(2, '0')}E${String(episode.episodeNumber).padStart(2, '0')} - ${episodeTitle}`
+			title: `${series.title} S${String(episode.seasonNumber).padStart(2, '0')}E${String(episode.episodeNumber).padStart(2, '0')} - ${episodeTitle}`
 		};
 		isSubtitleSearchModalOpen = true;
 	}
@@ -743,7 +850,7 @@
 
 			if (result.success && result.subtitle) {
 				// Find and update the episode's subtitles in local state
-				for (const season of data.seasons) {
+				for (const season of seasons) {
 					const ep = season.episodes.find((e) => e.id === episode.id);
 					if (ep) {
 						ep.subtitles = [...(ep.subtitles || []), result.subtitle];
@@ -773,7 +880,7 @@
 	}
 
 	function handleSelectAllInSeason(seasonId: string, selectAll: boolean) {
-		const season = data.seasons.find((s) => s.id === seasonId);
+		const season = seasons.find((s) => s.id === seasonId);
 		if (!season) return;
 
 		const episodeIds = season.episodes.map((e) => e.id);
@@ -834,7 +941,7 @@
 	// Helper function to look up episode IDs from local data
 	function lookupEpisodeIds(season: number, episodes: number[]): string[] {
 		const ids: string[] = [];
-		for (const seasonData of data.seasons) {
+		for (const seasonData of seasons) {
 			if (seasonData.seasonNumber === season) {
 				for (const ep of seasonData.episodes) {
 					if (episodes.includes(ep.episodeNumber)) {
@@ -891,7 +998,7 @@
 					indexerId: release.indexerId,
 					indexerName: release.indexerName,
 					protocol: release.protocol,
-					seriesId: data.series.id,
+					seriesId: series.id,
 					mediaType: 'tv',
 					seasonNumber,
 					episodeIds,
@@ -918,33 +1025,59 @@
 	// Get search title - just the series title, no episode token embedded
 	// Season/episode info is passed separately and the backend handles format composition
 	const searchTitle = $derived(() => {
-		return data.series.title;
+		return series.title;
 	});
 </script>
 
 <svelte:head>
-	<title>{data.series.title} - Library - Cinephage</title>
+	<title>{series.title} - Library - Cinephage</title>
 </svelte:head>
 
 <div class="flex w-full flex-col gap-4 px-4 pb-20 md:gap-6 md:overflow-x-hidden md:px-6 lg:px-8">
-	<div
-		class="rounded-lg px-3 py-2 text-sm font-medium text-base-100 md:px-4 md:py-3 {data.series
-			.monitored
-			? 'bg-success/80'
-			: 'bg-error/80'}"
-	>
-		{#if data.series.monitored}
-			Series monitoring is enabled.
-		{:else}
-			Monitoring is disabled.
-			<span class="block text-xs font-normal text-base-100/90">
-				Season and episode toggles are locked. Enable series monitoring to unlock them.
-			</span>
-		{/if}
+	<div class="flex flex-col gap-2">
+		<!-- Monitoring Status Banner -->
+		<div
+			class="rounded-lg px-3 py-2 text-sm font-medium text-base-100 md:px-4 md:py-3 {series.monitored
+				? 'bg-success/80'
+				: 'bg-error/80'}"
+		>
+			<div class="flex items-center justify-between">
+				{#if series.monitored}
+					Series monitoring is enabled.
+				{:else}
+					<div>
+						Monitoring is disabled.
+						<span class="block text-xs font-normal text-base-100/90">
+							Season and episode toggles are locked. Enable series monitoring to unlock them.
+						</span>
+					</div>
+				{/if}
+
+				<!-- SSE Connection Status -->
+				<div class="flex items-center gap-2 text-xs">
+					{#if sse.isConnected}
+						<span class="flex items-center gap-1">
+							<Radio class="h-3 w-3" />
+							Live
+						</span>
+					{:else if sse.status === 'error'}
+						<span class="flex items-center gap-1 text-base-100/70">
+							<Loader2 class="h-3 w-3 animate-spin" />
+							Reconnecting...
+						</span>
+					{:else}
+						<span class="flex items-center gap-1 text-base-100/70">
+							<WifiOff class="h-3 w-3" />
+							Offline
+						</span>
+					{/if}
+				</div>
+			</div>
+		</div>
 	</div>
 	<!-- Header -->
 	<LibrarySeriesHeader
-		series={data.series}
+		{series}
 		{qualityProfileName}
 		refreshing={isRefreshing}
 		{refreshProgress}
@@ -987,16 +1120,16 @@
 				</div>
 			</div>
 
-			{#if data.seasons.length === 0}
+			{#if seasons.length === 0}
 				<div class="rounded-xl bg-base-200 p-8 text-center text-base-content/60">
 					No seasons found
 				</div>
 			{:else}
-				{#each data.seasons as season (season.id)}
+				{#each seasons as season (season.id)}
 					<SeasonAccordion
 						{season}
-						seriesMonitored={data.series.monitored ?? false}
-						isStreamerProfile={data.series.scoringProfileId === 'streamer'}
+						seriesMonitored={series.monitored ?? false}
+						isStreamerProfile={series.scoringProfileId === 'streamer'}
 						defaultOpen={openSeasonId === season.id}
 						{selectedEpisodes}
 						{showCheckboxes}
@@ -1026,7 +1159,7 @@
 		</div>
 
 		<!-- Sidebar -->
-		<TVSeriesSidebar series={data.series} />
+		<TVSeriesSidebar {series} />
 	</div>
 </div>
 
@@ -1041,7 +1174,7 @@
 <!-- Edit Modal -->
 <SeriesEditModal
 	open={isEditModalOpen}
-	series={data.series}
+	{series}
 	qualityProfiles={data.qualityProfiles}
 	rootFolders={data.rootFolders}
 	saving={isSaving}
@@ -1053,11 +1186,11 @@
 <InteractiveSearchModal
 	open={isSearchModalOpen}
 	title={searchTitle()}
-	tmdbId={data.series.tmdbId}
-	imdbId={data.series.imdbId}
-	year={data.series.year}
+	tmdbId={series.tmdbId}
+	imdbId={series.imdbId}
+	year={series.year}
 	mediaType="tv"
-	scoringProfileId={data.series.scoringProfileId}
+	scoringProfileId={series.scoringProfileId}
 	season={searchContext?.season}
 	episode={searchContext?.episode}
 	searchMode={searchContext?.searchMode ?? 'all'}
@@ -1084,8 +1217,8 @@
 <RenamePreviewModal
 	open={isRenameModalOpen}
 	mediaType="series"
-	mediaId={data.series.id}
-	mediaTitle={data.series.title}
+	mediaId={series.id}
+	mediaTitle={series.title}
 	onClose={() => (isRenameModalOpen = false)}
 	onRenamed={() => location.reload()}
 />
@@ -1094,7 +1227,7 @@
 <DeleteConfirmationModal
 	open={isDeleteModalOpen}
 	title="Delete Series"
-	itemName={data.series.title}
+	itemName={series.title}
 	loading={isDeleting}
 	onConfirm={performDelete}
 	onCancel={() => (isDeleteModalOpen = false)}

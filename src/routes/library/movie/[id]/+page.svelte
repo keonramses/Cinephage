@@ -1,5 +1,6 @@
 <script lang="ts">
 	import type { PageData } from './$types';
+	import type { LibraryMovie, MovieFile } from '$lib/types/library';
 	import {
 		LibraryMovieHeader,
 		MovieFilesTab,
@@ -14,16 +15,73 @@
 	import { ConfirmationModal } from '$lib/components/ui/modal';
 	import { toasts } from '$lib/stores/toast.svelte';
 	import type { MovieEditData } from '$lib/components/library/MovieEditModal.svelte';
-	import { FileEdit } from 'lucide-svelte';
+	import { FileEdit, Radio, WifiOff, Loader2 } from 'lucide-svelte';
 	import { page } from '$app/stores';
 	import { goto } from '$app/navigation';
+	import { createSSE } from '$lib/sse';
 
 	let { data }: { data: PageData } = $props();
 
+	// Reactive data that will be updated via SSE
+	let movie = $state<LibraryMovie>(data.movie);
+	let queueItem = $state<PageData['queueItem']>(data.queueItem);
+
+	// SSE Connection for real-time updates
+	const sse = createSSE<{
+		'media:initial': { movie: LibraryMovie; queueItem: PageData['queueItem'] };
+		'queue:updated': { id: string; title: string; status: string; progress: number | null };
+		'file:added': {
+			file: MovieFile;
+			wasUpgrade: boolean;
+			replacedFileIds?: string[];
+		};
+		'file:removed': { fileId: string };
+	}>(`/api/library/movies/${movie.id}/stream`, {
+		'media:initial': (payload) => {
+			movie = payload.movie;
+			queueItem = payload.queueItem;
+		},
+		'queue:updated': (payload) => {
+			if (
+				payload.status === 'imported' ||
+				payload.status === 'removed' ||
+				payload.status === 'failed'
+			) {
+				queueItem = null;
+			} else {
+				queueItem = {
+					id: payload.id,
+					title: payload.title,
+					status: payload.status,
+					progress: payload.progress
+				};
+			}
+		},
+		'file:added': (payload) => {
+			// Remove replaced files first
+			if (payload.replacedFileIds) {
+				movie.files = movie.files.filter((f) => !payload.replacedFileIds?.includes(f.id));
+			}
+			// Check if file already exists (update scenario)
+			const existingIndex = movie.files.findIndex((f) => f.id === payload.file.id);
+			if (existingIndex >= 0) {
+				movie.files[existingIndex] = payload.file;
+			} else {
+				movie.files = [...movie.files, payload.file];
+			}
+			movie.hasFile = movie.files.length > 0;
+			queueItem = null;
+		},
+		'file:removed': (payload) => {
+			movie.files = movie.files.filter((f) => f.id !== payload.fileId);
+			movie.hasFile = movie.files.length > 0;
+		}
+	});
+
 	// Prefetch stream when page loads (warms cache for faster playback)
 	$effect(() => {
-		if (data.movie?.tmdbId) {
-			fetch(`/api/streaming/resolve/movie/${data.movie.tmdbId}`, {
+		if (movie?.tmdbId) {
+			fetch(`/api/streaming/resolve/movie/${movie.tmdbId}`, {
 				signal: AbortSignal.timeout(5000)
 			}).catch(() => {});
 		}
@@ -72,8 +130,8 @@
 
 	// Find quality profile name (use default if none set)
 	const qualityProfileName = $derived.by(() => {
-		if (data.movie.scoringProfileId) {
-			return data.qualityProfiles.find((p) => p.id === data.movie.scoringProfileId)?.name ?? null;
+		if (movie.scoringProfileId) {
+			return data.qualityProfiles.find((p) => p.id === movie.scoringProfileId)?.name ?? null;
 		}
 		// No profile set - show the default
 		const defaultProfile = data.qualityProfiles.find((p) => p.isDefault);
@@ -81,8 +139,8 @@
 	});
 
 	const movieStoragePath = $derived.by(() => {
-		const rootPath = data.movie.rootFolderPath ?? '';
-		const relativePath = data.movie.path ?? '';
+		const rootPath = movie.rootFolderPath ?? '';
+		const relativePath = movie.path ?? '';
 
 		if (!rootPath) {
 			return relativePath;
@@ -106,7 +164,7 @@
 	async function handleMonitorToggle(newValue: boolean) {
 		isSaving = true;
 		try {
-			const response = await fetch(`/api/library/movies/${data.movie.id}`, {
+			const response = await fetch(`/api/library/movies/${movie.id}`, {
 				method: 'PUT',
 				headers: { 'Content-Type': 'application/json' },
 				body: JSON.stringify({ monitored: newValue })
@@ -115,7 +173,7 @@
 			if (response.ok) {
 				data = {
 					...data,
-					movie: { ...data.movie, monitored: newValue }
+					movie: { ...movie, monitored: newValue }
 				};
 			}
 		} catch (error) {
@@ -133,7 +191,7 @@
 		autoSearching = true;
 		autoSearchResult = null;
 		try {
-			const response = await fetch(`/api/library/movies/${data.movie.id}/auto-search`, {
+			const response = await fetch(`/api/library/movies/${movie.id}/auto-search`, {
 				method: 'POST'
 			});
 
@@ -188,7 +246,7 @@
 					indexerId: release.indexerId,
 					indexerName: release.indexerName,
 					protocol: release.protocol,
-					movieId: data.movie.id,
+					movieId: movie.id,
 					mediaType: 'movie',
 					streamUsenet: streaming && release.protocol === 'usenet'
 				})
@@ -219,7 +277,7 @@
 	async function handleEditSave(editData: MovieEditData) {
 		isSaving = true;
 		try {
-			const response = await fetch(`/api/library/movies/${data.movie.id}`, {
+			const response = await fetch(`/api/library/movies/${movie.id}`, {
 				method: 'PUT',
 				headers: { 'Content-Type': 'application/json' },
 				body: JSON.stringify(editData)
@@ -227,15 +285,15 @@
 
 			if (response.ok) {
 				// Update local state
-				data.movie.monitored = editData.monitored;
-				data.movie.scoringProfileId = editData.scoringProfileId;
-				data.movie.rootFolderId = editData.rootFolderId;
-				data.movie.minimumAvailability = editData.minimumAvailability;
-				data.movie.wantsSubtitles = editData.wantsSubtitles;
+				movie.monitored = editData.monitored;
+				movie.scoringProfileId = editData.scoringProfileId;
+				movie.rootFolderId = editData.rootFolderId;
+				movie.minimumAvailability = editData.minimumAvailability;
+				movie.wantsSubtitles = editData.wantsSubtitles;
 
 				// Update root folder path display
 				const newFolder = data.rootFolders.find((f) => f.id === editData.rootFolderId);
-				data.movie.rootFolderPath = newFolder?.path ?? null;
+				movie.rootFolderPath = newFolder?.path ?? null;
 
 				isEditModalOpen = false;
 			}
@@ -254,7 +312,7 @@
 		isDeleting = true;
 		try {
 			const response = await fetch(
-				`/api/library/movies/${data.movie.id}?deleteFiles=${deleteFiles}&removeFromLibrary=${removeFromLibrary}`,
+				`/api/library/movies/${movie.id}?deleteFiles=${deleteFiles}&removeFromLibrary=${removeFromLibrary}`,
 				{ method: 'DELETE' }
 			);
 			const result = await response.json();
@@ -282,7 +340,7 @@
 	}
 
 	async function handleDeleteFile(fileId: string) {
-		const file = data.movie.files.find((f) => f.id === fileId);
+		const file = movie.files.find((f) => f.id === fileId);
 		deletingFileId = fileId;
 		deletingFileName = file ? getFileName(file.relativePath) : 'this file';
 		isDeleteFileModalOpen = true;
@@ -302,18 +360,18 @@
 
 		isDeletingFile = true;
 		try {
-			const response = await fetch(`/api/library/movies/${data.movie.id}/files/${deletingFileId}`, {
+			const response = await fetch(`/api/library/movies/${movie.id}/files/${deletingFileId}`, {
 				method: 'DELETE'
 			});
 			const result = await response.json();
 
 			if (result.success) {
 				toasts.success('File deleted');
-				const updatedFiles = data.movie.files.filter((f) => f.id !== deletingFileId);
+				const updatedFiles = movie.files.filter((f) => f.id !== deletingFileId);
 				data = {
 					...data,
 					movie: {
-						...data.movie,
+						...movie,
 						files: updatedFiles,
 						hasFile: updatedFiles.length > 0
 					}
@@ -341,14 +399,14 @@
 			const response = await fetch('/api/subtitles/auto-search', {
 				method: 'POST',
 				headers: { 'Content-Type': 'application/json' },
-				body: JSON.stringify({ movieId: data.movie.id })
+				body: JSON.stringify({ movieId: movie.id })
 			});
 
 			const result = await response.json();
 
 			if (result.success && result.subtitle) {
 				// Refresh subtitles by adding the new one
-				data.movie.subtitles = [...(data.movie.subtitles || []), result.subtitle];
+				movie.subtitles = [...(movie.subtitles || []), result.subtitle];
 			}
 		} catch (error) {
 			console.error('Failed to auto-search subtitles:', error);
@@ -365,11 +423,11 @@
 
 	// Score handlers
 	async function fetchScore() {
-		if (scoreFetched || !data.movie.hasFile) return;
+		if (scoreFetched || !movie.hasFile) return;
 
 		scoreLoading = true;
 		try {
-			const response = await fetch(`/api/library/movies/${data.movie.id}/score`);
+			const response = await fetch(`/api/library/movies/${movie.id}/score`);
 			if (response.ok) {
 				const result = await response.json();
 				if (result.success) {
@@ -393,37 +451,63 @@
 
 	// Fetch score on mount if movie has a file
 	$effect(() => {
-		if (data.movie.hasFile && !scoreFetched) {
+		if (movie.hasFile && !scoreFetched) {
 			fetchScore();
 		}
 	});
 </script>
 
 <svelte:head>
-	<title>{data.movie.title} - Library - Cinephage</title>
+	<title>{movie.title} - Library - Cinephage</title>
 </svelte:head>
 
 <div class="flex w-full flex-col gap-4 overflow-x-hidden px-4 pb-20 md:gap-6 md:px-6 lg:px-8">
-	<div
-		class="rounded-lg px-3 py-2 text-sm font-medium text-base-100 md:px-4 md:py-3 {data.movie
-			.monitored
-			? 'bg-success/80'
-			: 'bg-error/80'}"
-	>
-		{#if data.movie.monitored}
-			Monitoring enabled.
-		{:else}
-			Monitoring is disabled.
-			<span class="block text-xs font-normal text-base-100/90">
-				Automatic downloads and upgrades will not occur.
-			</span>
-		{/if}
+	<div class="flex flex-col gap-2">
+		<!-- Monitoring Status Banner -->
+		<div
+			class="rounded-lg px-3 py-2 text-sm font-medium text-base-100 md:px-4 md:py-3 {movie.monitored
+				? 'bg-success/80'
+				: 'bg-error/80'}"
+		>
+			<div class="flex items-center justify-between">
+				{#if movie.monitored}
+					Monitoring enabled.
+				{:else}
+					<div>
+						Monitoring is disabled.
+						<span class="block text-xs font-normal text-base-100/90">
+							Automatic downloads and upgrades will not occur.
+						</span>
+					</div>
+				{/if}
+
+				<!-- SSE Connection Status -->
+				<div class="flex items-center gap-2 text-xs">
+					{#if sse.isConnected}
+						<span class="flex items-center gap-1">
+							<Radio class="h-3 w-3" />
+							Live
+						</span>
+					{:else if sse.status === 'error'}
+						<span class="flex items-center gap-1 text-base-100/70">
+							<Loader2 class="h-3 w-3 animate-spin" />
+							Reconnecting...
+						</span>
+					{:else}
+						<span class="flex items-center gap-1 text-base-100/70">
+							<WifiOff class="h-3 w-3" />
+							Offline
+						</span>
+					{/if}
+				</div>
+			</div>
+		</div>
 	</div>
 	<!-- Header -->
 	<LibraryMovieHeader
-		movie={data.movie}
+		{movie}
 		{qualityProfileName}
-		isDownloading={data.queueItem !== null}
+		isDownloading={queueItem !== null}
 		onMonitorToggle={handleMonitorToggle}
 		onAutoSearch={handleAutoSearch}
 		onSearch={handleSearch}
@@ -443,7 +527,7 @@
 			<div class="rounded-xl bg-base-200 p-4 md:p-6">
 				<div class="mb-4 flex items-center justify-between">
 					<h2 class="text-lg font-semibold">Files</h2>
-					{#if data.movie.files.length > 0}
+					{#if movie.files.length > 0}
 						<button class="btn gap-1 btn-ghost btn-sm" onclick={() => (isRenameModalOpen = true)}>
 							<FileEdit class="h-4 w-4" />
 							Rename
@@ -451,9 +535,9 @@
 					{/if}
 				</div>
 				<MovieFilesTab
-					files={data.movie.files}
-					subtitles={data.movie.subtitles}
-					isStreamerProfile={data.movie.scoringProfileId === 'streamer'}
+					files={movie.files}
+					subtitles={movie.subtitles}
+					isStreamerProfile={movie.scoringProfileId === 'streamer'}
 					onDeleteFile={handleDeleteFile}
 					onSearch={handleSearch}
 					onSubtitleSearch={handleSubtitleSearch}
@@ -466,11 +550,11 @@
 		<!-- Sidebar -->
 		<div class="space-y-4 md:space-y-6">
 			<!-- Overview -->
-			{#if data.movie.overview}
+			{#if movie.overview}
 				<div class="rounded-xl bg-base-200 p-4 md:p-6">
 					<h3 class="mb-2 font-semibold">Overview</h3>
 					<p class="text-sm leading-relaxed text-base-content/80">
-						{data.movie.overview}
+						{movie.overview}
 					</p>
 				</div>
 			{/if}
@@ -479,35 +563,35 @@
 			<div class="rounded-xl bg-base-200 p-4 md:p-6">
 				<h3 class="mb-3 font-semibold">Details</h3>
 				<dl class="space-y-2 text-sm">
-					{#if data.movie.originalTitle && data.movie.originalTitle !== data.movie.title}
+					{#if movie.originalTitle && movie.originalTitle !== movie.title}
 						<div class="flex flex-col gap-0.5 sm:flex-row sm:justify-between">
 							<dt class="text-base-content/60">Original Title</dt>
-							<dd class="sm:text-right">{data.movie.originalTitle}</dd>
+							<dd class="sm:text-right">{movie.originalTitle}</dd>
 						</div>
 					{/if}
-					{#if data.movie.runtime}
+					{#if movie.runtime}
 						<div class="flex flex-col gap-0.5 sm:flex-row sm:justify-between">
 							<dt class="text-base-content/60">Runtime</dt>
-							<dd>{Math.floor(data.movie.runtime / 60)}h {data.movie.runtime % 60}m</dd>
+							<dd>{Math.floor(movie.runtime / 60)}h {movie.runtime % 60}m</dd>
 						</div>
 					{/if}
-					{#if data.movie.genres && data.movie.genres.length > 0}
+					{#if movie.genres && movie.genres.length > 0}
 						<div class="flex flex-col gap-0.5 sm:flex-row sm:justify-between">
 							<dt class="text-base-content/60">Genres</dt>
-							<dd class="sm:text-right">{data.movie.genres.join(', ')}</dd>
+							<dd class="sm:text-right">{movie.genres.join(', ')}</dd>
 						</div>
 					{/if}
-					{#if data.movie.imdbId}
+					{#if movie.imdbId}
 						<div class="flex flex-col gap-0.5 sm:flex-row sm:justify-between">
 							<dt class="text-base-content/60">IMDb</dt>
 							<dd>
 								<a
-									href="https://www.imdb.com/title/{data.movie.imdbId}"
+									href="https://www.imdb.com/title/{movie.imdbId}"
 									target="_blank"
 									rel="noopener noreferrer"
 									class="link link-primary"
 								>
-									{data.movie.imdbId}
+									{movie.imdbId}
 								</a>
 							</dd>
 						</div>
@@ -516,12 +600,12 @@
 						<dt class="text-base-content/60">TMDB ID</dt>
 						<dd>
 							<a
-								href="https://www.themoviedb.org/movie/{data.movie.tmdbId}"
+								href="https://www.themoviedb.org/movie/{movie.tmdbId}"
 								target="_blank"
 								rel="noopener noreferrer"
 								class="link link-primary"
 							>
-								{data.movie.tmdbId}
+								{movie.tmdbId}
 							</a>
 						</dd>
 					</div>
@@ -547,7 +631,7 @@
 <!-- Edit Modal -->
 <MovieEditModal
 	open={isEditModalOpen}
-	movie={data.movie}
+	{movie}
 	qualityProfiles={data.qualityProfiles}
 	rootFolders={data.rootFolders}
 	saving={isSaving}
@@ -558,12 +642,12 @@
 <!-- Search Modal -->
 <InteractiveSearchModal
 	open={isSearchModalOpen}
-	title={data.movie.title}
-	tmdbId={data.movie.tmdbId}
-	imdbId={data.movie.imdbId}
-	year={data.movie.year}
+	title={movie.title}
+	tmdbId={movie.tmdbId}
+	imdbId={movie.imdbId}
+	year={movie.year}
 	mediaType="movie"
-	scoringProfileId={data.movie.scoringProfileId}
+	scoringProfileId={movie.scoringProfileId}
 	onClose={() => (isSearchModalOpen = false)}
 	onGrab={handleGrab}
 />
@@ -571,8 +655,8 @@
 <!-- Subtitle Search Modal -->
 <SubtitleSearchModal
 	open={isSubtitleSearchModalOpen}
-	title={data.movie.title}
-	movieId={data.movie.id}
+	title={movie.title}
+	movieId={movie.id}
 	onClose={() => (isSubtitleSearchModalOpen = false)}
 	onDownloaded={handleSubtitleDownloaded}
 />
@@ -581,8 +665,8 @@
 <RenamePreviewModal
 	open={isRenameModalOpen}
 	mediaType="movie"
-	mediaId={data.movie.id}
-	mediaTitle={data.movie.title}
+	mediaId={movie.id}
+	mediaTitle={movie.title}
 	onClose={() => (isRenameModalOpen = false)}
 	onRenamed={() => location.reload()}
 />
@@ -591,7 +675,7 @@
 <DeleteConfirmationModal
 	open={isDeleteModalOpen}
 	title="Delete Movie"
-	itemName={data.movie.title}
+	itemName={movie.title}
 	loading={isDeleting}
 	onConfirm={performDelete}
 	onCancel={() => (isDeleteModalOpen = false)}
