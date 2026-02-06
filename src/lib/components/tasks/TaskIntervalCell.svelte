@@ -1,5 +1,4 @@
 <script lang="ts">
-	import { invalidate } from '$app/navigation';
 	import type { UnifiedTask } from '$lib/server/tasks/UnifiedTaskRegistry';
 
 	interface Props {
@@ -29,7 +28,7 @@
 				body: JSON.stringify({ intervalHours: editValue })
 			});
 			if (response.ok) {
-				await invalidate('app:tasks');
+				// SSE will push the updated interval and nextRunTime
 				isEditing = false;
 			} else {
 				const data = await response.json();

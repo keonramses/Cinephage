@@ -1,5 +1,4 @@
 <script lang="ts">
-	import { invalidate } from '$app/navigation';
 	import type { UnifiedTask } from '$lib/server/tasks/UnifiedTaskRegistry';
 	import type { TaskHistoryEntry } from '$lib/types/task';
 	import TaskIntervalCell from './TaskIntervalCell.svelte';
@@ -9,71 +8,102 @@
 		history: TaskHistoryEntry[];
 		onRunTask: (taskId: string) => Promise<void>;
 		onCancelTask?: (taskId: string) => Promise<void>;
+		onToggleEnabled?: (taskId: string, enabled: boolean) => Promise<void>;
 		onShowHistory: () => void;
 	}
 
-	let { task, history, onRunTask, onCancelTask, onShowHistory }: Props = $props();
+	let { task, history, onRunTask, onCancelTask, onToggleEnabled, onShowHistory }: Props = $props();
 
-	let isRunning = $state(false);
 	let isCancelling = $state(false);
 
-	// Sync state with props
+	// Live countdown state - updated every second
+	let now = $state(Date.now());
+
+	// Tick the clock every second for live countdowns
 	$effect(() => {
-		isRunning = task.isRunning;
-		// Reset cancelling state when task stops running
+		const interval = setInterval(() => {
+			now = Date.now();
+		}, 1000);
+		return () => clearInterval(interval);
+	});
+
+	// Reset cancelling state when task stops running
+	$effect(() => {
 		if (!task.isRunning) {
 			isCancelling = false;
 		}
 	});
 
-	// Derived state for last run status
-	const lastRunStatus = $derived(() => {
-		if (history.length === 0) return null;
-		return history[0]?.status ?? null;
+	// Derive isRunning from the task prop (single source of truth from parent's taskMap)
+	const isRunning = $derived(task.isRunning);
+
+	// Derived state for last run status (value, not function)
+	const lastRunStatus = $derived(history.length > 0 ? (history[0]?.status ?? null) : null);
+
+	/**
+	 * Format a duration in milliseconds to a human-readable string.
+	 * Shows live seconds for < 1 minute, minutes/hours only for >= 1 minute.
+	 * Uses tabular-nums friendly format to prevent layout shift.
+	 */
+	function formatDuration(diffMs: number): string {
+		const totalSeconds = Math.floor(diffMs / 1000);
+		const totalMinutes = Math.floor(totalSeconds / 60);
+		const totalHours = Math.floor(totalMinutes / 60);
+		const totalDays = Math.floor(totalHours / 24);
+
+		const minutes = totalMinutes % 60;
+		const hours = totalHours % 24;
+
+		if (totalDays > 0) {
+			return hours > 0 ? `${totalDays}d ${hours}h` : `${totalDays}d`;
+		}
+		if (totalHours > 0) {
+			return minutes > 0 ? `${totalHours}h ${minutes}m` : `${totalHours}h`;
+		}
+		if (totalMinutes > 0) {
+			return `${totalMinutes}m`;
+		}
+		// Under 1 minute - show live seconds
+		return `${totalSeconds}s`;
+	}
+
+	// Live-computed "time ago" string that updates every second
+	const liveTimeAgo = $derived.by(() => {
+		if (!task.lastRunTime) return 'Never';
+		const date = new Date(task.lastRunTime).getTime();
+		const diffMs = now - date;
+		if (diffMs < 0) return 'Just now';
+		if (diffMs < 60000) return 'Just now';
+		return `${formatDuration(diffMs)} ago`;
 	});
 
-	function formatTimeAgo(dateStr: string | null): string {
-		if (!dateStr) return 'Never';
-		const date = new Date(dateStr);
-		const now = new Date();
-		const diffMs = now.getTime() - date.getTime();
-		const diffMins = Math.floor(diffMs / 60000);
-		const diffHours = Math.floor(diffMins / 60);
-		const diffDays = Math.floor(diffHours / 24);
-
-		if (diffMins < 0) return formatTimeUntil(dateStr);
-		if (diffMins < 1) return 'Just now';
-		if (diffMins < 60) return `${diffMins}m ago`;
-		if (diffHours < 24) return `${diffHours}h ago`;
-		return `${diffDays}d ago`;
-	}
-
-	function formatTimeUntil(dateStr: string | null): string {
-		if (!dateStr) return '—';
-		const date = new Date(dateStr);
-		const now = new Date();
-		const diffMs = date.getTime() - now.getTime();
-
+	// Live-computed "time until" string that updates every second
+	const liveTimeUntil = $derived.by(() => {
+		if (!task.nextRunTime) return '—';
+		const date = new Date(task.nextRunTime).getTime();
+		const diffMs = date - now;
 		if (diffMs <= 0) return 'Overdue';
+		return `in ${formatDuration(diffMs)}`;
+	});
 
-		const diffMins = Math.floor(diffMs / 60000);
-		const diffHours = Math.floor(diffMins / 60);
-		const diffDays = Math.floor(diffHours / 24);
+	// Whether the next run is overdue
+	const isOverdue = $derived(
+		task.nextRunTime ? new Date(task.nextRunTime).getTime() <= now : false
+	);
 
-		if (diffMins < 60) return `in ${diffMins}m`;
-		if (diffHours < 24) return `in ${diffHours}h`;
-		return `in ${diffDays}d`;
-	}
+	// Whether the next run is imminent (< 1 minute)
+	const isImminent = $derived.by(() => {
+		if (!task.nextRunTime) return false;
+		const diffMs = new Date(task.nextRunTime).getTime() - now;
+		return diffMs > 0 && diffMs < 60000;
+	});
 
 	async function runTask() {
 		if (isRunning) return;
-		isRunning = true;
 		try {
 			await onRunTask(task.id);
 		} catch (error) {
 			console.error('Task failed:', error);
-		} finally {
-			isRunning = false;
 		}
 	}
 
@@ -88,17 +118,8 @@
 	}
 
 	async function toggleEnabled() {
-		try {
-			const response = await fetch(`/api/tasks/${task.id}/enabled`, {
-				method: 'PUT',
-				headers: { 'Content-Type': 'application/json' },
-				body: JSON.stringify({ enabled: !task.enabled })
-			});
-			if (response.ok) {
-				await invalidate('app:tasks');
-			}
-		} catch (error) {
-			console.error('Failed to toggle task:', error);
+		if (onToggleEnabled) {
+			await onToggleEnabled(task.id, !task.enabled);
 		}
 	}
 </script>
@@ -116,9 +137,9 @@
 					<span class="loading loading-xs loading-spinner"></span>
 					Running
 				</span>
-			{:else if lastRunStatus() === 'completed'}
+			{:else if lastRunStatus === 'completed'}
 				<span class="badge badge-sm badge-success"></span>
-			{:else if lastRunStatus() === 'failed'}
+			{:else if lastRunStatus === 'failed'}
 				<span class="badge badge-sm badge-error"></span>
 			{/if}
 		</div>
@@ -131,15 +152,25 @@
 		</td>
 
 		<!-- Last Run -->
-		<td class="text-sm">
-			{formatTimeAgo(task.lastRunTime)}
+		<td
+			class="text-sm whitespace-nowrap tabular-nums"
+			title={task.lastRunTime ? new Date(task.lastRunTime).toLocaleString() : ''}
+		>
+			{liveTimeAgo}
 		</td>
 
 		<!-- Next Run -->
-		<td class="text-sm">
-			{#if task.nextRunTime}
-				<span class={new Date(task.nextRunTime) <= new Date() ? 'text-warning' : ''}>
-					{formatTimeUntil(task.nextRunTime)}
+		<td class="text-sm whitespace-nowrap tabular-nums">
+			{#if task.isRunning}
+				<span class="text-primary">Running...</span>
+			{:else if task.nextRunTime}
+				<span
+					class="{isOverdue ? 'font-medium text-warning' : ''} {isImminent
+						? 'animate-pulse text-success'
+						: ''}"
+					title={new Date(task.nextRunTime).toLocaleString()}
+				>
+					{liveTimeUntil}
 				</span>
 			{:else}
 				<span class="text-base-content/40">—</span>
@@ -150,8 +181,11 @@
 		<td class="text-sm text-base-content/60">Manual</td>
 
 		<!-- Last Run -->
-		<td class="text-sm">
-			{formatTimeAgo(task.lastRunTime)}
+		<td
+			class="text-sm whitespace-nowrap tabular-nums"
+			title={task.lastRunTime ? new Date(task.lastRunTime).toLocaleString() : ''}
+		>
+			{liveTimeAgo}
 		</td>
 	{/if}
 

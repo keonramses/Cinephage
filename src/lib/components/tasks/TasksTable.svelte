@@ -9,9 +9,10 @@
 		taskHistory: Record<string, TaskHistoryEntry[]>;
 		onRunTask: (taskId: string) => Promise<void>;
 		onCancelTask?: (taskId: string) => Promise<void>;
+		onToggleEnabled?: (taskId: string, enabled: boolean) => Promise<void>;
 	}
 
-	let { tasks, taskHistory, onRunTask, onCancelTask }: Props = $props();
+	let { tasks, taskHistory, onRunTask, onCancelTask, onToggleEnabled }: Props = $props();
 
 	// Group tasks by category
 	const scheduledTasks = $derived(tasks.filter((t) => t.category === 'scheduled'));
@@ -99,6 +100,7 @@
 									history={taskHistory[task.id] ?? []}
 									{onRunTask}
 									{onCancelTask}
+									{onToggleEnabled}
 									onShowHistory={() => openHistory(task)}
 								/>
 							{/each}
@@ -171,6 +173,7 @@
 									history={taskHistory[task.id] ?? []}
 									{onRunTask}
 									{onCancelTask}
+									{onToggleEnabled}
 									onShowHistory={() => openHistory(task)}
 								/>
 							{/each}
