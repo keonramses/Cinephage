@@ -479,7 +479,7 @@
 				<SectionRow
 					title="Trending Today"
 					items={data.sections.trendingDay}
-					link="/discover?trending=day"
+					link="/discover?trending=day{excludeInLibrary ? '&exclude_in_library=true' : ''}"
 					endpoint="trending/all/day"
 					onAddToLibrary={handleAddToLibrary}
 					{excludeInLibrary}
@@ -487,7 +487,7 @@
 				<SectionRow
 					title="Trending This Week"
 					items={data.sections.trendingWeek}
-					link="/discover?trending=week"
+					link="/discover?trending=week{excludeInLibrary ? '&exclude_in_library=true' : ''}"
 					endpoint="trending/all/week"
 					onAddToLibrary={handleAddToLibrary}
 					{excludeInLibrary}
@@ -495,7 +495,9 @@
 				<SectionRow
 					title="Popular Movies"
 					items={data.sections.popularMovies}
-					link="/discover?type=movie&sort_by=popularity.desc"
+					link="/discover?type=movie&sort_by=popularity.desc{excludeInLibrary
+						? '&exclude_in_library=true'
+						: ''}"
 					endpoint="movie/popular"
 					onAddToLibrary={handleAddToLibrary}
 					{excludeInLibrary}
@@ -503,7 +505,9 @@
 				<SectionRow
 					title="Popular TV Shows"
 					items={data.sections.popularTV}
-					link="/discover?type=tv&sort_by=popularity.desc"
+					link="/discover?type=tv&sort_by=popularity.desc{excludeInLibrary
+						? '&exclude_in_library=true'
+						: ''}"
 					endpoint="tv/popular"
 					onAddToLibrary={handleAddToLibrary}
 					{excludeInLibrary}
@@ -511,7 +515,9 @@
 				<SectionRow
 					title="Top Rated Movies"
 					items={data.sections.topRatedMovies}
-					link="/discover?type=movie&sort_by=vote_average.desc"
+					link="/discover?type=movie&sort_by=vote_average.desc{excludeInLibrary
+						? '&exclude_in_library=true'
+						: ''}"
 					endpoint="movie/top_rated"
 					onAddToLibrary={handleAddToLibrary}
 					{excludeInLibrary}
