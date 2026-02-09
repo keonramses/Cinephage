@@ -294,7 +294,7 @@ export class StalkerPortalClient {
 		} catch (error) {
 			clearTimeout(timeoutId);
 			if (error instanceof Error && error.name === 'AbortError') {
-				throw new Error('Request timed out', { cause: error });
+				throw new Error('Request timed out');
 			}
 			throw error;
 		}

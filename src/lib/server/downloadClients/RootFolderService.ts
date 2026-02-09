@@ -390,7 +390,7 @@ export class RootFolderService {
 	 */
 	private async rowToFolder(row: typeof rootFoldersTable.$inferSelect): Promise<RootFolder> {
 		// Check current accessibility
-		let accessible: boolean;
+		let accessible = false;
 		let freeSpaceBytes: number | null = null;
 		let freeSpaceFormatted: string | undefined;
 		const isReadOnly = !!row.readOnly;

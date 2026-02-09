@@ -26,9 +26,9 @@ export async function executeCutoffUnmetTask(
 	const taskHistoryId = ctx?.historyId;
 	logger.info('[CutoffUnmetTask] Starting cutoff unmet search', { taskHistoryId });
 
-	let itemsProcessed: number;
-	let itemsGrabbed: number;
-	let errors: number;
+	let itemsProcessed = 0;
+	let itemsGrabbed = 0;
+	let errors = 0;
 
 	try {
 		// Check for cancellation before starting

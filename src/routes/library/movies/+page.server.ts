@@ -188,7 +188,7 @@ export const load: PageServerLoad = async ({ url }) => {
 		// Apply sorting
 		const [sortField, sortDir] = sort.split('-') as [string, 'asc' | 'desc'];
 		filteredMovies.sort((a, b) => {
-			let comparison: number;
+			let comparison = 0;
 
 			switch (sortField) {
 				case 'title':

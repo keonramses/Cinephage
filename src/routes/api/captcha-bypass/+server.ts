@@ -18,7 +18,7 @@ const requestSchema = z
 	}));
 
 export const POST: RequestHandler = async ({ request }) => {
-	let requestUrl: string;
+	let requestUrl = '';
 	try {
 		const body = await request.json();
 		const parsed = requestSchema.safeParse(body);
