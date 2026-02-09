@@ -28,8 +28,6 @@ interface QueueItem {
 	isUpgrade?: boolean;
 }
 
-type QueueEventPayload = QueueItem | { queueItem?: QueueItem; error?: string };
-
 function isQueueItem(value: unknown): value is QueueItem {
 	if (!value || typeof value !== 'object') return false;
 	const maybe = value as Partial<QueueItem>;
@@ -40,7 +38,7 @@ function getQueueItemFromPayload(payload: unknown): QueueItem | null {
 	if (isQueueItem(payload)) return payload;
 
 	if (payload && typeof payload === 'object' && 'queueItem' in payload) {
-		const wrapped = (payload as QueueEventPayload).queueItem;
+		const wrapped = (payload as { queueItem?: unknown }).queueItem;
 		if (isQueueItem(wrapped)) return wrapped;
 	}
 
@@ -49,7 +47,7 @@ function getQueueItemFromPayload(payload: unknown): QueueItem | null {
 
 function getQueueErrorFromPayload(payload: unknown): string | undefined {
 	if (!payload || typeof payload !== 'object') return undefined;
-	const maybeError = (payload as QueueEventPayload).error;
+	const maybeError = (payload as { error?: unknown }).error;
 	return typeof maybeError === 'string' ? maybeError : undefined;
 }
 

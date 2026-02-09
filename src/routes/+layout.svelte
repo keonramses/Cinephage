@@ -132,12 +132,7 @@
 
 	<!-- Sidebar -->
 	<div class="drawer-side z-40">
-		<label
-			for="main-drawer"
-			aria-label="close sidebar"
-			class="drawer-overlay"
-			onclick={closeMobileDrawer}
-		></label>
+		<label for="main-drawer" aria-label="close sidebar" class="drawer-overlay"></label>
 		<aside
 			class="flex min-h-full flex-col overflow-x-hidden bg-base-200 transition-[width] duration-300 ease-in-out
             {layoutState.isSidebarExpanded ? 'w-64' : 'w-20'}"

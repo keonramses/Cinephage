@@ -18,17 +18,28 @@
 	import { FileEdit, Wifi, WifiOff, Loader2 } from 'lucide-svelte';
 	import { page } from '$app/stores';
 	import { goto } from '$app/navigation';
-	import { createSSE } from '$lib/sse';
+	import { createDynamicSSE } from '$lib/sse';
 	import { mobileSSEStatus } from '$lib/sse/mobileStatus.svelte';
 
 	let { data }: { data: PageData } = $props();
 
 	// Reactive data that will be updated via SSE
-	let movie = $state<LibraryMovie>(data.movie);
-	let queueItem = $state<PageData['queueItem']>(data.queueItem);
+	let movieState = $state<LibraryMovie | null>(null);
+	let queueItemState = $state<PageData['queueItem'] | undefined>(undefined);
+	const movie = $derived(movieState ?? data.movie);
+	const queueItem = $derived(queueItemState === undefined ? data.queueItem : queueItemState);
+
+	$effect(() => {
+		if (movieState === null) {
+			movieState = $state.snapshot(data.movie);
+		}
+		if (queueItemState === undefined) {
+			queueItemState = $state.snapshot(data.queueItem);
+		}
+	});
 
 	// SSE Connection - internally handles browser/SSR
-	const sse = createSSE<{
+	const sse = createDynamicSSE<{
 		'media:initial': { movie: LibraryMovie; queueItem: PageData['queueItem'] };
 		'queue:updated': { id: string; title: string; status: string; progress: number | null };
 		'file:added': {
@@ -37,10 +48,10 @@
 			replacedFileIds?: string[];
 		};
 		'file:removed': { fileId: string };
-	}>(`/api/library/movies/${movie.id}/stream`, {
+	}>(() => `/api/library/movies/${movie.id}/stream`, {
 		'media:initial': (payload) => {
-			movie = payload.movie;
-			queueItem = payload.queueItem;
+			movieState = payload.movie;
+			queueItemState = payload.queueItem;
 		},
 		'queue:updated': (payload) => {
 			if (
@@ -48,9 +59,9 @@
 				payload.status === 'removed' ||
 				payload.status === 'failed'
 			) {
-				queueItem = null;
+				queueItemState = null;
 			} else {
-				queueItem = {
+				queueItemState = {
 					id: payload.id,
 					title: payload.title,
 					status: payload.status,
@@ -71,7 +82,7 @@
 				movie.files = [...movie.files, payload.file];
 			}
 			movie.hasFile = movie.files.length > 0;
-			queueItem = null;
+			queueItemState = null;
 		},
 		'file:removed': (payload) => {
 			movie.files = movie.files.filter((f) => f.id !== payload.fileId);
@@ -178,7 +189,7 @@
 			if (!result.success || !result.movie) return;
 
 			const refreshed = result.movie as LibraryMovie;
-			movie = {
+			movieState = {
 				...movie,
 				...refreshed,
 				files: refreshed.files ?? [],
@@ -352,7 +363,7 @@
 					toasts.success('Movie files deleted');
 					movie.files = [];
 					movie.hasFile = false;
-					queueItem = null;
+					queueItemState = null;
 				}
 			} else {
 				toasts.error('Failed to delete movie', { description: result.error });

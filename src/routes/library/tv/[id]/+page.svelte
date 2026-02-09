@@ -18,18 +18,33 @@
 	import { SvelteSet, SvelteMap } from 'svelte/reactivity';
 	import { page } from '$app/stores';
 	import { goto } from '$app/navigation';
-	import { createSSE } from '$lib/sse';
+	import { createDynamicSSE } from '$lib/sse';
 	import { mobileSSEStatus } from '$lib/sse/mobileStatus.svelte';
 
 	let { data }: { data: PageData } = $props();
 
 	// Reactive data that will be updated via SSE
-	let series = $state(data.series);
-	let seasons = $state(data.seasons);
-	let queueItems = $state(data.queueItems);
+	let seriesState = $state<PageData['series'] | null>(null);
+	let seasonsState = $state<PageData['seasons'] | null>(null);
+	let queueItemsState = $state<PageData['queueItems'] | null>(null);
+	const series = $derived(seriesState ?? data.series);
+	const seasons = $derived(seasonsState ?? data.seasons);
+	const queueItems = $derived(queueItemsState ?? data.queueItems);
+
+	$effect(() => {
+		if (seriesState === null) {
+			seriesState = $state.snapshot(data.series);
+		}
+		if (seasonsState === null) {
+			seasonsState = $state.snapshot(data.seasons);
+		}
+		if (queueItemsState === null) {
+			queueItemsState = $state.snapshot(data.queueItems);
+		}
+	});
 
 	// SSE Connection - internally handles browser/SSR
-	const sse = createSSE<{
+	const sse = createDynamicSSE<{
 		'media:initial': {
 			series: typeof series;
 			seasons: typeof seasons;
@@ -51,11 +66,11 @@
 			replacedFileIds?: string[];
 		};
 		'file:removed': { fileId: string; episodeIds: string[] };
-	}>(`/api/library/series/${series.id}/stream`, {
+	}>(() => `/api/library/series/${series.id}/stream`, {
 		'media:initial': (payload) => {
-			series = payload.series;
-			seasons = payload.seasons;
-			queueItems = payload.queueItems;
+			seriesState = payload.series;
+			seasonsState = payload.seasons;
+			queueItemsState = payload.queueItems;
 		},
 		'queue:updated': (payload) => {
 			if (
@@ -64,7 +79,7 @@
 				payload.status === 'failed'
 			) {
 				// Remove from queue if terminal state
-				queueItems = queueItems.filter((q) => q.id !== payload.id);
+				queueItemsState = queueItems.filter((q) => q.id !== payload.id);
 			} else {
 				// Update or add queue item
 				const existingIndex = queueItems.findIndex((q) => q.id === payload.id);
@@ -79,7 +94,7 @@
 				if (existingIndex >= 0) {
 					queueItems[existingIndex] = newQueueItem;
 				} else {
-					queueItems = [...queueItems, newQueueItem];
+					queueItemsState = [...queueItems, newQueueItem];
 				}
 			}
 		},
@@ -333,7 +348,7 @@
 			0
 		);
 
-		series = {
+		seriesState = {
 			...series,
 			episodeCount: totalEpisodes,
 			episodeFileCount: totalFiles,
@@ -350,9 +365,9 @@
 			if (!result.success || !result.series) return;
 
 			const { seasons: refreshedSeasons, ...seriesFields } = result.series;
-			series = { ...series, ...seriesFields };
+			seriesState = { ...series, ...seriesFields };
 			if (Array.isArray(refreshedSeasons)) {
-				seasons = refreshedSeasons;
+				seasonsState = refreshedSeasons;
 			}
 		} catch (error) {
 			console.error('Failed to refresh series state:', error);
@@ -489,9 +504,9 @@
 							file: null
 						}))
 					}));
-					seasons = updatedSeasons;
+					seasonsState = updatedSeasons;
 					updateSeriesStatsFromSeasons(updatedSeasons);
-					queueItems = [];
+					queueItemsState = [];
 				}
 			} else {
 				toasts.error('Failed to delete series', { description: result.error });
@@ -545,7 +560,7 @@
 							}
 						: s
 				);
-				seasons = updatedSeasons;
+				seasonsState = updatedSeasons;
 				updateSeriesStatsFromSeasons(updatedSeasons);
 			} else {
 				toasts.error('Failed to delete season files', { description: result.error });
@@ -608,7 +623,7 @@
 						episodeCount: updatedEpisodeCount
 					};
 				});
-				seasons = updatedSeasons;
+				seasonsState = updatedSeasons;
 				updateSeriesStatsFromSeasons(updatedSeasons);
 			} else {
 				toasts.error('Failed to delete episode files', { description: result.error });
@@ -632,7 +647,7 @@
 			});
 
 			if (response.ok) {
-				seasons = seasons.map((season) =>
+				seasonsState = seasons.map((season) =>
 					season.id === seasonId
 						? {
 								...season,
@@ -656,7 +671,7 @@
 			});
 
 			if (response.ok) {
-				seasons = seasons.map((season) => ({
+				seasonsState = seasons.map((season) => ({
 					...season,
 					episodes: season.episodes.map((ep) =>
 						ep.id === episodeId ? { ...ep, monitored: newValue } : ep
@@ -883,7 +898,7 @@
 			format: subtitle.format
 		};
 
-		seasons = seasons.map((season) => ({
+		seasonsState = seasons.map((season) => ({
 			...season,
 			episodes: season.episodes.map((episode) => {
 				if (episode.id !== episodeId) return episode;
