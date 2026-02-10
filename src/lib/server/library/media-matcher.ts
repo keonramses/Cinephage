@@ -579,7 +579,7 @@ export class MediaMatcherService {
 		}
 
 		// Skip .strm probing for existing items using the Streamer profile
-		let allowStrmProbe = true;
+		let allowStrmProbe: boolean;
 		if (mediaType === 'movie') {
 			const [existingMovie] = await db
 				.select({ scoringProfileId: movies.scoringProfileId })

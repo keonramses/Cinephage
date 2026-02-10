@@ -3433,7 +3433,7 @@ const MIGRATIONS: MigrationDefinition[] = [
 				const seenCanonical = new Set<string>();
 
 				for (const row of rows) {
-					let parsedIds: unknown = [];
+					let parsedIds: unknown;
 					try {
 						parsedIds = row.episodeIds ? JSON.parse(row.episodeIds) : [];
 					} catch {

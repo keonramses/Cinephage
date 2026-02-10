@@ -28,7 +28,8 @@
 		Activity,
 		Loader2,
 		Wifi,
-		WifiOff
+		WifiOff,
+		FileQuestion
 	} from 'lucide-svelte';
 
 	let { children } = $props();
@@ -46,7 +47,8 @@
 			icon: Library,
 			children: [
 				{ href: '/library/movies', label: 'Movies', icon: Clapperboard },
-				{ href: '/library/tv', label: 'TV Shows', icon: Tv }
+				{ href: '/library/tv', label: 'TV Shows', icon: Tv },
+				{ href: '/library/unmatched', label: 'Unmatched Files', icon: FileQuestion }
 			]
 		},
 		{ href: '/activity', label: 'Activity', icon: Activity },

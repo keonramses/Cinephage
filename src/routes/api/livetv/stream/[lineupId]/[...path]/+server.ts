@@ -47,7 +47,7 @@ async function fetchWithRetry(
 
 			// Don't retry on abort (timeout)
 			if (lastError.name === 'AbortError') {
-				throw new Error(`Segment fetch timeout`);
+				throw new Error(`Segment fetch timeout`, { cause: error });
 			}
 
 			if (attempt < maxRetries) {

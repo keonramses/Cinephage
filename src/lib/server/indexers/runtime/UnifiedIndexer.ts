@@ -620,7 +620,7 @@ export class UnifiedIndexer implements IIndexer {
 		} catch (error) {
 			const message = error instanceof Error ? error.message : String(error);
 			this.log.error('Indexer test failed', { error: message });
-			throw new Error(`Indexer test failed: ${message}`);
+			throw new Error(`Indexer test failed: ${message}`, { cause: error });
 		}
 	}
 

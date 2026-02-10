@@ -4,21 +4,7 @@
 	import ModalWrapper from '$lib/components/ui/modal/ModalWrapper.svelte';
 	import TmdbImage from '$lib/components/tmdb/TmdbImage.svelte';
 
-	interface UnmatchedFolder {
-		folderPath: string;
-		folderName: string;
-		mediaType: string;
-		fileCount: number;
-		files: Array<
-			{
-				path: string;
-				parsedTitle: string | null;
-				parsedSeason: number | null;
-				parsedEpisode: number | null;
-			} & Record<string, unknown>
-		>;
-		commonParsedTitle: string | null;
-	}
+	import type { UnmatchedFolder } from '$lib/types/unmatched.js';
 
 	interface TmdbSearchResult {
 		id: number;
@@ -110,11 +96,14 @@
 
 		isMatching = true;
 		try {
-			const response = await fetch('/api/library/unmatched/folder-match', {
+			// Get all file IDs from the folder
+			const fileIds = folder.files.map((f) => f.id);
+
+			const response = await fetch('/api/library/unmatched/match', {
 				method: 'POST',
 				headers: { 'Content-Type': 'application/json' },
 				body: JSON.stringify({
-					folderPath: folder.folderPath,
+					fileIds,
 					tmdbId: selectedMedia.id,
 					mediaType: searchType
 				})
@@ -124,8 +113,8 @@
 			if (result.success) {
 				const mediaTitle = selectedMedia.title || selectedMedia.name;
 				toasts.success(
-					`Matched ${result.matched} files to ${mediaTitle}`,
-					result.failed > 0 ? { description: `${result.failed} files failed` } : undefined
+					`Matched ${result.data.matched} files to ${mediaTitle}`,
+					result.data.failed > 0 ? { description: `${result.data.failed} files failed` } : undefined
 				);
 				onSuccess(folder.folderPath);
 			} else {

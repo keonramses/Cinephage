@@ -71,8 +71,8 @@ export class SelectorEngine {
 		}
 
 		// Get the element to select from
-		let selection = element;
-		let value: string | null = null;
+		let selection: ReturnType<typeof $>;
+		let value: string | null;
 
 		if (selectorBlock.selector) {
 			// Expand template in selector
@@ -85,6 +85,8 @@ export class SelectorEngine {
 			if (selectorStr.startsWith(':root')) {
 				selectorStr = selectorStr.substring(5);
 				selection = $.root();
+			} else {
+				selection = element;
 			}
 
 			// Check if element matches selector or find within
@@ -101,6 +103,8 @@ export class SelectorEngine {
 				}
 				selection = matched.first();
 			}
+		} else {
+			selection = element;
 		}
 
 		// Handle remove (remove child elements before extraction)

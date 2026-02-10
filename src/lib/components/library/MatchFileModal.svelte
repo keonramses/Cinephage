@@ -89,7 +89,7 @@
 		isMatching = true;
 		try {
 			const response = await fetch(`/api/library/unmatched/${file.id}`, {
-				method: 'POST',
+				method: 'PATCH',
 				headers: { 'Content-Type': 'application/json' },
 				body: JSON.stringify({
 					tmdbId: movie.id,
@@ -123,7 +123,7 @@
 		isMatching = true;
 		try {
 			const response = await fetch(`/api/library/unmatched/${file.id}`, {
-				method: 'POST',
+				method: 'PATCH',
 				headers: { 'Content-Type': 'application/json' },
 				body: JSON.stringify({
 					tmdbId: selectedShow.id,

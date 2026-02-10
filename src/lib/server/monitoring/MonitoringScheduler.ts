@@ -521,7 +521,7 @@ export class MonitoringScheduler extends EventEmitter implements BackgroundServi
 			const intervalMs = intervalHours * 60 * 60 * 1000;
 
 			// Calculate if task is due
-			let isDue = false;
+			let isDue: boolean;
 			if (!lastRunTime) {
 				// Never run before - run it (but we're past grace period)
 				isDue = true;

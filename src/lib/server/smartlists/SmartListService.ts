@@ -974,7 +974,7 @@ export class SmartListService {
 		const monitored = list.autoAddMonitored ?? true;
 		const wantsSubtitles = list.wantsSubtitles ?? true;
 
-		let addedCount = 0;
+		let addedCount: number;
 
 		if (mediaType === 'movie') {
 			addedCount = await this.autoAddMovies(
