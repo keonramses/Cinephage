@@ -103,6 +103,35 @@ async function getDashboardStats() {
 		})
 		.from(episodes);
 
+	const today = new Date().toISOString().split('T')[0];
+
+	const [airedMissingEpisodes, unairedEpisodes] = await Promise.all([
+		db
+			.select({ count: count() })
+			.from(episodes)
+			.innerJoin(series, eq(episodes.seriesId, series.id))
+			.where(
+				and(
+					eq(episodes.monitored, true),
+					eq(episodes.hasFile, false),
+					eq(series.monitored, true),
+					sql`${episodes.airDate} <= ${today}`
+				)
+			),
+		db
+			.select({ count: count() })
+			.from(episodes)
+			.innerJoin(series, eq(episodes.seriesId, series.id))
+			.where(
+				and(
+					eq(episodes.monitored, true),
+					eq(episodes.hasFile, false),
+					eq(series.monitored, true),
+					sql`${episodes.airDate} > ${today}`
+				)
+			)
+	]);
+
 	const [activeDownloads, failedDownloads] = await Promise.all([
 		db
 			.select({ count: count() })
@@ -159,7 +188,8 @@ async function getDashboardStats() {
 		episodes: {
 			total: episodeStats?.total || 0,
 			withFile: episodeStats?.withFile || 0,
-			missing: (episodeStats?.total || 0) - (episodeStats?.withFile || 0),
+			missing: airedMissingEpisodes?.[0]?.count || 0,
+			unaired: unairedEpisodes?.[0]?.count || 0,
 			monitored: episodeStats?.monitored || 0
 		},
 		activeDownloads: activeDownloads?.[0]?.count || 0,
@@ -202,9 +232,36 @@ async function getRecentlyAdded() {
 		.orderBy(desc(series.added))
 		.limit(6);
 
+	const today = new Date().toISOString().split('T')[0];
+	const recentlyAddedSeriesIds = recentlyAddedSeries.map((s) => s.id);
+	const recentlyAddedSeriesMissingCounts =
+		recentlyAddedSeriesIds.length > 0
+			? await db
+					.select({
+						seriesId: episodes.seriesId,
+						count: count()
+					})
+					.from(episodes)
+					.where(
+						and(
+							inArray(episodes.seriesId, recentlyAddedSeriesIds),
+							eq(episodes.hasFile, false),
+							sql`${episodes.airDate} <= ${today}`
+						)
+					)
+					.groupBy(episodes.seriesId)
+			: [];
+	const recentlyAddedSeriesMissingMap = new Map(
+		recentlyAddedSeriesMissingCounts.map((row) => [row.seriesId, row.count])
+	);
+	const recentlyAddedSeriesWithMissing = recentlyAddedSeries.map((show) => ({
+		...show,
+		airedMissingCount: recentlyAddedSeriesMissingMap.get(show.id) ?? 0
+	}));
+
 	return {
 		movies: recentlyAddedMovies,
-		series: recentlyAddedSeries
+		series: recentlyAddedSeriesWithMissing
 	};
 }
 
