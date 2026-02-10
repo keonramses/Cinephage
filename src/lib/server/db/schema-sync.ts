@@ -3591,7 +3591,7 @@ const MIGRATIONS: MigrationDefinition[] = [
 				rowsUpdated: result.changes
 			});
 		}
-		},
+	},
 
 	// Migration 50: Fresh start for Live TV with multi-provider support (Stalker, XStream, M3U)
 	{
@@ -4029,8 +4029,8 @@ const MIGRATIONS: MigrationDefinition[] = [
 				logger.info('[SchemaSync] iptv_org_config column already exists in livetv_accounts');
 			}
 		}
-		}
-	];
+	}
+];
 
 /**
  * Get current schema version from database
