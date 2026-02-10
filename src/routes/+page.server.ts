@@ -43,7 +43,7 @@ export const load: PageServerLoad = async ({ fetch, url }) => {
 			})
 			.from(episodes);
 
-		const today = new Date().toISOString().split('T')[0];
+			const today = new Date().toISOString().split('T')[0];
 
 		const [airedMissingEpisodes, unairedEpisodes] = await Promise.all([
 			db
@@ -72,7 +72,7 @@ export const load: PageServerLoad = async ({ fetch, url }) => {
 				)
 		]);
 
-		// Get active and failed download counts
+			// Get active and failed download counts
 		const [activeDownloads, failedDownloads] = await Promise.all([
 			db
 				.select({ count: count() })
