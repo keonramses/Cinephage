@@ -6,6 +6,7 @@
 		CheckCircle2,
 		XCircle,
 		Loader2,
+		PauseCircle,
 		AlertCircle,
 		Minus,
 		Clapperboard,
@@ -51,6 +52,7 @@
 		imported: { label: 'Imported', variant: 'badge-success', icon: CheckCircle2 },
 		streaming: { label: 'Streaming', variant: 'badge-info', icon: CheckCircle2 },
 		downloading: { label: 'Downloading', variant: 'badge-info', icon: Loader2 },
+		paused: { label: 'Paused', variant: 'badge-warning', icon: PauseCircle },
 		failed: { label: 'Failed', variant: 'badge-error', icon: XCircle },
 		rejected: { label: 'Rejected', variant: 'badge-warning', icon: AlertCircle },
 		removed: { label: 'Removed', variant: 'badge-ghost', icon: XCircle },
@@ -301,7 +303,7 @@
 								<Pause class="h-4 w-4" />
 								Pause
 							</button>
-						{:else}
+						{:else if activity.status === 'paused'}
 							<button class="btn btn-ghost btn-sm" onclick={handleResume} disabled={actionLoading}>
 								<Play class="h-4 w-4" />
 								Resume

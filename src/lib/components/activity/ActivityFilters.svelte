@@ -81,6 +81,7 @@
 		{ value: 'all', label: 'All', color: '' },
 		{ value: 'success', label: 'Success', color: 'badge-success' },
 		{ value: 'downloading', label: 'Downloading', color: 'badge-info' },
+		{ value: 'paused', label: 'Paused', color: 'badge-warning' },
 		{ value: 'failed', label: 'Failed', color: 'badge-error' },
 		{ value: 'removed', label: 'Removed', color: 'badge-ghost' },
 		{ value: 'rejected', label: 'Rejected', color: 'badge-warning' },

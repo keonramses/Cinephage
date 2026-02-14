@@ -19,12 +19,13 @@ export function getMovieAvailabilityLevel(
 	if (movieYear > currentYear) return 'announced';
 	if (movieYear < currentYear) return 'released';
 
-	const addedDate = movie.added ? new Date(movie.added) : now;
-	const daysSinceAdded = (now.getTime() - addedDate.getTime()) / (1000 * 60 * 60 * 24);
+	// Current-year movies are unreleased by default and only considered released
+	// after they have been in-library for a sustained period.
+	const addedTimestamp = movie.added ? new Date(movie.added).getTime() : Number.NaN;
+	if (Number.isNaN(addedTimestamp)) return 'inCinemas';
 
+	const daysSinceAdded = (now.getTime() - addedTimestamp) / (1000 * 60 * 60 * 24);
 	if (daysSinceAdded > 120) return 'released';
-	if (daysSinceAdded > 30) return 'inCinemas';
-
 	return 'inCinemas';
 }
 

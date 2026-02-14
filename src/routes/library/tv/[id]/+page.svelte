@@ -32,6 +32,29 @@
 	const seasons = $derived(seasonsState ?? data.seasons);
 	const queueItems = $derived(queueItemsState ?? data.queueItems);
 
+	function computeSeriesEpisodeStats(seasonList: PageData['seasons']) {
+		const regularSeasons = seasonList.filter((season) => season.seasonNumber > 0);
+		const totalEpisodes = regularSeasons.reduce((sum, season) => sum + season.episodes.length, 0);
+		const totalFiles = regularSeasons.reduce(
+			(sum, season) => sum + season.episodes.filter((episode) => episode.file !== null).length,
+			0
+		);
+		const percentComplete = totalEpisodes > 0 ? Math.round((totalFiles / totalEpisodes) * 100) : 0;
+
+		return { totalEpisodes, totalFiles, percentComplete };
+	}
+
+	// Keep series completion counters aligned with the actual episode rows shown in seasons.
+	const seriesForDisplay = $derived.by(() => {
+		const { totalEpisodes, totalFiles, percentComplete } = computeSeriesEpisodeStats(seasons);
+		return {
+			...series,
+			episodeCount: totalEpisodes,
+			episodeFileCount: totalFiles,
+			percentComplete
+		};
+	});
+
 	$effect(() => {
 		const incomingSeriesId = data.series.id;
 		if (lastSeriesId !== incomingSeriesId) {
@@ -109,12 +132,11 @@
 
 			// Update season stats
 			seasons[seasonIndex].episodeFileCount = seasons[seasonIndex].episodes.filter(
-				(e) => e.hasFile
+				(e) => e.file !== null
 			).length;
 
 			// Update series stats
-			const totalEpisodes = seasons.reduce((acc, s) => acc + (s.episodeCount || 0), 0);
-			const totalFiles = seasons.reduce((acc, s) => acc + (s.episodeFileCount || 0), 0);
+			const { totalEpisodes, totalFiles } = computeSeriesEpisodeStats(seasons);
 			series.episodeFileCount = totalFiles;
 			series.percentComplete =
 				totalEpisodes > 0 ? Math.round((totalFiles / totalEpisodes) * 100) : 0;
@@ -129,12 +151,11 @@
 					}
 				}
 				// Update season stats
-				season.episodeFileCount = season.episodes.filter((e) => e.hasFile).length;
+				season.episodeFileCount = season.episodes.filter((e) => e.file !== null).length;
 			}
 
 			// Update series stats
-			const totalEpisodes = seasons.reduce((acc, s) => acc + (s.episodeCount || 0), 0);
-			const totalFiles = seasons.reduce((acc, s) => acc + (s.episodeFileCount || 0), 0);
+			const { totalEpisodes, totalFiles } = computeSeriesEpisodeStats(seasons);
 			series.episodeFileCount = totalFiles;
 			series.percentComplete =
 				totalEpisodes > 0 ? Math.round((totalFiles / totalEpisodes) * 100) : 0;
@@ -282,7 +303,7 @@
 		let count = 0;
 		for (const season of seasons) {
 			for (const episode of season.episodes) {
-				if (episode.monitored && !episode.hasFile && episode.airDate && episode.airDate <= now) {
+				if (episode.monitored && !episode.file && episode.airDate && episode.airDate <= now) {
 					// Don't count as missing if it's downloading
 					if (
 						!downloadingEpisodeIds.has(episode.id) &&
@@ -343,18 +364,7 @@
 	}
 
 	function updateSeriesStatsFromSeasons(updatedSeasons: typeof seasons): void {
-		const totalEpisodes = updatedSeasons.reduce(
-			(sum, season) => sum + (season.episodeCount ?? season.episodes.length),
-			0
-		);
-		const totalFiles = updatedSeasons.reduce(
-			(sum, season) =>
-				sum +
-				(typeof season.episodeFileCount === 'number'
-					? season.episodeFileCount
-					: season.episodes.filter((episode) => episode.hasFile).length),
-			0
-		);
+		const { totalEpisodes, totalFiles } = computeSeriesEpisodeStats(updatedSeasons);
 
 		seriesState = {
 			...series,
@@ -621,7 +631,7 @@
 					const updatedEpisodes = season.episodes.map((e) =>
 						e.id === deletingEpisodeId ? { ...e, hasFile: false as boolean | null, file: null } : e
 					);
-					const updatedEpisodeFileCount = updatedEpisodes.filter((e) => e.hasFile).length;
+					const updatedEpisodeFileCount = updatedEpisodes.filter((e) => e.file !== null).length;
 					const updatedEpisodeCount = updatedEpisodes.length;
 
 					return {
@@ -1181,7 +1191,7 @@
 	</div>
 	<!-- Header -->
 	<LibrarySeriesHeader
-		{series}
+		series={seriesForDisplay}
 		{qualityProfileName}
 		refreshing={isRefreshing}
 		{refreshProgress}
@@ -1263,7 +1273,7 @@
 		</div>
 
 		<!-- Sidebar -->
-		<TVSeriesSidebar {series} />
+		<TVSeriesSidebar series={seriesForDisplay} />
 	</div>
 </div>
 

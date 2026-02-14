@@ -7,16 +7,18 @@ import {
 	movies,
 	series,
 	episodes,
+	episodeFiles,
 	downloadQueue,
+	downloadHistory,
 	unmatchedFiles,
 	rootFolders
 } from '$lib/server/db/schema';
-import { count, eq, desc, and, not, inArray, sql, gte, ne } from 'drizzle-orm';
+import { count, eq, desc, and, inArray, sql, gte, ne } from 'drizzle-orm';
 import { activityService, mediaResolver } from '$lib/server/activity';
 import { extractReleaseGroup } from '$lib/server/indexers/parser/patterns/releaseGroup';
 import type { UnifiedActivity, ActivityStatus } from '$lib/types/activity';
 import type { RequestHandler } from '@sveltejs/kit';
-import { getMovieAvailabilityLevel, isMovieReleased } from '$lib/utils/movieAvailability';
+import { getMovieAvailabilityLevel } from '$lib/utils/movieAvailability';
 
 interface QueueItem {
 	id: string;
@@ -37,8 +39,6 @@ interface QueueItem {
 	errorMessage?: string | null;
 	isUpgrade?: boolean;
 }
-
-const TERMINAL_STATUSES = ['imported', 'removed'];
 
 function isQueueItem(value: unknown): value is QueueItem {
 	if (!value || typeof value !== 'object') return false;
@@ -65,6 +65,8 @@ function getQueueErrorFromPayload(payload: unknown): string | undefined {
 
 function mapQueueStatusToActivityStatus(status: string): ActivityStatus {
 	switch (status) {
+		case 'paused':
+			return 'paused';
 		case 'failed':
 			return 'failed';
 		case 'imported':
@@ -104,88 +106,121 @@ async function getDashboardStats() {
 		})
 		.from(episodes);
 
-	const today = new Date().toISOString().split('T')[0];
+	const now = new Date();
+	const today = now.toISOString().split('T')[0];
+	const currentYear = now.getFullYear();
+	const nowIso = now.toISOString();
+	const releasedMovieCondition = sql`(
+		${movies.year} IS NOT NULL
+		AND (
+			${movies.year} < ${currentYear}
+			OR (
+				${movies.year} = ${currentYear}
+				AND ${movies.added} IS NOT NULL
+				AND julianday(${movies.added}) IS NOT NULL
+				AND (julianday(${nowIso}) - julianday(${movies.added})) > 120
+			)
+		)
+	)`;
 
 	// Primary counters are monitored-only (actionable). We also keep a secondary
 	// unmonitored missing counter for visibility ("ignored" in UI).
-	const [airedMissingEpisodes, unairedEpisodes, unmonitoredAiredMissingEpisodes, missingMovies] =
+	const [
+		airedMissingEpisodes,
+		unairedEpisodes,
+		unmonitoredAiredMissingEpisodes,
+		missingMovieStats
+	] = await Promise.all([
+		db
+			.select({ count: count() })
+			.from(episodes)
+			.innerJoin(series, eq(episodes.seriesId, series.id))
+			.where(
+				and(
+					eq(episodes.hasFile, false),
+					eq(episodes.monitored, true),
+					eq(series.monitored, true),
+					ne(episodes.seasonNumber, 0),
+					sql`${episodes.airDate} <= ${today}`
+				)
+			),
+		db
+			.select({ count: count() })
+			.from(episodes)
+			.innerJoin(series, eq(episodes.seriesId, series.id))
+			.where(
+				and(
+					eq(episodes.hasFile, false),
+					eq(episodes.monitored, true),
+					eq(series.monitored, true),
+					ne(episodes.seasonNumber, 0),
+					sql`${episodes.airDate} > ${today}`
+				)
+			),
+		db
+			.select({ count: count() })
+			.from(episodes)
+			.innerJoin(series, eq(episodes.seriesId, series.id))
+			.where(
+				and(
+					eq(episodes.hasFile, false),
+					ne(episodes.seasonNumber, 0),
+					sql`${episodes.airDate} <= ${today}`,
+					sql`(${episodes.monitored} = 0 OR ${series.monitored} = 0)`
+				)
+			),
+		db
+			.select({
+				monitoredReleasedMissing: count(
+					sql`CASE WHEN ${movies.monitored} = 1 AND ${releasedMovieCondition} THEN 1 END`
+				),
+				monitoredUnreleased: count(
+					sql`CASE WHEN ${movies.monitored} = 1 AND NOT (${releasedMovieCondition}) THEN 1 END`
+				),
+				unmonitoredMissing: count(sql`CASE WHEN ${movies.monitored} = 0 THEN 1 END`)
+			})
+			.from(movies)
+			.where(eq(movies.hasFile, false))
+	]);
+	const monitoredReleasedMissingMovies = missingMovieStats?.[0]?.monitoredReleasedMissing || 0;
+	const monitoredUnreleasedMovies = missingMovieStats?.[0]?.monitoredUnreleased || 0;
+	const unmonitoredMissingMovies = missingMovieStats?.[0]?.unmonitoredMissing || 0;
+
+	const oneDayAgoIso = new Date(now.getTime() - 24 * 60 * 60 * 1000).toISOString();
+	const [downloadingDownloads, queuedDownloads, downloadThroughput, completedDownloads24h] =
 		await Promise.all([
 			db
 				.select({ count: count() })
-				.from(episodes)
-				.innerJoin(series, eq(episodes.seriesId, series.id))
-				.where(
-					and(
-						eq(episodes.hasFile, false),
-						eq(episodes.monitored, true),
-						eq(series.monitored, true),
-						ne(episodes.seasonNumber, 0),
-						sql`${episodes.airDate} <= ${today}`
-					)
-				),
-			db
-				.select({ count: count() })
-				.from(episodes)
-				.innerJoin(series, eq(episodes.seriesId, series.id))
-				.where(
-					and(
-						eq(episodes.hasFile, false),
-						eq(episodes.monitored, true),
-						eq(series.monitored, true),
-						ne(episodes.seasonNumber, 0),
-						sql`${episodes.airDate} > ${today}`
-					)
-				),
-			db
-				.select({ count: count() })
-				.from(episodes)
-				.innerJoin(series, eq(episodes.seriesId, series.id))
-				.where(
-					and(
-						eq(episodes.hasFile, false),
-						ne(episodes.seasonNumber, 0),
-						sql`${episodes.airDate} <= ${today}`,
-						sql`(${episodes.monitored} = 0 OR ${series.monitored} = 0)`
-					)
-				),
+				.from(downloadQueue)
+				.where(eq(downloadQueue.status, 'downloading')),
+			db.select({ count: count() }).from(downloadQueue).where(eq(downloadQueue.status, 'queued')),
 			db
 				.select({
-					monitored: movies.monitored,
-					year: movies.year,
-					added: movies.added
+					totalSpeed: sql<number>`COALESCE(SUM(${downloadQueue.downloadSpeed}), 0)`,
+					avgProgress: sql<number>`COALESCE(AVG(CAST(${downloadQueue.progress} AS REAL)), 0)`,
+					movingCount: count(sql`CASE WHEN ${downloadQueue.downloadSpeed} > 0 THEN 1 END`)
 				})
-				.from(movies)
-				.where(eq(movies.hasFile, false))
-		]);
-
-	let monitoredReleasedMissingMovies = 0;
-	let monitoredUnreleasedMovies = 0;
-	let unmonitoredMissingMovies = 0;
-
-	for (const movie of missingMovies) {
-		if (movie.monitored) {
-			if (isMovieReleased(movie)) {
-				monitoredReleasedMissingMovies += 1;
-			} else {
-				monitoredUnreleasedMovies += 1;
-			}
-		} else {
-			unmonitoredMissingMovies += 1;
-		}
-	}
-
-	const [activeDownloads, failedDownloads] = await Promise.all([
-		db
-			.select({ count: count() })
-			.from(downloadQueue)
-			.where(
-				and(
-					not(inArray(downloadQueue.status, TERMINAL_STATUSES)),
-					not(eq(downloadQueue.status, 'failed'))
+				.from(downloadQueue)
+				.where(eq(downloadQueue.status, 'downloading')),
+			db
+				.select({ count: count() })
+				.from(downloadHistory)
+				.where(
+					and(
+						eq(downloadHistory.status, 'imported'),
+						sql`COALESCE(${downloadHistory.importedAt}, ${downloadHistory.completedAt}, ${downloadHistory.createdAt}) >= ${oneDayAgoIso}`
+					)
 				)
-			),
-		db.select({ count: count() }).from(downloadQueue).where(eq(downloadQueue.status, 'failed'))
-	]);
+		]);
+	const activeDownloads = downloadingDownloads?.[0]?.count || 0;
+	const queuedDownloadCount = queuedDownloads?.[0]?.count || 0;
+	const downloadSpeedBytes = Number(downloadThroughput?.[0]?.totalSpeed || 0);
+	const downloadAvgProgress = Math.max(
+		0,
+		Math.min(100, Math.round(Number(downloadThroughput?.[0]?.avgProgress || 0) * 100))
+	);
+	const movingDownloads = downloadThroughput?.[0]?.movingCount || 0;
+	const completedDownloadsLast24h = completedDownloads24h?.[0]?.count || 0;
 
 	const [unmatchedCount] = await db.select({ count: count() }).from(unmatchedFiles);
 
@@ -237,8 +272,12 @@ async function getDashboardStats() {
 			unmonitoredMissing: unmonitoredAiredMissingEpisodes?.[0]?.count || 0,
 			monitored: episodeStats?.monitored || 0
 		},
-		activeDownloads: activeDownloads?.[0]?.count || 0,
-		failedDownloads: failedDownloads?.[0]?.count || 0,
+		activeDownloads,
+		queuedDownloads: queuedDownloadCount,
+		downloadSpeedBytes,
+		downloadAvgProgress,
+		movingDownloads,
+		completedDownloadsLast24h,
 		unmatchedFiles: unmatchedCount?.count || 0,
 		missingRootFolders: (missingMovieRoots?.[0]?.count || 0) + (missingSeriesRoots?.[0]?.count || 0)
 	};
@@ -288,6 +327,48 @@ async function getRecentlyAdded() {
 
 	const today = new Date().toISOString().split('T')[0];
 	const recentlyAddedSeriesIds = recentlyAddedSeries.map((s) => s.id);
+	const [recentRegularEpisodes, recentEpisodeFiles] =
+		recentlyAddedSeriesIds.length > 0
+			? await Promise.all([
+					db
+						.select({
+							id: episodes.id,
+							seriesId: episodes.seriesId
+						})
+						.from(episodes)
+						.where(
+							and(inArray(episodes.seriesId, recentlyAddedSeriesIds), ne(episodes.seasonNumber, 0))
+						),
+					db
+						.select({
+							seriesId: episodeFiles.seriesId,
+							episodeIds: episodeFiles.episodeIds
+						})
+						.from(episodeFiles)
+						.where(inArray(episodeFiles.seriesId, recentlyAddedSeriesIds))
+				])
+			: [[], []];
+	const recentEpisodeIdToSeries = new Map(recentRegularEpisodes.map((ep) => [ep.id, ep.seriesId]));
+	const recentEpisodeTotals = new Map<string, number>();
+	for (const episode of recentRegularEpisodes) {
+		recentEpisodeTotals.set(episode.seriesId, (recentEpisodeTotals.get(episode.seriesId) ?? 0) + 1);
+	}
+	const recentEpisodeFilesBySeries = new Map<string, Set<string>>();
+	for (const file of recentEpisodeFiles) {
+		const linkedEpisodeIds = (file.episodeIds as string[] | null) ?? [];
+		if (linkedEpisodeIds.length === 0) continue;
+		const seriesId = file.seriesId;
+		let tracked = recentEpisodeFilesBySeries.get(seriesId);
+		if (!tracked) {
+			tracked = new Set<string>();
+			recentEpisodeFilesBySeries.set(seriesId, tracked);
+		}
+		for (const episodeId of linkedEpisodeIds) {
+			if (recentEpisodeIdToSeries.get(episodeId) === seriesId) {
+				tracked.add(episodeId);
+			}
+		}
+	}
 	const recentlyAddedSeriesMissingCounts =
 		recentlyAddedSeriesIds.length > 0
 			? await db
@@ -315,6 +396,8 @@ async function getRecentlyAdded() {
 	);
 	const recentlyAddedSeriesWithMissing = recentlyAddedSeries.map((show) => ({
 		...show,
+		episodeCount: recentEpisodeTotals.get(show.id) ?? 0,
+		episodeFileCount: recentEpisodeFilesBySeries.get(show.id)?.size ?? 0,
 		airedMissingCount: recentlyAddedSeriesMissingMap.get(show.id) ?? 0
 	}));
 

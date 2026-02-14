@@ -6,6 +6,10 @@
 		XCircle,
 		AlertCircle,
 		Loader2,
+		Pause,
+		Play,
+		RotateCcw,
+		Trash2,
 		MessageSquare,
 		Minus,
 		Clapperboard,
@@ -18,6 +22,7 @@
 	} from 'lucide-svelte';
 	import { resolvePath } from '$lib/utils/routing';
 	import { formatBytes } from '$lib/utils/format';
+	import { toasts } from '$lib/stores/toast.svelte';
 
 	interface Props {
 		activities: UnifiedActivity[];
@@ -25,6 +30,10 @@
 		sortDirection?: 'asc' | 'desc';
 		onSort?: (field: string) => void;
 		onRowClick?: (activity: UnifiedActivity) => void;
+		onPause?: (id: string) => Promise<void>;
+		onResume?: (id: string) => Promise<void>;
+		onRemove?: (id: string) => Promise<void>;
+		onRetry?: (id: string) => Promise<void>;
 		compact?: boolean;
 	}
 
@@ -34,12 +43,17 @@
 		sortDirection = 'desc',
 		onSort,
 		onRowClick,
+		onPause,
+		onResume,
+		onRemove,
+		onRetry,
 		compact = false
 	}: Props = $props();
 
 	// Track expanded rows
 	let expandedRows = new SvelteSet<string>();
 	let failedReasonExpandedRows = new SvelteSet<string>();
+	let queueActionLoadingRows = new SvelteSet<string>();
 
 	function toggleRow(id: string) {
 		if (expandedRows.has(id)) {
@@ -88,6 +102,7 @@
 		imported: { label: 'Imported', variant: 'badge-success', icon: CheckCircle2 },
 		streaming: { label: 'Streaming', variant: 'badge-info', icon: CheckCircle2 },
 		downloading: { label: 'Downloading', variant: 'badge-info', icon: Loader2 },
+		paused: { label: 'Paused', variant: 'badge-warning', icon: Pause },
 		failed: { label: 'Failed', variant: 'badge-error', icon: XCircle },
 		rejected: { label: 'Rejected', variant: 'badge-warning', icon: AlertCircle },
 		removed: { label: 'Removed', variant: 'badge-ghost', icon: XCircle },
@@ -146,6 +161,38 @@
 
 		return null;
 	}
+
+	async function runQueueAction(
+		activity: UnifiedActivity,
+		action: 'pause' | 'resume' | 'remove' | 'retry'
+	): Promise<void> {
+		if (!activity.queueItemId) return;
+		if (queueActionLoadingRows.has(activity.id)) return;
+
+		const handler =
+			action === 'pause'
+				? onPause
+				: action === 'resume'
+					? onResume
+					: action === 'remove'
+						? onRemove
+						: onRetry;
+		if (!handler) return;
+
+		queueActionLoadingRows.add(activity.id);
+		try {
+			await handler(activity.queueItemId);
+			if (action === 'pause') toasts.success('Download paused');
+			if (action === 'resume') toasts.success('Download resumed');
+			if (action === 'remove') toasts.success('Download removed');
+			if (action === 'retry') toasts.success('Download retry initiated');
+		} catch (error) {
+			const message = error instanceof Error ? error.message : `Failed to ${action} download`;
+			toasts.error(message);
+		} finally {
+			queueActionLoadingRows.delete(activity.id);
+		}
+	}
 </script>
 
 {#if activities.length === 0}
@@ -162,6 +209,7 @@
 			{@const StatusIcon = config.icon}
 			{@const isExpanded = expandedRows.has(activity.id)}
 			{@const isFailedReasonExpanded = failedReasonExpandedRows.has(activity.id)}
+			{@const isQueueActionLoading = queueActionLoadingRows.has(activity.id)}
 			<div class="rounded-xl bg-base-200 p-4">
 				<div class="flex items-start justify-between gap-2">
 					<span class="badge gap-1 {config.variant}">
@@ -279,6 +327,50 @@
 						<div class="text-xs text-base-content/60">{activity.statusReason}</div>
 					{/if}
 				</div>
+
+				{#if activity.queueItemId}
+					<div class="mt-3 flex flex-wrap gap-2">
+						{#if activity.status === 'downloading'}
+							<button
+								class="btn btn-ghost btn-xs"
+								onclick={() => runQueueAction(activity, 'pause')}
+								disabled={isQueueActionLoading}
+							>
+								<Pause class="h-3.5 w-3.5" />
+								Pause
+							</button>
+						{:else if activity.status === 'paused'}
+							<button
+								class="btn btn-ghost btn-xs"
+								onclick={() => runQueueAction(activity, 'resume')}
+								disabled={isQueueActionLoading}
+							>
+								<Play class="h-3.5 w-3.5" />
+								Resume
+							</button>
+						{/if}
+
+						{#if activity.status === 'failed'}
+							<button
+								class="btn btn-ghost btn-xs"
+								onclick={() => runQueueAction(activity, 'retry')}
+								disabled={isQueueActionLoading}
+							>
+								<RotateCcw class="h-3.5 w-3.5" />
+								Retry
+							</button>
+						{/if}
+
+						<button
+							class="btn btn-ghost btn-xs btn-error"
+							onclick={() => runQueueAction(activity, 'remove')}
+							disabled={isQueueActionLoading}
+						>
+							<Trash2 class="h-3.5 w-3.5" />
+							Remove
+						</button>
+					</div>
+				{/if}
 
 				{#if (activity.timeline?.length ?? 0) > 0}
 					<button

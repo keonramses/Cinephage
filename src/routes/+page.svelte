@@ -4,6 +4,7 @@
 		Tv,
 		Download,
 		AlertCircle,
+		PauseCircle,
 		Clock,
 		CheckCircle,
 		XCircle,
@@ -139,6 +140,7 @@
 			imported: { label: 'Imported', variant: 'badge-success', icon: CheckCircle },
 			streaming: { label: 'Streaming', variant: 'badge-info', icon: CheckCircle },
 			downloading: { label: 'Downloading', variant: 'badge-info', icon: Loader2 },
+			paused: { label: 'Paused', variant: 'badge-warning', icon: PauseCircle },
 			failed: { label: 'Failed', variant: 'badge-error', icon: XCircle },
 			rejected: { label: 'Rejected', variant: 'badge-warning', icon: AlertCircle },
 			removed: { label: 'Removed', variant: 'badge-ghost', icon: XCircle },
@@ -259,21 +261,14 @@
 						<Download class="h-6 w-6 text-accent" />
 					</div>
 					<div>
-						<div class="text-2xl font-bold">
-							{stats.activeDownloads + (stats.failedDownloads || 0)}
-						</div>
+						<div class="text-2xl font-bold">{stats.activeDownloads}</div>
 						<div class="text-sm text-base-content/70">Downloads</div>
 					</div>
 				</div>
 				<div class="mt-2 text-xs">
-					{#if stats.activeDownloads > 0 || (stats.failedDownloads || 0) > 0}
+					{#if stats.activeDownloads > 0}
 						<div class="flex flex-wrap gap-2">
-							{#if stats.activeDownloads > 0}
-								<span class="badge badge-sm badge-accent">{stats.activeDownloads} active</span>
-							{/if}
-							{#if (stats.failedDownloads || 0) > 0}
-								<span class="badge badge-sm badge-error">{stats.failedDownloads} failed</span>
-							{/if}
+							<span class="badge badge-sm badge-accent">{stats.activeDownloads} active</span>
 						</div>
 					{:else}
 						<span class="text-base-content/50">No active downloads</span>

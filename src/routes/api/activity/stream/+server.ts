@@ -53,6 +53,8 @@ function getQueueErrorFromPayload(payload: unknown): string | undefined {
 
 function mapQueueStatusToActivityStatus(status: string): ActivityStatus {
 	switch (status) {
+		case 'paused':
+			return 'paused';
 		case 'failed':
 			return 'failed';
 		case 'imported':

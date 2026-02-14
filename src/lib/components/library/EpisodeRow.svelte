@@ -151,6 +151,7 @@
 				: 'Not monitored'
 			: 'Series is unmonitored. Enable series monitoring to monitor episodes.'
 	);
+	const hasEpisodeFile = $derived(episode.file !== null);
 
 	function formatAirDate(dateString: string | null): string {
 		if (!dateString) return 'TBA';
@@ -230,7 +231,7 @@
 	}
 </script>
 
-<tr class="hover" class:opacity-60={!isAired(episode.airDate) && !episode.hasFile}>
+<tr class="hover" class:opacity-60={!isAired(episode.airDate) && !hasEpisodeFile}>
 	<!-- Checkbox for selection -->
 	{#if showCheckbox}
 		<td class="w-10">
@@ -313,7 +314,7 @@
 									Interactive search
 								</button>
 							</li>
-							{#if episode.hasFile && (onSubtitleSearch || onSubtitleAutoSearch)}
+							{#if hasEpisodeFile && (onSubtitleSearch || onSubtitleAutoSearch)}
 								<li class="menu-title">
 									<span>Subtitles</span>
 								</li>
@@ -400,7 +401,7 @@
 			<div class="mt-1 flex flex-wrap items-center gap-2 text-xs text-base-content/60 sm:hidden">
 				<span>{formatAirDate(episode.airDate)}</span>
 				<span class="text-base-content/40">•</span>
-				{#if episode.hasFile && episode.file}
+				{#if hasEpisodeFile}
 					<span class="text-success">Downloaded</span>
 				{:else if isDownloading}
 					<span class="text-warning">Downloading</span>
@@ -418,12 +419,12 @@
 					{/if}
 				</span>
 			</div>
-			{#if episode.hasFile && episode.file}
+			{#if hasEpisodeFile}
 				<div class="mt-1 flex flex-wrap items-center gap-2 text-xs text-base-content/60 sm:hidden">
 					{#if isStreamerProfile}
 						<span class="badge badge-xs badge-secondary">Streaming</span>
 					{:else}
-						<QualityBadge quality={episode.file.quality} mediaInfo={null} size="sm" />
+						<QualityBadge quality={episode.file?.quality ?? null} mediaInfo={null} size="sm" />
 					{/if}
 					{#if allSubtitles.length > 0}
 						<div class="flex items-center gap-1">
@@ -443,14 +444,14 @@
 
 	<!-- Status -->
 	<td class="hidden sm:table-cell">
-		{#if episode.hasFile && episode.file}
+		{#if hasEpisodeFile}
 			<div class="flex flex-col gap-1">
 				<div class="flex items-center gap-2">
 					<CheckCircle size={16} class="text-success" />
 					{#if isStreamerProfile}
 						<span class="badge badge-xs badge-secondary">Streaming</span>
 					{:else}
-						<QualityBadge quality={episode.file.quality} mediaInfo={null} size="sm" />
+						<QualityBadge quality={episode.file?.quality ?? null} mediaInfo={null} size="sm" />
 					{/if}
 				</div>
 				{#if allSubtitles.length > 0}
@@ -546,7 +547,7 @@
 							Interactive search
 						</button>
 					</li>
-					{#if episode.hasFile && (onSubtitleSearch || onSubtitleAutoSearch)}
+					{#if hasEpisodeFile && (onSubtitleSearch || onSubtitleAutoSearch)}
 						<li class="menu-title">
 							<span>Subtitles</span>
 						</li>

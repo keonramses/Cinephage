@@ -136,8 +136,11 @@
 		isOpen = defaultOpen;
 	});
 
-	const downloadedCount = $derived(season.episodeFileCount ?? 0);
-	const totalCount = $derived(season.episodeCount ?? season.episodes.length);
+	// Keep header counts aligned with visible rows (episodes array), not cached flags/aggregates.
+	const downloadedCount = $derived(
+		season.episodes.filter((episode) => episode.file !== null).length
+	);
+	const totalCount = $derived(season.episodes.length);
 	const percentComplete = $derived(
 		totalCount > 0 ? Math.round((downloadedCount / totalCount) * 100) : 0
 	);

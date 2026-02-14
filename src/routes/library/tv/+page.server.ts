@@ -1,12 +1,13 @@
 import { db } from '$lib/server/db/index.js';
 import {
 	series,
+	episodes,
 	rootFolders,
 	scoringProfiles,
 	profileSizeLimits,
 	episodeFiles
 } from '$lib/server/db/schema.js';
-import { eq } from 'drizzle-orm';
+import { eq, and, inArray, ne } from 'drizzle-orm';
 import type { PageServerLoad } from './$types';
 import type { LibrarySeries, EpisodeFile } from '$lib/types/library';
 import { logger } from '$lib/logging';
@@ -63,25 +64,69 @@ export const load: PageServerLoad = async ({ url }) => {
 			.from(series)
 			.leftJoin(rootFolders, eq(series.rootFolderId, rootFolders.id));
 
-		// Calculate percentages and format data
-		const seriesWithStats: LibrarySeries[] = allSeries.map((s) => ({
-			...s,
-			missingRootFolder: !s.rootFolderId || !s.rootFolderPath || s.rootFolderMediaType !== 'tv',
-			percentComplete:
-				s.episodeCount && s.episodeCount > 0
-					? Math.round(((s.episodeFileCount || 0) / s.episodeCount) * 100)
-					: 0
-		})) as LibrarySeries[];
+		const seriesIds = allSeries.map((s) => s.id);
+		const allRegularEpisodes =
+			seriesIds.length > 0
+				? await db
+						.select({
+							id: episodes.id,
+							seriesId: episodes.seriesId
+						})
+						.from(episodes)
+						.where(and(inArray(episodes.seriesId, seriesIds), ne(episodes.seasonNumber, 0)))
+				: [];
+		const regularEpisodeIdToSeries = new Map(allRegularEpisodes.map((ep) => [ep.id, ep.seriesId]));
+		const episodeTotalsBySeries = new Map<string, number>();
+		for (const episode of allRegularEpisodes) {
+			episodeTotalsBySeries.set(
+				episode.seriesId,
+				(episodeTotalsBySeries.get(episode.seriesId) ?? 0) + 1
+			);
+		}
 
-		// Fetch all episode files for file-type filtering and size aggregation
+		// Fetch all episode files for file-type filtering, size aggregation, and derived episode-file counts.
 		const allEpisodeFiles = await db
 			.select({
 				seriesId: episodeFiles.seriesId,
+				episodeIds: episodeFiles.episodeIds,
 				size: episodeFiles.size,
 				quality: episodeFiles.quality,
 				mediaInfo: episodeFiles.mediaInfo
 			})
 			.from(episodeFiles);
+
+		const episodeFilesBySeries = new Map<string, Set<string>>();
+		for (const file of allEpisodeFiles) {
+			const linkedEpisodeIds = (file.episodeIds as string[] | null) ?? [];
+			if (linkedEpisodeIds.length === 0) continue;
+			const seriesId = file.seriesId;
+			let tracked = episodeFilesBySeries.get(seriesId);
+			if (!tracked) {
+				tracked = new Set<string>();
+				episodeFilesBySeries.set(seriesId, tracked);
+			}
+			for (const episodeId of linkedEpisodeIds) {
+				if (regularEpisodeIdToSeries.get(episodeId) === seriesId) {
+					tracked.add(episodeId);
+				}
+			}
+		}
+
+		// Calculate percentages and format data using derived episode/file linkage (source of truth).
+		const seriesWithStats: LibrarySeries[] = allSeries.map((s) => {
+			const derivedEpisodeCount = episodeTotalsBySeries.get(s.id) ?? 0;
+			const derivedEpisodeFileCount = episodeFilesBySeries.get(s.id)?.size ?? 0;
+			return {
+				...s,
+				episodeCount: derivedEpisodeCount,
+				episodeFileCount: derivedEpisodeFileCount,
+				missingRootFolder: !s.rootFolderId || !s.rootFolderPath || s.rootFolderMediaType !== 'tv',
+				percentComplete:
+					derivedEpisodeCount > 0
+						? Math.round((derivedEpisodeFileCount / derivedEpisodeCount) * 100)
+						: 0
+			};
+		}) as LibrarySeries[];
 
 		// Build seriesId -> total size map for sort-by-size
 		const seriesTotalSizeMap = new Map<string, number>();

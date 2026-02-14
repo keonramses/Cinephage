@@ -31,24 +31,53 @@
 	let bulkSavingTv = $state(false);
 	const savingIssues = new SvelteMap<string, boolean>();
 
-	const movieIssueCount = $derived(
-		libraryItems.filter((item) => item.mediaType === 'movie').length
-	);
-	const tvIssueCount = $derived(libraryItems.filter((item) => item.mediaType === 'tv').length);
-	const missingIssueCount = $derived(
-		libraryItems.filter((item) => item.issue === 'missing_root_folder').length
-	);
-	const invalidIssueCount = $derived(
-		libraryItems.filter((item) => item.issue === 'invalid_root_folder').length
-	);
-	const selectedMovieCount = $derived(
-		libraryItems.filter((item) => item.mediaType === 'movie' && selectedIssues.includes(item.id))
-			.length
-	);
-	const selectedTvCount = $derived(
-		libraryItems.filter((item) => item.mediaType === 'tv' && selectedIssues.includes(item.id))
-			.length
-	);
+	const selectedIssueSet = $derived.by(() => new Set(selectedIssues));
+	const issueCounts = $derived.by(() => {
+		const selectedSet = new Set(selectedIssues);
+		let movieCount = 0;
+		let tvCount = 0;
+		let missingCount = 0;
+		let invalidCount = 0;
+		let selectedMovie = 0;
+		let selectedTv = 0;
+
+		for (const item of libraryItems) {
+			if (item.mediaType === 'movie') {
+				movieCount += 1;
+			} else {
+				tvCount += 1;
+			}
+
+			if (item.issue === 'invalid_root_folder') {
+				invalidCount += 1;
+			} else {
+				missingCount += 1;
+			}
+
+			if (selectedSet.has(item.id)) {
+				if (item.mediaType === 'movie') {
+					selectedMovie += 1;
+				} else {
+					selectedTv += 1;
+				}
+			}
+		}
+
+		return {
+			movieCount,
+			tvCount,
+			missingCount,
+			invalidCount,
+			selectedMovie,
+			selectedTv
+		};
+	});
+	const movieIssueCount = $derived(issueCounts.movieCount);
+	const tvIssueCount = $derived(issueCounts.tvCount);
+	const missingIssueCount = $derived(issueCounts.missingCount);
+	const invalidIssueCount = $derived(issueCounts.invalidCount);
+	const selectedMovieCount = $derived(issueCounts.selectedMovie);
+	const selectedTvCount = $derived(issueCounts.selectedTv);
 	const selectedFilteredCount = $derived(
 		libraryIssuesFilter === 'movie' ? selectedMovieCount : selectedTvCount
 	);
@@ -175,7 +204,7 @@
 	}
 
 	function toggleIssueSelection(itemId: string): void {
-		if (selectedIssues.includes(itemId)) {
+		if (selectedIssueSet.has(itemId)) {
 			selectedIssues = selectedIssues.filter((id) => id !== itemId);
 			return;
 		}
@@ -210,7 +239,7 @@
 		}
 
 		const selectedItems = libraryItems.filter(
-			(item) => item.mediaType === mediaType && selectedIssues.includes(item.id)
+			(item) => item.mediaType === mediaType && selectedIssueSet.has(item.id)
 		);
 		if (selectedItems.length === 0) {
 			toasts.info('Select items to apply the bulk action');
@@ -401,7 +430,7 @@
 									<input
 										type="checkbox"
 										class="checkbox checkbox-sm"
-										checked={selectedIssues.includes(item.id)}
+										checked={selectedIssueSet.has(item.id)}
 										onchange={() => toggleIssueSelection(item.id)}
 									/>
 									<div

@@ -44,6 +44,7 @@
 			case 'imported':
 			case 'streaming':
 			case 'downloading':
+			case 'paused':
 			case 'failed':
 			case 'rejected':
 			case 'removed':
@@ -178,12 +179,21 @@
 			if (existingIndex >= 0) {
 				activities = activities.filter((a) => a.id !== normalized.id);
 				total = Math.max(0, total - 1);
+				if (selectedActivity?.id === normalized.id) {
+					selectedActivity = null;
+					activityDetails = null;
+					isModalOpen = false;
+				}
 			}
 			return;
 		}
 
 		if (existingIndex >= 0) {
-			activities[existingIndex] = { ...activities[existingIndex], ...normalized };
+			const existing = activities[existingIndex];
+			Object.assign(existing, normalized);
+			if (selectedActivity?.id === existing.id && selectedActivity !== existing) {
+				selectedActivity = existing;
+			}
 			return;
 		}
 
@@ -221,18 +231,15 @@
 			activities = activities.flatMap((a) => {
 				if (a.id !== data.id) return [a];
 
-				const updated = {
-					...a,
-					downloadProgress: data.progress,
-					status: data.status ? normalizeActivityStatus(data.status) : a.status
-				};
+				a.downloadProgress = data.progress;
+				a.status = data.status ? normalizeActivityStatus(data.status) : a.status;
 
-				if (!matchesLiveFilters(updated)) {
+				if (!matchesLiveFilters(a)) {
 					removed = true;
 					return [];
 				}
 
-				return [updated];
+				return [a];
 			});
 
 			if (removed) {
@@ -403,17 +410,45 @@
 		activityDetails = null;
 	}
 
+	function applyQueueStatusLocally(id: string, status: ActivityStatus) {
+		for (const activity of activities) {
+			if (activity.queueItemId === id) {
+				activity.status = status;
+			}
+		}
+		if (selectedActivity?.queueItemId === id) {
+			selectedActivity.status = status;
+		}
+	}
+
+	async function runQueueAction(id: string, action: 'pause' | 'resume') {
+		const response = await fetch(`/api/queue/${id}`, {
+			method: 'PATCH',
+			headers: { 'Content-Type': 'application/json' },
+			body: JSON.stringify({ action })
+		});
+		if (!response.ok) {
+			let message = `Failed to ${action}`;
+			try {
+				const payload = await response.json();
+				if (payload?.message && typeof payload.message === 'string') {
+					message = payload.message;
+				}
+			} catch {
+				// Ignore JSON parse errors and fall back to default message.
+			}
+			throw new Error(message);
+		}
+		applyQueueStatusLocally(id, action === 'pause' ? 'paused' : 'downloading');
+	}
+
 	// Queue actions
 	async function handlePause(id: string) {
-		const response = await fetch(`/api/queue/${id}/pause`, { method: 'POST' });
-		if (!response.ok) throw new Error('Failed to pause');
-		await invalidateAll();
+		await runQueueAction(id, 'pause');
 	}
 
 	async function handleResume(id: string) {
-		const response = await fetch(`/api/queue/${id}/resume`, { method: 'POST' });
-		if (!response.ok) throw new Error('Failed to resume');
-		await invalidateAll();
+		await runQueueAction(id, 'resume');
 	}
 
 	async function handleRemove(id: string) {
@@ -504,6 +539,10 @@
 			{sortDirection}
 			onSort={handleSort}
 			onRowClick={openDetailModal}
+			onPause={handlePause}
+			onResume={handleResume}
+			onRemove={handleRemove}
+			onRetry={handleRetry}
 		/>
 
 		<!-- Load More -->

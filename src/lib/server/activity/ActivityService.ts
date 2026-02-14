@@ -813,6 +813,8 @@ export class ActivityService {
 
 	private mapQueueStatus(status: string): ActivityStatus {
 		switch (status) {
+			case 'paused':
+				return 'paused';
 			case 'failed':
 				return 'failed';
 			case 'imported':
