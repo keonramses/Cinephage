@@ -95,7 +95,6 @@ export interface TorrentProtocolSettings {
 	seedRatio: string | null;
 	seedTime: number | null;
 	packSeedTime: number | null;
-	preferMagnetUrl: boolean;
 	rejectDeadTorrents: boolean;
 }
 
@@ -203,6 +202,10 @@ export const indexerStatus = sqliteTable(
 		recentFailures: text('recent_failures', { mode: 'json' })
 			.$type<Array<{ timestamp: string; message: string; requestUrl?: string }>>()
 			.default([]),
+
+		// Session cookies for persistent authentication (e.g., ncore 2FA sessions)
+		cookies: text('cookies', { mode: 'json' }).$type<Record<string, string>>(),
+		cookiesExpirationDate: text('cookies_expiration_date'),
 
 		// Timestamps
 		createdAt: text('created_at').$defaultFn(() => new Date().toISOString()),

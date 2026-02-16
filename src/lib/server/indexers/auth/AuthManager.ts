@@ -87,6 +87,27 @@ export class AuthManager {
 	}
 
 	/**
+	 * Refresh cookie expiration after successful request.
+	 * This keeps the session alive by extending the expiration date.
+	 */
+	async refreshCookieExpiration(context: AuthContext): Promise<void> {
+		if (Object.keys(this.cookies).length === 0) {
+			return;
+		}
+
+		// Reload current cookies from storage to preserve any expiration data
+		const stored = await this.cookieStore.load(context.indexerId);
+		if (stored) {
+			// Merge current cookies with stored expirations
+			this.cookies = { ...stored.cookies, ...this.cookies };
+		}
+
+		// Save with refreshed expiration (12 days from Prowlarr's approach, or 30 days default)
+		const newExpiry = CookieStore.getDefaultExpiry();
+		await this.cookieStore.save(context.indexerId, this.cookies, newExpiry);
+	}
+
+	/**
 	 * Clear stored cookies.
 	 */
 	async clearCookies(context: AuthContext): Promise<void> {

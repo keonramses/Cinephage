@@ -237,7 +237,6 @@ export class IndexerManager {
 				seedRatio: config.seedRatio ?? null,
 				seedTime: config.seedTime ?? null,
 				packSeedTime: config.packSeedTime ?? null,
-				preferMagnetUrl: config.preferMagnetUrl ?? false,
 				rejectDeadTorrents: config.rejectDeadTorrents ?? true
 			};
 		}
@@ -292,7 +291,6 @@ export class IndexerManager {
 			updates.seedRatio !== undefined ||
 			updates.seedTime !== undefined ||
 			updates.packSeedTime !== undefined ||
-			updates.preferMagnetUrl !== undefined ||
 			updates.rejectDeadTorrents !== undefined
 		) {
 			const currentSettings =
@@ -304,7 +302,6 @@ export class IndexerManager {
 				...(updates.seedRatio !== undefined && { seedRatio: updates.seedRatio }),
 				...(updates.seedTime !== undefined && { seedTime: updates.seedTime }),
 				...(updates.packSeedTime !== undefined && { packSeedTime: updates.packSeedTime }),
-				...(updates.preferMagnetUrl !== undefined && { preferMagnetUrl: updates.preferMagnetUrl }),
 				...(updates.rejectDeadTorrents !== undefined && {
 					rejectDeadTorrents: updates.rejectDeadTorrents
 				})
@@ -518,7 +515,6 @@ export class IndexerManager {
 			seedRatio?: string | null; // Stored as string (e.g., "1.5")
 			seedTime?: number | null;
 			packSeedTime?: number | null;
-			preferMagnetUrl?: boolean;
 			rejectDeadTorrents?: boolean;
 		} | null;
 
@@ -542,7 +538,6 @@ export class IndexerManager {
 			seedRatio: protocolSettings?.seedRatio ?? null,
 			seedTime: protocolSettings?.seedTime ?? null,
 			packSeedTime: protocolSettings?.packSeedTime ?? null,
-			preferMagnetUrl: protocolSettings?.preferMagnetUrl ?? false,
 			rejectDeadTorrents: protocolSettings?.rejectDeadTorrents ?? true
 		};
 	}

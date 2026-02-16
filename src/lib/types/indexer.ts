@@ -147,7 +147,6 @@ export interface Indexer {
 	seedRatio?: string | null; // Decimal stored as string (e.g., "1.0")
 	seedTime?: number | null; // Minutes
 	packSeedTime?: number | null; // Minutes for season packs
-	preferMagnetUrl?: boolean;
 	rejectDeadTorrents?: boolean; // Reject torrents with 0 seeders
 }
 
@@ -201,7 +200,6 @@ export interface IndexerFormData {
 	seedRatio?: string | null;
 	seedTime?: number | null;
 	packSeedTime?: number | null;
-	preferMagnetUrl: boolean;
 	rejectDeadTorrents: boolean;
 }
 

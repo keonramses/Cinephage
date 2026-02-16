@@ -507,6 +507,17 @@ export class UnifiedIndexer implements IIndexer {
 			return this.parseResponse(retryResponse.body, request.searchPath);
 		}
 
+		// Refresh cookie expiration after successful request to keep session alive
+		if (Object.keys(this.cookies).length > 0) {
+			const context = {
+				indexerId: this.id,
+				baseUrl: this.requestBuilder.getBaseUrl(),
+				settings: this.settings,
+				encoding: this.definition.encoding
+			};
+			await this.authManager.refreshCookieExpiration(context);
+		}
+
 		return this.parseResponse(response.body, request.searchPath);
 	}
 

@@ -47,7 +47,6 @@ export const indexerCreateSchema = z.object({
 		.nullable(), // Decimal as string (e.g., "1.0")
 	seedTime: z.number().int().min(0).optional().nullable(), // Minutes
 	packSeedTime: z.number().int().min(0).optional().nullable(), // Minutes
-	preferMagnetUrl: z.boolean().default(false),
 	rejectDeadTorrents: z.boolean().default(true) // Reject torrents with 0 seeders
 });
 

@@ -78,8 +78,9 @@ interface MigrationDefinition {
  * Version 51: Fix channel lineup foreign key references
  * Version 52: Fix epg_programs table schema for multi-provider support
  * Version 53: Add iptv_org_config column to livetv_accounts for IPTV-Org provider support
+ * Version 54: Add cookies and cookies_expiration_date columns to indexer_status for persistent session storage
  */
-export const CURRENT_SCHEMA_VERSION = 53;
+export const CURRENT_SCHEMA_VERSION = 54;
 
 /**
  * All table definitions with CREATE TABLE IF NOT EXISTS
@@ -351,6 +352,8 @@ const TABLE_DEFINITIONS: string[] = [
 		"last_error_message" text,
 		"avg_response_time" integer,
 		"recent_failures" text DEFAULT '[]',
+		"cookies" text,
+		"cookies_expiration_date" text,
 		"created_at" text,
 		"updated_at" text
 	)`,
@@ -4027,6 +4030,31 @@ const MIGRATIONS: MigrationDefinition[] = [
 				logger.info('[SchemaSync] Added iptv_org_config column to livetv_accounts');
 			} else {
 				logger.info('[SchemaSync] iptv_org_config column already exists in livetv_accounts');
+			}
+		}
+	},
+
+	// Migration 54: Add cookie persistence columns to indexer_status for session storage
+	{
+		version: 54,
+		name: 'add_indexer_cookies_columns',
+		apply: (sqlite) => {
+			// Add cookies column (JSON object storing cookie name/value pairs)
+			if (!columnExists(sqlite, 'indexer_status', 'cookies')) {
+				sqlite.prepare(`ALTER TABLE "indexer_status" ADD COLUMN "cookies" text`).run();
+				logger.info('[SchemaSync] Added cookies column to indexer_status');
+			} else {
+				logger.info('[SchemaSync] cookies column already exists in indexer_status');
+			}
+
+			// Add cookies_expiration_date column (ISO timestamp for session expiry)
+			if (!columnExists(sqlite, 'indexer_status', 'cookies_expiration_date')) {
+				sqlite
+					.prepare(`ALTER TABLE "indexer_status" ADD COLUMN "cookies_expiration_date" text`)
+					.run();
+				logger.info('[SchemaSync] Added cookies_expiration_date column to indexer_status');
+			} else {
+				logger.info('[SchemaSync] cookies_expiration_date column already exists in indexer_status');
 			}
 		}
 	}

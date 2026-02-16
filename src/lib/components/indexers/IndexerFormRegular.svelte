@@ -17,7 +17,6 @@
 		seedRatio: string;
 		seedTime: number | '';
 		packSeedTime: number | '';
-		preferMagnetUrl: boolean;
 		rejectDeadTorrents: boolean;
 		isTorrent: boolean;
 		isStreaming: boolean;
@@ -35,7 +34,6 @@
 		onSeedRatioChange: (value: string) => void;
 		onSeedTimeChange: (value: number | '') => void;
 		onPackSeedTimeChange: (value: number | '') => void;
-		onPreferMagnetUrlChange: (value: boolean) => void;
 		onRejectDeadTorrentsChange: (value: boolean) => void;
 	}
 
@@ -53,7 +51,6 @@
 		seedRatio,
 		seedTime,
 		packSeedTime,
-		preferMagnetUrl,
 		rejectDeadTorrents,
 		isTorrent,
 		isStreaming,
@@ -71,7 +68,6 @@
 		onSeedRatioChange,
 		onSeedTimeChange,
 		onPackSeedTimeChange,
-		onPreferMagnetUrlChange,
 		onRejectDeadTorrentsChange
 	}: Props = $props();
 
@@ -282,11 +278,6 @@
 				</div>
 			</div>
 
-			<ToggleSetting
-				checked={preferMagnetUrl}
-				label="Prefer Magnet URLs"
-				onchange={() => onPreferMagnetUrlChange(!preferMagnetUrl)}
-			/>
 			<ToggleSetting
 				checked={rejectDeadTorrents}
 				label="Reject Dead Torrents"

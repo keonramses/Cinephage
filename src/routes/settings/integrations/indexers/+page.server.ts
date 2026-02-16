@@ -44,7 +44,6 @@ export const load: PageServerLoad = async () => {
 		seedRatio: config.seedRatio,
 		seedTime: config.seedTime,
 		packSeedTime: config.packSeedTime,
-		preferMagnetUrl: config.preferMagnetUrl,
 		rejectDeadTorrents: config.rejectDeadTorrents
 	}));
 
@@ -114,7 +113,6 @@ export const actions: Actions = {
 				seedRatio: result.data.seedRatio ?? null,
 				seedTime: result.data.seedTime ?? null,
 				packSeedTime: result.data.packSeedTime ?? null,
-				preferMagnetUrl: result.data.preferMagnetUrl,
 				rejectDeadTorrents: result.data.rejectDeadTorrents
 			});
 
@@ -172,7 +170,6 @@ export const actions: Actions = {
 				seedRatio: result.data.seedRatio,
 				seedTime: result.data.seedTime,
 				packSeedTime: result.data.packSeedTime,
-				preferMagnetUrl: result.data.preferMagnetUrl,
 				rejectDeadTorrents: result.data.rejectDeadTorrents
 			});
 

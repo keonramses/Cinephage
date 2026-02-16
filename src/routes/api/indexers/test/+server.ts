@@ -60,8 +60,7 @@ export const POST: RequestHandler = async ({ request }) => {
 			minimumSeeders: 1,
 			seedRatio: null,
 			seedTime: null,
-			packSeedTime: null,
-			preferMagnetUrl: false
+			packSeedTime: null
 		});
 
 		return json({ success: true });
