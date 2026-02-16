@@ -237,6 +237,42 @@ export class DiskScanService extends EventEmitter {
 							error: statError instanceof Error ? statError.message : String(statError)
 						});
 					}
+				} else if (entry.isSymbolicLink()) {
+					// Include symlinked files (e.g., NZB-Mount/rclone strategies),
+					// but avoid recursing through symlinked directories.
+					if (!isVideoFile(entry.name)) {
+						continue;
+					}
+
+					const relativePath = relative(rootPath, fullPath);
+					if (this.shouldExcludeFile(entry.name, relativePath)) {
+						continue;
+					}
+
+					try {
+						const stats = await stat(fullPath);
+						if (!stats.isFile()) {
+							continue;
+						}
+
+						// Skip files below minimum size (except .strm streaming placeholders)
+						if (stats.size < DOWNLOAD.MIN_SCAN_SIZE_BYTES && !entry.name.endsWith('.strm')) {
+							continue;
+						}
+
+						files.push({
+							path: fullPath,
+							relativePath,
+							size: stats.size,
+							modifiedAt: stats.mtime,
+							parentFolder: dirname(relativePath) || '.'
+						});
+					} catch (statError) {
+						logger.warn('[DiskScan] Could not stat symlinked file', {
+							fullPath,
+							error: statError instanceof Error ? statError.message : String(statError)
+						});
+					}
 				}
 			}
 		} catch (error) {

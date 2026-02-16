@@ -3,7 +3,7 @@ import type { RequestHandler } from './$types.js';
 import { db } from '$lib/server/db/index.js';
 import { libraryScanHistory, rootFolders } from '$lib/server/db/schema.js';
 import { eq, desc } from 'drizzle-orm';
-import { librarySchedulerService, diskScanService } from '$lib/server/library/index.js';
+import { librarySchedulerService } from '$lib/server/library/index.js';
 import { logger } from '$lib/logging';
 
 /**
@@ -82,7 +82,8 @@ export const POST: RequestHandler = async ({ request }) => {
 				return json({ success: false, error: 'Root folder not found' }, { status: 404 });
 			}
 
-			const scanResult = await diskScanService.scanRootFolder(rootFolderId);
+			// Use scheduler path so unmatched processing + stat refresh run consistently
+			const scanResult = await librarySchedulerService.runFolderScan(rootFolderId);
 
 			const scanResultData = scanResult ? (scanResult as unknown as Record<string, unknown>) : {};
 			const { success: _ignored, ...safeScanResultData } = scanResultData;
