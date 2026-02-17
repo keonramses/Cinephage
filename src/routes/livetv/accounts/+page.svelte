@@ -1,12 +1,14 @@
 <script lang="ts">
 	import { Plus, RefreshCw, Loader2, Wifi, WifiOff } from 'lucide-svelte';
 	import { LiveTvAccountTable, LiveTvAccountModal } from '$lib/components/livetv';
+	import { ConfirmationModal } from '$lib/components/ui/modal';
 	import type { LiveTvAccount, LiveTvAccountTestResult } from '$lib/types/livetv';
 	import type { FormData, TestConfig } from '$lib/components/livetv/LiveTvAccountModal.svelte';
 	import { onMount } from 'svelte';
 	import { createSSE } from '$lib/sse';
 	import { mobileSSEStatus } from '$lib/sse/mobileStatus.svelte';
 	import { resolvePath } from '$lib/utils/routing';
+	import { toasts } from '$lib/stores/toast.svelte';
 
 	// State
 	let accounts = $state<LiveTvAccount[]>([]);
@@ -20,6 +22,7 @@
 	let modalMode = $state<'add' | 'edit'>('add');
 	let editingAccount = $state<LiveTvAccount | null>(null);
 	let modalError = $state<string | null>(null);
+	let deleteConfirmOpen = $state(false);
 
 	// Testing state
 	let testingId = $state<string | null>(null);
@@ -118,6 +121,7 @@
 		modalOpen = false;
 		editingAccount = null;
 		modalError = null;
+		deleteConfirmOpen = false;
 	}
 
 	async function handleSave(data: FormData) {
@@ -191,11 +195,18 @@
 		}
 	}
 
-	async function handleDelete() {
+	function handleDelete() {
 		if (!editingAccount) return;
+		deleteConfirmOpen = true;
+	}
 
-		const confirmed = confirm(`Are you sure you want to delete "${editingAccount.name}"?`);
-		if (!confirmed) return;
+	function closeDeleteConfirm() {
+		if (saving) return;
+		deleteConfirmOpen = false;
+	}
+
+	async function confirmDelete() {
+		if (!editingAccount) return;
 
 		saving = true;
 		modalError = null;
@@ -211,6 +222,7 @@
 			}
 
 			await loadAccounts();
+			deleteConfirmOpen = false;
 			closeModal();
 		} catch (e) {
 			modalError = e instanceof Error ? e.message : 'Failed to delete account';
@@ -245,13 +257,62 @@
 				method: 'POST'
 			});
 
+			const payload = await response.json();
+
 			if (!response.ok) {
-				throw new Error('Failed to test account');
+				throw new Error(
+					typeof payload?.error === 'string' ? payload.error : 'Failed to test account'
+				);
 			}
 
-			await loadAccounts();
+			const testResult =
+				payload?.result && typeof payload.result.success === 'boolean'
+					? payload.result
+					: payload && typeof payload.success === 'boolean'
+						? payload
+						: null;
+
+			if (!testResult) {
+				throw new Error('Invalid test response');
+			}
+
+			const now = new Date().toISOString();
+			accounts = accounts.map((existing) => {
+				if (existing.id !== account.id) return existing;
+
+				return {
+					...existing,
+					lastTestedAt: now,
+					lastTestSuccess: testResult.success,
+					lastTestError: testResult.success ? null : (testResult.error ?? 'Unknown error'),
+					...(testResult.success && testResult.profile
+						? {
+								playbackLimit: testResult.profile.playbackLimit,
+								channelCount: testResult.profile.channelCount,
+								categoryCount: testResult.profile.categoryCount,
+								expiresAt: testResult.profile.expiresAt,
+								serverTimezone: testResult.profile.serverTimezone
+							}
+						: {})
+				};
+			});
+
+			if (testResult.success) {
+				toasts.success(`Connection test passed: ${account.name}`, {
+					description: testResult.profile
+						? `${testResult.profile.channelCount.toLocaleString()} channels • ${testResult.profile.categoryCount.toLocaleString()} categories`
+						: undefined
+				});
+			} else {
+				toasts.error(`Connection test failed: ${account.name}`, {
+					description: testResult.error || 'Unknown test failure'
+				});
+			}
 		} catch (e) {
 			console.error('Failed to test account:', e);
+			toasts.error(`Connection test failed: ${account.name}`, {
+				description: e instanceof Error ? e.message : 'Failed to test account'
+			});
 		} finally {
 			testingId = null;
 		}
@@ -319,7 +380,30 @@
 			body: JSON.stringify(body)
 		});
 
-		return response.json();
+		const result = await response.json();
+
+		if (!response.ok) {
+			return {
+				success: false,
+				error:
+					typeof result?.error === 'string' ? result.error : 'Failed to test account configuration'
+			};
+		}
+
+		// API currently returns { success, result }, but keep backward compatibility
+		// in case the endpoint returns LiveTvAccountTestResult directly.
+		if (result?.result && typeof result.result.success === 'boolean') {
+			return result.result as LiveTvAccountTestResult;
+		}
+
+		if (typeof result?.success === 'boolean') {
+			return result as LiveTvAccountTestResult;
+		}
+
+		return {
+			success: false,
+			error: 'Invalid response from test endpoint'
+		};
 	}
 </script>
 
@@ -334,7 +418,7 @@
 			<h1 class="text-2xl font-bold">Live TV Accounts</h1>
 			<p class="mt-1 text-base-content/60">Manage your IPTV accounts (Stalker, XStream, M3U)</p>
 		</div>
-		<div class="flex items-center gap-2">
+		<div class="flex w-full items-center gap-2 sm:w-auto">
 			<!-- Connection Status -->
 			<div class="hidden lg:block">
 				{#if sse.isConnected}
@@ -366,7 +450,7 @@
 					<RefreshCw class="h-4 w-4" />
 				{/if}
 			</button>
-			<button class="btn btn-sm btn-primary" onclick={openAddModal}>
+			<button class="btn flex-1 btn-sm btn-primary sm:flex-none" onclick={openAddModal}>
 				<Plus class="h-4 w-4" />
 				Add Account
 			</button>
@@ -411,4 +495,15 @@
 	onSave={handleSave}
 	onDelete={handleDelete}
 	onTest={handleTestConfig}
+/>
+
+<ConfirmationModal
+	open={deleteConfirmOpen}
+	title="Delete Account"
+	message={`Delete "${editingAccount?.name ?? 'this account'}"? This will remove it from Live TV and stop channel sync.`}
+	confirmLabel="Delete"
+	confirmVariant="error"
+	loading={saving}
+	onConfirm={confirmDelete}
+	onCancel={closeDeleteConfirm}
 />

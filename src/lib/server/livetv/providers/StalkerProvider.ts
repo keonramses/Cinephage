@@ -492,7 +492,8 @@ export class StalkerProvider implements LiveTvProvider {
 					// Use Unix timestamps for timezone-independent comparison
 					const programStart = new Date(program.start_timestamp * 1000);
 					const programEnd = new Date(program.stop_timestamp * 1000);
-					if (programStart < startTime || programStart > endTime) continue;
+					// Keep any programme that overlaps the requested window.
+					if (programEnd < startTime || programStart > endTime) continue;
 
 					programs.push({
 						id: randomUUID(),

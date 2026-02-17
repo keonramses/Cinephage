@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { SvelteMap } from 'svelte/reactivity';
+	import { SvelteMap, SvelteSet } from 'svelte/reactivity';
 	import { Calendar, LayoutGrid, Settings, Wifi, WifiOff, Loader2 } from 'lucide-svelte';
 	import {
 		EpgStatusPanel,
@@ -36,7 +36,10 @@
 	// EPG status state
 	let epgStatus = $state<EpgStatus | null>(null);
 	let epgStatusLoading = $state(true);
-	let epgSyncing = $state(false);
+	let epgSyncingAll = $state(false);
+	let epgSyncingAccountIds = new SvelteSet<string>();
+	const epgSyncingAny = $derived(epgSyncingAll || epgSyncingAccountIds.size > 0);
+	const epgSyncingAccountList = $derived([...epgSyncingAccountIds]);
 
 	// EPG now/next data for coverage tab
 	let epgData = new SvelteMap<string, NowNextEntry>();
@@ -56,19 +59,31 @@
 	const sse = createSSE<Record<string, any>>(resolvePath('/api/livetv/epg/stream'), {
 		'epg:initial': (payload) => {
 			epgStatus = payload.status;
-			epgSyncing = payload.status?.isSyncing ?? false;
+			epgSyncingAll = payload.status?.isSyncing ?? false;
+			if (!epgSyncingAll) {
+				epgSyncingAccountIds.clear();
+			}
 			lineup = payload.lineup || [];
 			loadingLineup = false;
 			epgStatusLoading = false;
 		},
 		'epg:syncStarted': (payload) => {
-			epgSyncing = true;
+			if (payload.accountId) {
+				epgSyncingAccountIds.add(payload.accountId);
+			} else {
+				epgSyncingAll = true;
+			}
 			if (payload.status) {
 				epgStatus = payload.status;
 			}
 		},
 		'epg:syncCompleted': (payload) => {
-			epgSyncing = false;
+			if (payload.accountId) {
+				epgSyncingAccountIds.delete(payload.accountId);
+			} else {
+				epgSyncingAll = false;
+				epgSyncingAccountIds.clear();
+			}
 			if (payload.status) {
 				epgStatus = payload.status;
 			}
@@ -78,7 +93,12 @@
 			fetchEpgData();
 		},
 		'epg:syncFailed': (payload) => {
-			epgSyncing = false;
+			if (payload.accountId) {
+				epgSyncingAccountIds.delete(payload.accountId);
+			} else {
+				epgSyncingAll = false;
+				epgSyncingAccountIds.clear();
+			}
 			if (payload.status) {
 				epgStatus = payload.status;
 			}
@@ -145,19 +165,27 @@
 	}
 
 	async function triggerEpgSync() {
-		epgSyncing = true;
+		if (epgSyncingAny) return;
+		epgSyncingAll = true;
 		try {
 			await fetch('/api/livetv/epg/sync', { method: 'POST' });
 		} catch {
-			epgSyncing = false;
+			epgSyncingAll = false;
 		}
 	}
 
 	async function triggerAccountSync(accountId: string) {
+		if (epgSyncingAll || epgSyncingAccountIds.has(accountId)) return;
+		epgSyncingAccountIds.add(accountId);
 		try {
-			await fetch(`/api/livetv/epg/sync?accountId=${accountId}`, { method: 'POST' });
+			const response = await fetch(`/api/livetv/epg/sync?accountId=${accountId}`, {
+				method: 'POST'
+			});
+			if (!response.ok) {
+				throw new Error('Failed to trigger EPG sync');
+			}
 		} catch {
-			// Silent failure
+			epgSyncingAccountIds.delete(accountId);
 		}
 	}
 
@@ -227,10 +255,12 @@
 	</div>
 
 	<!-- Tabs -->
-	<div class="tabs-boxed tabs">
+	<div class="tabs-boxed tabs w-full overflow-x-auto sm:w-fit">
 		{#each tabs as tab (tab.id)}
 			<button
-				class="tab gap-2 {activeTab === tab.id ? 'tab-active' : ''}"
+				class="tab-sm tab flex-1 gap-1 whitespace-nowrap sm:flex-none sm:gap-2 {activeTab === tab.id
+					? 'tab-active'
+					: ''}"
 				onclick={() => (activeTab = tab.id)}
 			>
 				<tab.icon class="h-4 w-4" />
@@ -244,7 +274,8 @@
 		<EpgStatusPanel
 			status={epgStatus}
 			loading={epgStatusLoading}
-			syncing={epgSyncing}
+			syncingAll={epgSyncingAll}
+			syncingAccountIds={epgSyncingAccountList}
 			onSync={triggerEpgSync}
 			onSyncAccount={triggerAccountSync}
 		/>

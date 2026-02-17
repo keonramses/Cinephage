@@ -68,6 +68,7 @@
 	let selectedIds = new SvelteSet<string>();
 	let addingIds = new SvelteSet<string>();
 	let bulkAdding = $state(false);
+	let addingCategory = $state(false);
 
 	// Local copy of lineup IDs (updated after successful adds)
 	let localLineupIds = new SvelteSet<string>();
@@ -105,6 +106,9 @@
 
 	const someVisibleSelected = $derived(
 		selectableChannels.some((c) => selectedIds.has(c.id)) && !allVisibleSelected
+	);
+	const selectedCategory = $derived(
+		categories.find((category) => category.id === selectedCategoryId)
 	);
 
 	// Reset state only when modal OPENS (transition from closed to open)
@@ -190,7 +194,7 @@
 
 	async function loadCategories(accountId: string) {
 		try {
-			const response = await fetch(`/api/livetv/categories?accountIds=${accountId}`);
+			const response = await fetch(`/api/livetv/categories?accountId=${accountId}`);
 			if (response.ok) {
 				const data = await response.json();
 				categories = data.categories || [];
@@ -326,6 +330,136 @@
 			error = e instanceof Error ? e.message : 'Failed to add channels';
 		} finally {
 			bulkAdding = false;
+		}
+	}
+
+	async function getAllChannelsForSelectedCategory(): Promise<CachedChannel[]> {
+		if (!selectedAccountId || !selectedCategoryId) {
+			return [];
+		}
+
+		const categoryChannels: CachedChannel[] = [];
+		let currentPage = 1;
+		let hasMore = true;
+		const fetchPageSize = 500;
+
+		while (hasMore) {
+			const params = new SvelteURLSearchParams();
+			params.set('page', String(currentPage));
+			params.set('pageSize', String(fetchPageSize));
+			params.set('accountIds', selectedAccountId);
+			params.set('categoryIds', selectedCategoryId);
+
+			const response = await fetch(`/api/livetv/channels?${params.toString()}`);
+			if (!response.ok) {
+				throw new Error('Failed to load category channels');
+			}
+
+			const result = await response.json();
+			if (!result.success) {
+				throw new Error(result.error || 'Failed to load category channels');
+			}
+
+			const pageChannels = (result.channels ?? []) as CachedChannel[];
+			categoryChannels.push(...pageChannels);
+
+			const totalPagesForQuery = Math.max(1, Number(result.totalPages || 1));
+			currentPage++;
+			hasMore = currentPage <= totalPagesForQuery;
+		}
+
+		return categoryChannels;
+	}
+
+	async function getOrCreateLineupCategoryId(name: string): Promise<string> {
+		const normalizedName = name.trim();
+		if (!normalizedName) {
+			throw new Error('Selected category has no name');
+		}
+
+		const existingResponse = await fetch('/api/livetv/channel-categories');
+		if (!existingResponse.ok) {
+			throw new Error('Failed to load Cinephage categories');
+		}
+
+		const existingData = await existingResponse.json();
+		const existingCategories = (existingData.categories ?? []) as Array<{
+			id: string;
+			name: string;
+		}>;
+		const existing = existingCategories.find(
+			(category) => category.name?.trim().toLowerCase() === normalizedName.toLowerCase()
+		);
+		if (existing?.id) {
+			return existing.id;
+		}
+
+		const createResponse = await fetch('/api/livetv/channel-categories', {
+			method: 'POST',
+			headers: { 'Content-Type': 'application/json' },
+			body: JSON.stringify({ name: normalizedName })
+		});
+
+		if (!createResponse.ok) {
+			const data = await createResponse.json().catch(() => ({}));
+			throw new Error(data.error || 'Failed to create Cinephage category');
+		}
+
+		const createData = await createResponse.json();
+		const categoryId = createData.category?.id as string | undefined;
+		if (!categoryId) {
+			throw new Error('Created category did not return an ID');
+		}
+
+		return categoryId;
+	}
+
+	async function addSelectedCategoryChannels() {
+		if (!selectedAccountId || !selectedCategoryId || addingCategory) return;
+
+		addingCategory = true;
+		error = null;
+
+		try {
+			const lineupCategoryName = selectedCategory?.title?.trim();
+			if (!lineupCategoryName) {
+				throw new Error('Please select a valid provider category first');
+			}
+			const lineupCategoryId = await getOrCreateLineupCategoryId(lineupCategoryName);
+			const categoryChannels = await getAllChannelsForSelectedCategory();
+
+			if (categoryChannels.length === 0) {
+				return;
+			}
+
+			const response = await fetch('/api/livetv/lineup', {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({
+					channels: categoryChannels.map((channel) => ({
+						accountId: channel.accountId,
+						channelId: channel.id,
+						categoryId: lineupCategoryId
+					}))
+				})
+			});
+
+			if (!response.ok) {
+				const data = await response.json().catch(() => ({}));
+				throw new Error(data.error || 'Failed to add category channels');
+			}
+
+			for (const channel of categoryChannels) {
+				localLineupIds.add(channel.id);
+				selectedIds.delete(channel.id);
+			}
+
+			onChannelsAdded();
+			await loadChannels();
+		} catch (e) {
+			error = e instanceof Error ? e.message : 'Failed to add category channels';
+		} finally {
+			addingCategory = false;
 		}
 	}
 
@@ -476,6 +610,24 @@
 				/>
 				Show already added
 			</label>
+			{#if selectedAccountId && selectedCategoryId}
+				<button
+					class="btn btn-outline btn-sm"
+					onclick={addSelectedCategoryChannels}
+					disabled={addingCategory || loading}
+					title="Add all channels in this provider category"
+				>
+					{#if addingCategory}
+						<Loader2 class="h-4 w-4 animate-spin" />
+					{:else}
+						<Plus class="h-4 w-4" />
+					{/if}
+					Add Entire Category
+					{#if selectedCategory}
+						({selectedCategory.channelCount})
+					{/if}
+				</button>
+			{/if}
 			{#if selectedIds.size > 0}
 				<div class="flex gap-2">
 					<button class="btn btn-ghost btn-xs" onclick={clearSelection}>Clear</button>

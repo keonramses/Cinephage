@@ -13,10 +13,17 @@ export const GET: RequestHandler = async ({ url }) => {
 	const channelService = getLiveTvChannelService();
 
 	// Parse query parameters
+	const accountIdsParam = url.searchParams.get('accountIds');
 	const accountIdParam = url.searchParams.get('accountId');
 
+	const accountIds =
+		accountIdsParam
+			?.split(',')
+			.map((v) => v.trim())
+			.filter(Boolean) ?? (accountIdParam ? [accountIdParam] : undefined);
+
 	try {
-		const categories = await channelService.getCategories(accountIdParam || undefined);
+		const categories = await channelService.getCategories(accountIds);
 		return json({
 			success: true,
 			categories

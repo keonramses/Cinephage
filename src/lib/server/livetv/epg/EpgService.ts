@@ -30,6 +30,7 @@ import type {
 const BATCH_SIZE = 1000;
 const DEFAULT_RETENTION_HOURS = 48;
 const DEFAULT_LOOKAHEAD_HOURS = 72;
+const DEFAULT_LOOKBACK_HOURS = DEFAULT_RETENTION_HOURS;
 
 export class EpgService {
 	/**
@@ -152,12 +153,14 @@ export class EpgService {
 				updatedAt: account.updatedAt ?? new Date().toISOString()
 			};
 
-			// Calculate time range
+			// Calculate time range. Include historical hours so the guide can show
+			// previously aired programs (within retention) after sync.
 			const now = new Date();
+			const rangeStart = new Date(now.getTime() - DEFAULT_LOOKBACK_HOURS * 60 * 60 * 1000);
 			const endTime = new Date(now.getTime() + DEFAULT_LOOKAHEAD_HOURS * 60 * 60 * 1000);
 
 			// Fetch EPG data from provider
-			const epgPrograms = await provider.fetchEpg!(liveTvAccount, now, endTime);
+			const epgPrograms = await provider.fetchEpg!(liveTvAccount, rangeStart, endTime);
 
 			if (epgPrograms.length === 0) {
 				logger.info('No EPG data returned from provider', {
@@ -297,35 +300,40 @@ export class EpgService {
 		let programsAdded = 0;
 		let programsUpdated = 0;
 		const now = new Date().toISOString();
+		const makeProgramKey = (externalChannelId: string, startTime: string) =>
+			`${externalChannelId}::${startTime}`;
 
-		// Collect all programs to upsert
-		const allPrograms: {
-			id: string;
-			channelId: string;
-			externalChannelId: string;
-			accountId: string;
-			providerType: string;
-			title: string;
-			description: string | null;
-			category: string | null;
-			director: string | null;
-			actor: string | null;
-			startTime: string;
-			endTime: string;
-			duration: number;
-			hasArchive: boolean;
-			cachedAt: string;
-			updatedAt: string;
-		}[] = [];
+		// Collect all programs to upsert (deduplicated by account + external channel + start time)
+		const uniquePrograms = new Map<
+			string,
+			{
+				id: string;
+				channelId: string;
+				externalChannelId: string;
+				accountId: string;
+				providerType: EpgProgram['providerType'];
+				title: string;
+				description: string | null;
+				category: string | null;
+				director: string | null;
+				actor: string | null;
+				startTime: string;
+				endTime: string;
+				duration: number;
+				hasArchive: boolean;
+				cachedAt: string;
+				updatedAt: string;
+			}
+		>();
 
 		for (const program of epgProgramsData) {
 			const localChannelId = channelMap.get(program.externalChannelId);
 			if (!localChannelId) {
-				// Channel not in our database, skip
 				continue;
 			}
 
-			allPrograms.push({
+			const key = makeProgramKey(program.externalChannelId, program.startTime);
+			uniquePrograms.set(key, {
 				id: randomUUID(),
 				channelId: localChannelId,
 				externalChannelId: program.externalChannelId,
@@ -345,51 +353,78 @@ export class EpgService {
 			});
 		}
 
+		const allPrograms: {
+			id: string;
+			channelId: string;
+			externalChannelId: string;
+			accountId: string;
+			providerType: EpgProgram['providerType'];
+			title: string;
+			description: string | null;
+			category: string | null;
+			director: string | null;
+			actor: string | null;
+			startTime: string;
+			endTime: string;
+			duration: number;
+			hasArchive: boolean;
+			cachedAt: string;
+			updatedAt: string;
+		}[] = Array.from(uniquePrograms.values());
+
+		if (allPrograms.length > 0) {
+			const existingRows = await db
+				.select({
+					externalChannelId: epgPrograms.externalChannelId,
+					startTime: epgPrograms.startTime
+				})
+				.from(epgPrograms)
+				.where(eq(epgPrograms.accountId, accountId));
+
+			const existingKeys = new Set(
+				existingRows.map((row) => makeProgramKey(row.externalChannelId, row.startTime))
+			);
+
+			for (const key of uniquePrograms.keys()) {
+				if (existingKeys.has(key)) {
+					programsUpdated++;
+				} else {
+					programsAdded++;
+				}
+			}
+		}
+
 		// Upsert programs in batches
 		for (let i = 0; i < allPrograms.length; i += BATCH_SIZE) {
 			const batch = allPrograms.slice(i, i + BATCH_SIZE);
+			if (batch.length === 0) {
+				continue;
+			}
 
-			// Use INSERT OR REPLACE for upsert behavior
-			for (const program of batch) {
-				// Check if program exists (by unique constraint: account_id, external_channel_id, start_time)
-				const existing = await db
-					.select({ id: epgPrograms.id })
-					.from(epgPrograms)
-					.where(
-						and(
-							eq(epgPrograms.accountId, program.accountId),
-							eq(epgPrograms.externalChannelId, program.externalChannelId),
-							eq(epgPrograms.startTime, program.startTime)
-						)
-					)
-					.limit(1)
-					.then((rows) => rows[0]);
+			await db
+				.insert(epgPrograms)
+				.values(batch)
+				.onConflictDoUpdate({
+					target: [epgPrograms.accountId, epgPrograms.externalChannelId, epgPrograms.startTime],
+					set: {
+						channelId: sql`excluded.channel_id`,
+						providerType: sql`excluded.provider_type`,
+						title: sql`excluded.title`,
+						description: sql`excluded.description`,
+						category: sql`excluded.category`,
+						director: sql`excluded.director`,
+						actor: sql`excluded.actor`,
+						endTime: sql`excluded.end_time`,
+						duration: sql`excluded.duration`,
+						hasArchive: sql`excluded.has_archive`,
+						cachedAt: sql`excluded.cached_at`,
+						updatedAt: sql`excluded.updated_at`
+					}
+				});
 
-				if (existing) {
-					// Update existing
-					await db
-						.update(epgPrograms)
-						.set({
-							title: program.title,
-							description: program.description,
-							category: program.category,
-							director: program.director,
-							actor: program.actor,
-							endTime: program.endTime,
-							duration: program.duration,
-							hasArchive: program.hasArchive,
-							updatedAt: now
-						})
-						.where(eq(epgPrograms.id, existing.id));
-					programsUpdated++;
-				} else {
-					// Insert new
-					await db.insert(epgPrograms).values({
-						...program,
-						providerType: program.providerType as 'stalker' | 'xstream' | 'm3u' | 'iptvorg'
-					});
-					programsAdded++;
-				}
+			// Let the event loop process pending requests between write batches.
+			if (i + BATCH_SIZE < allPrograms.length) {
+				await new Promise<void>((resolve) => setImmediate(resolve));
 			}
 		}
 

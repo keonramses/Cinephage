@@ -32,9 +32,9 @@ const liveTvAccountTestSchema = z.object({
 	// XStream-specific config
 	xstreamConfig: z
 		.object({
-			baseUrl: z.string().url(),
-			username: z.string().min(1),
-			password: z.string().min(1)
+			baseUrl: z.string().url('Please enter a valid server URL'),
+			username: z.string().min(1, 'Username is required'),
+			password: z.string().min(1, 'Password is required')
 		})
 		.optional(),
 	// M3U-specific config
@@ -54,6 +54,65 @@ const liveTvAccountTestSchema = z.object({
 		})
 		.optional()
 });
+
+/**
+ * Build a user-friendly validation error message from flattened Zod errors.
+ */
+function getFriendlyValidationMessage(error: ValidationError): string {
+	const details = (error.context?.details ?? null) as {
+		formErrors?: string[];
+		fieldErrors?: Record<string, string[] | undefined>;
+	} | null;
+
+	const formError = details?.formErrors?.find(
+		(message) => typeof message === 'string' && message.length > 0
+	);
+	if (formError) {
+		return formError;
+	}
+
+	if (details?.fieldErrors) {
+		const firstFieldWithError = Object.entries(details.fieldErrors).find(
+			([, messages]) => Array.isArray(messages) && messages.length > 0
+		);
+
+		if (firstFieldWithError) {
+			const [field, messages] = firstFieldWithError;
+			const firstMessage = messages?.[0];
+			if (firstMessage) {
+				const hasSchemaInternals =
+					firstMessage.includes('Too small:') ||
+					firstMessage.includes('Invalid input:') ||
+					firstMessage.includes('expected string');
+				if (!hasSchemaInternals) {
+					return firstMessage;
+				}
+
+				if (field === 'xstreamConfig') {
+					return 'Please enter a valid server URL, username, and password.';
+				}
+				if (field === 'stalkerConfig') {
+					return 'Please enter a valid portal URL and MAC address.';
+				}
+				if (field === 'm3uConfig') {
+					return 'Please provide a valid M3U URL or playlist content.';
+				}
+				if (field === 'iptvOrgConfig') {
+					return 'Please select at least one country.';
+				}
+
+				const friendlyField = field
+					.replace(/([a-z])([A-Z])/g, '$1 $2')
+					.replace(/Config$/, ' configuration')
+					.toLowerCase();
+
+				return `Please check ${friendlyField}: ${firstMessage}`;
+			}
+		}
+	}
+
+	return 'Please review the account fields and try again.';
+}
 
 /**
  * Test a Live TV account configuration without saving
@@ -80,6 +139,7 @@ export const POST: RequestHandler = async ({ request }) => {
 			stalkerConfig: parsed.data.stalkerConfig,
 			xstreamConfig: parsed.data.xstreamConfig,
 			m3uConfig: parsed.data.m3uConfig,
+			iptvOrgConfig: parsed.data.iptvOrgConfig,
 			playbackLimit: null,
 			channelCount: null,
 			categoryCount: null,
@@ -108,23 +168,28 @@ export const POST: RequestHandler = async ({ request }) => {
 			result
 		});
 	} catch (error) {
-		logger.error(
-			'[API] Failed to test Live TV account configuration',
-			error instanceof Error ? error : undefined
-		);
-
 		// Validation errors
 		if (error instanceof ValidationError) {
+			logger.warn('[API] Live TV account test rejected due to invalid input', {
+				code: error.code,
+				statusCode: error.statusCode
+			});
+
 			return json(
 				{
 					success: false,
-					error: error.message,
+					error: getFriendlyValidationMessage(error),
 					code: error.code,
 					context: error.context
 				},
 				{ status: error.statusCode }
 			);
 		}
+
+		logger.error(
+			'[API] Failed to test Live TV account configuration',
+			error instanceof Error ? error : undefined
+		);
 
 		return json(
 			{

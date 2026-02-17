@@ -14,6 +14,8 @@
 		Link
 	} from 'lucide-svelte';
 	import ModalWrapper from '$lib/components/ui/modal/ModalWrapper.svelte';
+	import { copyToClipboard as copyTextToClipboard } from '$lib/utils/clipboard';
+	import { toasts } from '$lib/stores/toast.svelte';
 	import type {
 		ChannelLineupItemWithDetails,
 		ChannelCategory,
@@ -175,14 +177,14 @@
 	// Copy stream command to clipboard
 	async function copyStreamCommand() {
 		if (!channel?.channel.stalker?.cmd) return;
-		try {
-			await navigator.clipboard.writeText(channel.channel.stalker.cmd);
+		const copied = await copyTextToClipboard(channel.channel.stalker.cmd);
+		if (copied) {
 			copiedCmd = true;
 			setTimeout(() => {
 				copiedCmd = false;
 			}, 2000);
-		} catch {
-			// Silent failure
+		} else {
+			toasts.error('Failed to copy stream command');
 		}
 	}
 

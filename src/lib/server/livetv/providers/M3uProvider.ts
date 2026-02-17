@@ -16,6 +16,8 @@ import { eq } from 'drizzle-orm';
 import { logger } from '$lib/logging';
 import { randomUUID } from 'crypto';
 import { XMLParser } from 'fast-xml-parser';
+import { gunzip } from 'zlib';
+import { promisify } from 'util';
 import type {
 	LiveTvProvider,
 	AuthResult,
@@ -31,6 +33,8 @@ import type {
 	M3uConfig
 } from '$lib/types/livetv';
 
+const gunzipAsync = promisify(gunzip);
+
 // Parsed M3U entry
 interface M3uEntry {
 	tvgId?: string;
@@ -40,6 +44,11 @@ interface M3uEntry {
 	name: string;
 	url: string;
 	attributes: Record<string, string>;
+}
+
+interface ParsedM3u {
+	entries: M3uEntry[];
+	headerEpgUrl: string | null;
 }
 
 export class M3uProvider implements LiveTvProvider {
@@ -111,7 +120,8 @@ export class M3uProvider implements LiveTvProvider {
 			}
 
 			// Try to parse
-			const entries = this.parseM3u(playlistContent);
+			const parsed = this.parseM3u(playlistContent);
+			const entries = parsed.entries;
 
 			return {
 				success: true,
@@ -166,6 +176,7 @@ export class M3uProvider implements LiveTvProvider {
 
 			// Fetch or use playlist content
 			let playlistContent: string;
+			let fetchedFromUrl = false;
 
 			if (config.fileContent) {
 				playlistContent = config.fileContent;
@@ -185,25 +196,40 @@ export class M3uProvider implements LiveTvProvider {
 				}
 
 				playlistContent = await response.text();
-
-				// Update last refresh time if auto-refresh is enabled
-				if (config.autoRefresh) {
-					await db
-						.update(livetvAccounts)
-						.set({
-							m3uConfig: {
-								...config,
-								lastRefreshAt: new Date().toISOString()
-							}
-						})
-						.where(eq(livetvAccounts.id, accountId));
-				}
+				fetchedFromUrl = true;
 			} else {
 				throw new Error('No M3U URL or file content provided');
 			}
 
 			// Parse M3U
-			const entries = this.parseM3u(playlistContent);
+			const parsed = this.parseM3u(playlistContent);
+			const entries = parsed.entries;
+
+			// If EPG URL wasn't configured, try to derive it from the #EXTM3U header.
+			const derivedEpgUrl = !config.epgUrl ? parsed.headerEpgUrl : null;
+			if ((fetchedFromUrl && config.autoRefresh) || derivedEpgUrl) {
+				const now = new Date().toISOString();
+				const nextConfig: M3uConfig = {
+					...config,
+					...(fetchedFromUrl && config.autoRefresh ? { lastRefreshAt: now } : {}),
+					...(derivedEpgUrl ? { epgUrl: derivedEpgUrl } : {})
+				};
+
+				await db
+					.update(livetvAccounts)
+					.set({
+						m3uConfig: nextConfig,
+						updatedAt: now
+					})
+					.where(eq(livetvAccounts.id, accountId));
+
+				if (derivedEpgUrl) {
+					logger.info('[M3uProvider] Derived EPG URL from playlist header', {
+						accountId,
+						epgUrl: derivedEpgUrl
+					});
+				}
+			}
 
 			// Get existing categories
 			const existingCategories = await db
@@ -249,6 +275,8 @@ export class M3uProvider implements LiveTvProvider {
 			const channelMap = new Map(existingChannels.map((c) => [c.externalId, c.id]));
 			let channelsAdded = 0;
 			let channelsUpdated = 0;
+			let duplicateTvgIdCount = 0;
+			const tvgIdSeenCount = new Map<string, number>();
 
 			// Sync channels
 			for (let i = 0; i < entries.length; i++) {
@@ -262,8 +290,22 @@ export class M3uProvider implements LiveTvProvider {
 					attributes: entry.attributes
 				};
 
-				// Use tvg-id as external ID if available, otherwise generate from name
-				const externalId = entry.tvgId || `m3u_${i}`;
+				const normalizedTvgId = entry.tvgId?.trim();
+				let externalId: string;
+				if (normalizedTvgId) {
+					const seenCount = tvgIdSeenCount.get(normalizedTvgId) ?? 0;
+					tvgIdSeenCount.set(normalizedTvgId, seenCount + 1);
+					if (seenCount === 0) {
+						externalId = normalizedTvgId;
+					} else {
+						duplicateTvgIdCount++;
+						// Keep IDs deterministic across sync runs for duplicate tvg-id entries.
+						externalId = `${normalizedTvgId}__${seenCount + 1}`;
+					}
+				} else {
+					// Preserve legacy fallback behavior for playlists with no tvg-id.
+					externalId = `m3u_${i}`;
+				}
 				const categoryId = entry.groupTitle ? categoryMap.get(entry.groupTitle) : null;
 
 				const existingId = channelMap.get(externalId);
@@ -282,8 +324,9 @@ export class M3uProvider implements LiveTvProvider {
 						.where(eq(livetvChannels.id, existingId));
 					channelsUpdated++;
 				} else {
+					const newId = randomUUID();
 					await db.insert(livetvChannels).values({
-						id: randomUUID(),
+						id: newId,
 						accountId,
 						providerType: 'm3u',
 						externalId,
@@ -295,6 +338,7 @@ export class M3uProvider implements LiveTvProvider {
 						createdAt: new Date().toISOString(),
 						updatedAt: new Date().toISOString()
 					});
+					channelMap.set(externalId, newId);
 					channelsAdded++;
 				}
 			}
@@ -319,6 +363,7 @@ export class M3uProvider implements LiveTvProvider {
 				categoriesUpdated,
 				channelsAdded,
 				channelsUpdated,
+				duplicateTvgIdCount,
 				duration
 			});
 
@@ -420,15 +465,70 @@ export class M3uProvider implements LiveTvProvider {
 	async fetchEpg(account: LiveTvAccount, startTime: Date, endTime: Date): Promise<EpgProgram[]> {
 		try {
 			const config = account.m3uConfig;
-			if (!config?.epgUrl) {
+			if (!config) {
+				logger.debug('[M3uProvider] No M3U config found');
+				return [];
+			}
+
+			let epgUrl = config.epgUrl;
+
+			if (!epgUrl) {
+				let playlistContent: string | null = null;
+
+				if (config.fileContent) {
+					playlistContent = config.fileContent;
+				} else if (config.url) {
+					try {
+						const fetchHeaders: Record<string, string> = {
+							'User-Agent':
+								config.userAgent || 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+							...config.headers
+						};
+						const response = await fetch(config.url, {
+							headers: fetchHeaders,
+							signal: AbortSignal.timeout(30000)
+						});
+						if (response.ok) {
+							playlistContent = await response.text();
+						}
+					} catch {
+						// Ignore playlist fetch errors here and fall back to "no epg url"
+					}
+				}
+
+				if (playlistContent) {
+					const parsed = this.parseM3u(playlistContent);
+					epgUrl = parsed.headerEpgUrl ?? undefined;
+				}
+
+				if (epgUrl) {
+					await db
+						.update(livetvAccounts)
+						.set({
+							m3uConfig: {
+								...config,
+								epgUrl
+							},
+							updatedAt: new Date().toISOString()
+						})
+						.where(eq(livetvAccounts.id, account.id));
+
+					logger.info('[M3uProvider] Derived EPG URL from playlist for EPG sync', {
+						accountId: account.id,
+						epgUrl
+					});
+				}
+			}
+
+			if (!epgUrl) {
 				logger.debug('[M3uProvider] No EPG URL configured');
 				return [];
 			}
 
 			// Fetch XMLTV data
-			logger.info('[M3uProvider] Fetching XMLTV EPG', { epgUrl: config.epgUrl });
+			logger.info('[M3uProvider] Fetching XMLTV EPG', { epgUrl });
 
-			const response = await fetch(config.epgUrl, {
+			const response = await fetch(epgUrl, {
 				headers: {
 					'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
 				},
@@ -439,7 +539,7 @@ export class M3uProvider implements LiveTvProvider {
 				throw new Error(`Failed to fetch XMLTV: HTTP ${response.status}`);
 			}
 
-			const xmlContent = await response.text();
+			const xmlContent = await this.readXmltvContent(response, epgUrl);
 
 			if (!xmlContent || xmlContent.length === 0) {
 				logger.warn('[M3uProvider] Empty XMLTV response');
@@ -468,15 +568,27 @@ export class M3uProvider implements LiveTvProvider {
 				.from(livetvChannels)
 				.where(eq(livetvChannels.accountId, account.id));
 
-			// Build map of tvg-id to our channel ID
-			const channelMap = new Map<string, { id: string; externalId: string }>();
-			for (const channel of channels) {
-				const m3uData = channel.m3uData;
-				if (m3uData?.tvgId) {
-					channelMap.set(m3uData.tvgId, { id: channel.id, externalId: channel.externalId });
+			// Build map of XMLTV channel IDs -> one or more of our channels.
+			const channelMap = new Map<string, Map<string, { id: string; externalId: string }>>();
+			const addChannelMapEntry = (
+				xmltvChannelId: string | undefined,
+				channelInfo: { id: string; externalId: string }
+			) => {
+				if (!xmltvChannelId) return;
+				const key = xmltvChannelId.trim();
+				if (!key) return;
+				if (!channelMap.has(key)) {
+					channelMap.set(key, new Map());
 				}
-				// Also map by externalId as fallback
-				channelMap.set(channel.externalId, { id: channel.id, externalId: channel.externalId });
+				channelMap.get(key)!.set(channelInfo.id, channelInfo);
+			};
+
+			for (const channel of channels) {
+				const channelInfo = { id: channel.id, externalId: channel.externalId };
+				const m3uData = channel.m3uData;
+				addChannelMapEntry(m3uData?.tvgId, channelInfo);
+				// Fallback map by externalId for playlists where XMLTV channel uses external IDs.
+				addChannelMapEntry(channel.externalId, channelInfo);
 			}
 
 			// Parse programmes
@@ -490,12 +602,12 @@ export class M3uProvider implements LiveTvProvider {
 
 			for (const prog of programmes) {
 				try {
-					const channelId = prog['@_channel'];
-					if (!channelId) continue;
+					const xmltvChannelId = prog['@_channel']?.toString().trim();
+					if (!xmltvChannelId) continue;
 
-					// Find matching channel
-					const channelInfo = channelMap.get(channelId);
-					if (!channelInfo) continue;
+					// Find matching channels (can be multiple when tvg-id is duplicated in playlist).
+					const channelInfos = channelMap.get(xmltvChannelId);
+					if (!channelInfos || channelInfos.size === 0) continue;
 
 					// Parse timestamps (XMLTV format: YYYYMMDDHHMMSS +TZ)
 					const startStr = prog['@_start'];
@@ -508,8 +620,8 @@ export class M3uProvider implements LiveTvProvider {
 
 					if (!progStart || !progEnd) continue;
 
-					// Filter by time range
-					if (progStart < startTime || progStart > endTime) continue;
+					// Keep any programme that overlaps the requested window.
+					if (progEnd < startTime || progStart > endTime) continue;
 
 					// Extract program info
 					const title = this.extractXmltvText(prog.title);
@@ -532,24 +644,26 @@ export class M3uProvider implements LiveTvProvider {
 						}
 					}
 
-					programs.push({
-						id: randomUUID(),
-						channelId: channelInfo.id,
-						externalChannelId: channelInfo.externalId,
-						accountId: account.id,
-						providerType: 'm3u',
-						title: title || 'Unknown',
-						description,
-						category,
-						director,
-						actor,
-						startTime: progStart.toISOString(),
-						endTime: progEnd.toISOString(),
-						duration: Math.floor((progEnd.getTime() - progStart.getTime()) / 1000),
-						hasArchive: false, // M3U doesn't support archive
-						cachedAt: new Date().toISOString(),
-						updatedAt: new Date().toISOString()
-					});
+					for (const channelInfo of channelInfos.values()) {
+						programs.push({
+							id: randomUUID(),
+							channelId: channelInfo.id,
+							externalChannelId: channelInfo.externalId,
+							accountId: account.id,
+							providerType: 'm3u',
+							title: title || 'Unknown',
+							description,
+							category,
+							director,
+							actor,
+							startTime: progStart.toISOString(),
+							endTime: progEnd.toISOString(),
+							duration: Math.floor((progEnd.getTime() - progStart.getTime()) / 1000),
+							hasArchive: false, // M3U doesn't support archive
+							cachedAt: new Date().toISOString(),
+							updatedAt: new Date().toISOString()
+						});
+					}
 				} catch (_error) {
 					// Skip malformed programmes
 					continue;
@@ -628,6 +742,49 @@ export class M3uProvider implements LiveTvProvider {
 		return null;
 	}
 
+	/**
+	 * Read XMLTV response body, transparently handling gzip payloads (.gz).
+	 */
+	private async readXmltvContent(response: Response, epgUrl: string): Promise<string> {
+		const raw = new Uint8Array(await response.arrayBuffer());
+		if (raw.length === 0) {
+			return '';
+		}
+
+		const hasGzipMagic = raw.length >= 2 && raw[0] === 0x1f && raw[1] === 0x8b;
+		const contentType = response.headers.get('content-type')?.toLowerCase() ?? '';
+		const hasGzipMetadata =
+			contentType.includes('application/gzip') ||
+			contentType.includes('application/x-gzip') ||
+			/\.gz(?:$|[?#])/i.test(epgUrl);
+
+		let xmlBuffer = Buffer.from(raw);
+
+		if (hasGzipMagic) {
+			try {
+				xmlBuffer = await gunzipAsync(xmlBuffer);
+				logger.debug('[M3uProvider] Decompressed gzip XMLTV payload', {
+					epgUrl,
+					compressedBytes: raw.length,
+					uncompressedBytes: xmlBuffer.length
+				});
+			} catch (error) {
+				const message = error instanceof Error ? error.message : String(error);
+				throw new Error(`Failed to decompress XMLTV gzip payload: ${message}`);
+			}
+		} else if (hasGzipMetadata) {
+			// Some servers auto-decompress despite .gz URLs/content-types.
+			logger.debug('[M3uProvider] XMLTV marked as gzip but response was plain text', { epgUrl });
+		}
+
+		let xmlContent = xmlBuffer.toString('utf-8');
+		if (xmlContent.charCodeAt(0) === 0xfeff) {
+			xmlContent = xmlContent.slice(1);
+		}
+
+		return xmlContent;
+	}
+
 	// ============================================================================
 	// Archive (Not supported by M3U)
 	// ============================================================================
@@ -640,15 +797,22 @@ export class M3uProvider implements LiveTvProvider {
 	// Private Helpers
 	// ============================================================================
 
-	private parseM3u(content: string): M3uEntry[] {
+	private parseM3u(content: string): ParsedM3u {
 		const entries: M3uEntry[] = [];
 		const lines = content.split('\n');
+		let headerEpgUrl: string | null = null;
 
 		let currentAttrs: Record<string, string> = {};
 		let currentName = '';
 
 		for (let i = 0; i < lines.length; i++) {
 			const line = lines[i].trim();
+
+			if (line.startsWith('#EXTM3U')) {
+				const headerAttrs = this.parseM3uAttributes(line.slice('#EXTM3U'.length));
+				headerEpgUrl = this.extractHeaderEpgUrl(headerAttrs);
+				continue;
+			}
 
 			if (line.startsWith('#EXTINF:')) {
 				// Parse EXTINF line
@@ -658,12 +822,7 @@ export class M3uProvider implements LiveTvProvider {
 					currentName = match[2].trim();
 
 					// Parse attributes
-					currentAttrs = {};
-					const attrRegex = /(\w+)="([^"]*)"/g;
-					let attrMatch;
-					while ((attrMatch = attrRegex.exec(attrsString)) !== null) {
-						currentAttrs[attrMatch[1]] = attrMatch[2];
-					}
+					currentAttrs = this.parseM3uAttributes(attrsString);
 				}
 			} else if (line && !line.startsWith('#')) {
 				// This is a URL line
@@ -683,7 +842,38 @@ export class M3uProvider implements LiveTvProvider {
 			}
 		}
 
-		return entries;
+		return { entries, headerEpgUrl };
+	}
+
+	private parseM3uAttributes(attributesString: string): Record<string, string> {
+		const attributes: Record<string, string> = {};
+		const attrRegex = /([A-Za-z0-9_-]+)\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s,]+))/g;
+		let attrMatch: RegExpExecArray | null;
+
+		while ((attrMatch = attrRegex.exec(attributesString)) !== null) {
+			const key = attrMatch[1].toLowerCase();
+			const value = attrMatch[2] ?? attrMatch[3] ?? attrMatch[4] ?? '';
+			attributes[key] = value;
+		}
+
+		return attributes;
+	}
+
+	private extractHeaderEpgUrl(attributes: Record<string, string>): string | null {
+		const raw = attributes['x-tvg-url'] ?? attributes['url-tvg'] ?? attributes['tvg-url'];
+		if (!raw) return null;
+
+		for (const candidateRaw of raw.split(',')) {
+			const candidate = candidateRaw.trim();
+			if (!candidate) continue;
+			try {
+				return new URL(candidate).toString();
+			} catch {
+				// Try next candidate
+			}
+		}
+
+		return null;
 	}
 
 	private detectStreamType(url: string): 'hls' | 'direct' | 'unknown' {

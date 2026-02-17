@@ -17,6 +17,7 @@
 		ChannelEditModal,
 		ChannelCategoryManagerModal,
 		ChannelBulkActionBar,
+		ChannelRemoveModal,
 		ChannelBrowserModal,
 		EpgSourcePickerModal,
 		ChannelScheduleModal
@@ -32,6 +33,8 @@
 	import { createSSE } from '$lib/sse';
 	import { mobileSSEStatus } from '$lib/sse/mobileStatus.svelte';
 	import { resolvePath } from '$lib/utils/routing';
+	import { copyToClipboard as copyTextToClipboard } from '$lib/utils/clipboard';
+	import { toasts } from '$lib/stores/toast.svelte';
 
 	interface NowNextEntry {
 		now: EpgProgramWithProgress | null;
@@ -48,7 +51,7 @@
 	// Selection state
 	let selectedIds = new SvelteSet<string>();
 
-	// Expanded categories state (all expanded by default)
+	// Expanded categories state (accordion behavior, all collapsed by default)
 	let expandedCategories = new SvelteSet<string | null>();
 
 	// Drag state
@@ -92,6 +95,9 @@
 	// Bulk action state
 	let bulkActionLoading = $state(false);
 	let bulkAction = $state<'category' | 'remove' | null>(null);
+	let removeModalOpen = $state(false);
+	let removeModalMode = $state<'single' | 'bulk' | null>(null);
+	let removeModalChannel = $state<ChannelLineupItemWithDetails | null>(null);
 
 	// EPG state (now/next programs)
 	let epgData = new SvelteMap<string, NowNextEntry>();
@@ -188,16 +194,21 @@
 	// Derived: Selection helpers
 	const _hasSelection = $derived(selectedIds.size > 0);
 	const selectedCount = $derived(selectedIds.size);
-
-	// Initialize expanded categories when data loads
-	$effect(() => {
-		if (categories.length > 0 && expandedCategories.size === 0) {
-			for (const cat of categories) {
-				expandedCategories.add(cat.id);
+	const selectedCategoryIds = $derived.by(() => {
+		const ids = new SvelteSet<string | null>();
+		for (const item of lineup) {
+			if (selectedIds.has(item.id)) {
+				ids.add(item.categoryId ?? null);
 			}
-			expandedCategories.add(null); // Include uncategorized
 		}
+		return ids;
 	});
+	const removeModalCount = $derived(
+		removeModalMode === 'single' ? (removeModalChannel ? 1 : 0) : selectedIds.size
+	);
+	const removeModalChannelName = $derived(
+		removeModalMode === 'single' ? (removeModalChannel?.displayName ?? null) : null
+	);
 
 	onMount(() => {
 		loadData();
@@ -295,8 +306,11 @@
 	// Expand/collapse handlers
 	function handleToggleExpand(categoryId: string | null) {
 		if (expandedCategories.has(categoryId)) {
-			expandedCategories.delete(categoryId);
+			// Close current category when clicking it again
+			expandedCategories.clear();
 		} else {
+			// Accordion behavior: only one open at a time
+			expandedCategories.clear();
 			expandedCategories.add(categoryId);
 		}
 	}
@@ -414,11 +428,11 @@
 		scheduleModalChannel = channel;
 	}
 
-	async function handleEditDelete() {
+	function handleEditDelete() {
 		if (!editingChannel) return;
 		const item = editingChannel;
 		closeEditModal();
-		await handleRemove(item);
+		openSingleRemoveModal(item);
 	}
 
 	async function handleEditSave(id: string, data: UpdateChannelRequest) {
@@ -446,28 +460,81 @@
 		}
 	}
 
-	// Remove handler
-	async function handleRemove(item: ChannelLineupItemWithDetails) {
-		const confirmed = confirm(`Remove "${item.displayName}" from your lineup?`);
-		if (!confirmed) return;
+	function openSingleRemoveModal(item: ChannelLineupItemWithDetails) {
+		removeModalMode = 'single';
+		removeModalChannel = item;
+		removeModalOpen = true;
+	}
+
+	function openBulkRemoveModal() {
+		if (selectedIds.size === 0) return;
+		removeModalMode = 'bulk';
+		removeModalChannel = null;
+		removeModalOpen = true;
+	}
+
+	function closeRemoveModal(force = false) {
+		if (!force && bulkActionLoading && bulkAction === 'remove') return;
+		removeModalOpen = false;
+		removeModalMode = null;
+		removeModalChannel = null;
+	}
+
+	// Remove handler (single row action)
+	function handleRemove(item: ChannelLineupItemWithDetails) {
+		openSingleRemoveModal(item);
+	}
+
+	async function confirmRemove() {
+		if (!removeModalMode) return;
+		const removeMode = removeModalMode;
+		const singleChannel = removeModalChannel;
+		const bulkItemIds = removeMode === 'bulk' ? Array.from(selectedIds) : [];
+		if (removeMode === 'bulk' && bulkItemIds.length === 0) {
+			closeRemoveModal(true);
+			return;
+		}
+
+		bulkActionLoading = true;
+		bulkAction = 'remove';
+		closeRemoveModal(true);
 
 		try {
-			const response = await fetch(`/api/livetv/lineup/${item.id}`, {
-				method: 'DELETE'
-			});
+			if (removeMode === 'single' && singleChannel) {
+				const response = await fetch(`/api/livetv/lineup/${singleChannel.id}`, {
+					method: 'DELETE'
+				});
 
-			if (!response.ok) {
-				throw new Error('Failed to remove channel');
-			}
+				if (!response.ok) {
+					throw new Error('Failed to remove channel');
+				}
 
-			// Remove from selection if selected
-			if (selectedIds.has(item.id)) {
-				selectedIds.delete(item.id);
+				// Remove from selection if selected
+				if (selectedIds.has(singleChannel.id)) {
+					selectedIds.delete(singleChannel.id);
+				}
+			} else {
+				const response = await fetch('/api/livetv/lineup/remove', {
+					method: 'POST',
+					headers: { 'Content-Type': 'application/json' },
+					body: JSON.stringify({
+						itemIds: bulkItemIds
+					})
+				});
+
+				if (!response.ok) {
+					throw new Error('Failed to remove channels');
+				}
+
+				clearSelection();
 			}
 
 			await loadData();
 		} catch (e) {
-			console.error('Failed to remove channel:', e);
+			console.error('Failed to remove channel(s):', e);
+		} finally {
+			bulkActionLoading = false;
+			bulkAction = null;
 		}
 	}
 
@@ -514,6 +581,7 @@
 	// Bulk action handlers
 	async function handleBulkSetCategory(categoryId: string | null) {
 		if (selectedIds.size === 0) return;
+		const selectedCountAtAction = selectedIds.size;
 
 		bulkActionLoading = true;
 		bulkAction = 'category';
@@ -529,49 +597,26 @@
 			});
 
 			if (!response.ok) {
-				throw new Error('Failed to update categories');
+				const result = await response.json().catch(() => null);
+				throw new Error(result?.error || 'Failed to update categories');
 			}
 
 			await loadData();
 			clearSelection();
+			toasts.success(
+				`Updated category for ${selectedCountAtAction} channel${selectedCountAtAction === 1 ? '' : 's'}`
+			);
 		} catch (e) {
 			console.error('Failed to bulk update categories:', e);
+			toasts.error(e instanceof Error ? e.message : 'Failed to update categories');
 		} finally {
 			bulkActionLoading = false;
 			bulkAction = null;
 		}
 	}
 
-	async function handleBulkRemove() {
-		if (selectedIds.size === 0) return;
-
-		const confirmed = confirm(`Remove ${selectedIds.size} channel(s) from your lineup?`);
-		if (!confirmed) return;
-
-		bulkActionLoading = true;
-		bulkAction = 'remove';
-
-		try {
-			const response = await fetch('/api/livetv/lineup/remove', {
-				method: 'POST',
-				headers: { 'Content-Type': 'application/json' },
-				body: JSON.stringify({
-					itemIds: Array.from(selectedIds)
-				})
-			});
-
-			if (!response.ok) {
-				throw new Error('Failed to remove channels');
-			}
-
-			await loadData();
-			clearSelection();
-		} catch (e) {
-			console.error('Failed to bulk remove:', e);
-		} finally {
-			bulkActionLoading = false;
-			bulkAction = null;
-		}
+	function handleBulkRemove() {
+		openBulkRemoveModal();
 	}
 
 	// Backup browser handlers
@@ -633,14 +678,14 @@
 
 	async function copyToClipboard(type: 'm3u' | 'epg') {
 		const url = type === 'm3u' ? getM3uUrl() : getEpgUrl();
-		try {
-			await navigator.clipboard.writeText(url);
+		const copied = await copyTextToClipboard(url);
+		if (copied) {
 			copiedField = type;
 			setTimeout(() => {
 				copiedField = null;
 			}, 2000);
-		} catch (e) {
-			console.error('Failed to copy:', e);
+		} else {
+			toasts.error('Failed to copy URL');
 		}
 	}
 
@@ -701,11 +746,13 @@
 				Categories
 			</button>
 			<!-- Export Dropdown -->
-			<div class="dropdown dropdown-end">
+			<div class="relative">
 				<button
 					class="btn btn-ghost btn-sm"
 					onclick={toggleExportDropdown}
 					disabled={lineup.length === 0}
+					aria-expanded={exportDropdownOpen}
+					aria-haspopup="menu"
 				>
 					<Download class="h-4 w-4" />
 					Export
@@ -718,7 +765,7 @@
 						onkeydown={(e) => e.key === 'Escape' && closeExportDropdown()}
 					></div>
 					<div
-						class="dropdown-content menu pointer-events-auto left-1/2 z-50 mt-1
+						class="pointer-events-auto absolute left-1/2 z-50 mt-1
 							w-[calc(100vw-2rem)] max-w-sm -translate-x-1/2 rounded-box bg-base-200 p-4
 							shadow-lg sm:right-0 sm:left-auto sm:w-80 sm:max-w-none
 							sm:translate-x-0"
@@ -883,10 +930,21 @@
 	onChange={handleCategoryChange}
 />
 
+<!-- Remove Modal -->
+<ChannelRemoveModal
+	open={removeModalOpen}
+	loading={bulkActionLoading && bulkAction === 'remove'}
+	selectedCount={removeModalCount}
+	channelName={removeModalChannelName}
+	onConfirm={confirmRemove}
+	onCancel={closeRemoveModal}
+/>
+
 <!-- Bulk Action Bar -->
 <ChannelBulkActionBar
 	{selectedCount}
 	{categories}
+	excludedCategoryIds={selectedCategoryIds}
 	loading={bulkActionLoading}
 	currentAction={bulkAction}
 	onSetCategory={handleBulkSetCategory}

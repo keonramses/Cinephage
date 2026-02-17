@@ -212,8 +212,11 @@ export class LiveTvAccountManager implements BackgroundService {
 			m3uConfig = {
 				url: input.m3uConfig.url,
 				fileContent: input.m3uConfig.fileContent,
+				epgUrl: input.m3uConfig.epgUrl,
 				refreshIntervalHours: input.m3uConfig.refreshIntervalHours || 24,
-				autoRefresh: input.m3uConfig.autoRefresh ?? false
+				autoRefresh: input.m3uConfig.autoRefresh ?? false,
+				headers: input.m3uConfig.headers,
+				userAgent: input.m3uConfig.userAgent
 			};
 		} else if (input.providerType === 'iptvorg' && input.iptvOrgConfig) {
 			iptvOrgConfig = {

@@ -44,6 +44,7 @@ const liveTvAccountUpdateSchema = z.object({
 		.object({
 			url: z.string().url().optional(),
 			fileContent: z.string().optional(),
+			epgUrl: z.string().url().optional(),
 			refreshIntervalHours: z.number().min(1).max(168).optional(),
 			autoRefresh: z.boolean().optional()
 		})

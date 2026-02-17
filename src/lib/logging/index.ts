@@ -36,6 +36,29 @@ interface LogEntry {
 }
 
 /**
+ * Check if we're in development mode.
+ */
+function isDev(): boolean {
+	try {
+		return import.meta.env?.DEV ?? process.env.NODE_ENV === 'development';
+	} catch {
+		return false;
+	}
+}
+
+/**
+ * Whether error stack traces should be included in log output.
+ * Defaults to enabled in development, disabled in production.
+ * Override with LOG_INCLUDE_STACK=true|false.
+ */
+function shouldIncludeErrorStack(): boolean {
+	const configured = process.env.LOG_INCLUDE_STACK;
+	if (configured === 'true' || configured === '1') return true;
+	if (configured === 'false' || configured === '0') return false;
+	return isDev();
+}
+
+/**
  * Formats a log entry as JSON string.
  */
 function formatLog(level: LogLevel, message: string, context: LogContext, error?: Error): string {
@@ -50,7 +73,7 @@ function formatLog(level: LogLevel, message: string, context: LogContext, error?
 		entry.error = {
 			message: error.message,
 			name: error.name,
-			stack: error.stack
+			...(shouldIncludeErrorStack() ? { stack: error.stack } : {})
 		};
 	}
 
@@ -63,17 +86,6 @@ function formatLog(level: LogLevel, message: string, context: LogContext, error?
 function writeToFile(formatted: string, context: LogContext): void {
 	const category = context.logCategory || 'main';
 	fileLogger.write(category, formatted);
-}
-
-/**
- * Check if we're in development mode.
- */
-function isDev(): boolean {
-	try {
-		return import.meta.env?.DEV ?? process.env.NODE_ENV === 'development';
-	} catch {
-		return false;
-	}
 }
 
 /**

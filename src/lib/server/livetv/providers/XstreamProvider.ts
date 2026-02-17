@@ -78,6 +78,16 @@ interface XstreamStream {
 	tv_archive_duration?: number;
 }
 
+interface XstreamEpgEntry {
+	start_timestamp?: number | string;
+	stop_timestamp?: number | string;
+	start?: string;
+	end?: string;
+	title?: string;
+	description?: string;
+	name?: string;
+}
+
 export class XstreamProvider implements LiveTvProvider {
 	readonly type = 'xstream';
 
@@ -149,14 +159,40 @@ export class XstreamProvider implements LiveTvProvider {
 				? new Date(parseInt(result.user_info.exp_date) * 1000).toISOString()
 				: null;
 
-			logger.info('[XstreamProvider] Connection test successful', { accountId: account.id });
+			const config = account.xstreamConfig;
+			if (!config) {
+				throw new Error('XStream config not found');
+			}
+
+			let categoryCount = 0;
+			let channelCount = 0;
+
+			try {
+				const [categories, streams] = await Promise.all([
+					this.fetchXstreamCategories(config),
+					this.fetchXstreamStreams(config)
+				]);
+				categoryCount = categories.length;
+				channelCount = streams.length;
+			} catch (error) {
+				logger.warn('[XstreamProvider] Connection test succeeded, but count fetch failed', {
+					accountId: account.id,
+					error: error instanceof Error ? error.message : String(error)
+				});
+			}
+
+			logger.info('[XstreamProvider] Connection test successful', {
+				accountId: account.id,
+				channelCount,
+				categoryCount
+			});
 
 			return {
 				success: true,
 				profile: {
 					playbackLimit: parseInt(result.user_info?.max_connections || '1'),
-					channelCount: 0,
-					categoryCount: 0,
+					channelCount,
+					categoryCount,
 					expiresAt: expDate,
 					serverTimezone: result.server_info?.timezone || 'UTC',
 					status: result.user_info?.status === 'Active' ? 'active' : 'expired'
@@ -498,67 +534,107 @@ export class XstreamProvider implements LiveTvProvider {
 
 			const programs: EpgProgram[] = [];
 			const baseUrl = config.baseUrl.replace(/\/$/, '');
+			let actionOrder: string[] = ['get_epg', 'get_simple_data_table', 'get_short_epg'];
+			const failedChannelSamples: Array<{ channelId: string; streamId: string }> = [];
+			const errorChannelSamples: Array<{ channelId: string; streamId: string; error: string }> = [];
+			let failedChannelCount = 0;
+			let errorChannelCount = 0;
+			const sampleLimit = 5;
 
 			for (const channel of channels) {
 				const xstreamData = channel.xstreamData;
 				if (!xstreamData?.streamId) continue;
 
 				try {
-					const url = `${baseUrl}/player_api.php?username=${encodeURIComponent(config.username)}&password=${encodeURIComponent(config.password)}&action=get_epg&stream_id=${xstreamData.streamId}`;
+					const channelEpgResult = await this.fetchChannelEpg(
+						baseUrl,
+						config.username,
+						config.password,
+						xstreamData.streamId,
+						actionOrder
+					);
 
-					const response = await fetch(url, {
-						headers: {
-							'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
-						},
-						signal: AbortSignal.timeout(30000)
-					});
-
-					if (!response.ok) {
-						logger.warn('[XstreamProvider] EPG fetch failed for channel', {
-							channelId: channel.id,
-							streamId: xstreamData.streamId,
-							status: response.status
-						});
+					if (!channelEpgResult) {
+						failedChannelCount++;
+						if (failedChannelSamples.length < sampleLimit) {
+							failedChannelSamples.push({
+								channelId: channel.id,
+								streamId: xstreamData.streamId
+							});
+						}
 						continue;
 					}
 
-					const epgData = await response.json();
+					if (channelEpgResult.usedAction && channelEpgResult.usedAction !== actionOrder[0]) {
+						actionOrder = [
+							channelEpgResult.usedAction,
+							...actionOrder.filter((a) => a !== channelEpgResult.usedAction)
+						];
+					}
 
-					if (Array.isArray(epgData)) {
-						for (const entry of epgData) {
-							const entryStart = new Date(entry.start_timestamp * 1000);
-							const entryEnd = new Date(entry.stop_timestamp * 1000);
+					for (const entry of channelEpgResult.entries) {
+						const entryStart = this.parseEpgTime(
+							entry.start_timestamp ?? entry.start,
+							entry.start_timestamp !== undefined
+						);
+						const entryEnd = this.parseEpgTime(
+							entry.stop_timestamp ?? entry.end,
+							entry.stop_timestamp !== undefined
+						);
 
-							if (entryStart < startTime || entryStart > endTime) continue;
+						if (!entryStart || !entryEnd) continue;
+						// Keep any programme that overlaps the requested window.
+						if (entryEnd < startTime || entryStart > endTime) continue;
 
-							programs.push({
-								id: randomUUID(),
-								channelId: channel.id,
-								externalChannelId: channel.externalId,
-								accountId: account.id,
-								providerType: 'xstream',
-								title: entry.title || 'Unknown',
-								description: entry.description || null,
-								category: null,
-								director: null,
-								actor: null,
-								startTime: entryStart.toISOString(),
-								endTime: entryEnd.toISOString(),
-								duration: Math.floor((entryEnd.getTime() - entryStart.getTime()) / 1000),
-								hasArchive: false,
-								cachedAt: new Date().toISOString(),
-								updatedAt: new Date().toISOString()
-							});
-						}
+						const title = this.decodeMaybeBase64(entry.title) ?? entry.name ?? 'Unknown';
+						const description = this.decodeMaybeBase64(entry.description);
+
+						programs.push({
+							id: randomUUID(),
+							channelId: channel.id,
+							externalChannelId: channel.externalId,
+							accountId: account.id,
+							providerType: 'xstream',
+							title,
+							description: description || null,
+							category: null,
+							director: null,
+							actor: null,
+							startTime: entryStart.toISOString(),
+							endTime: entryEnd.toISOString(),
+							duration: Math.floor((entryEnd.getTime() - entryStart.getTime()) / 1000),
+							hasArchive: false,
+							cachedAt: new Date().toISOString(),
+							updatedAt: new Date().toISOString()
+						});
 					}
 				} catch (error) {
 					const message = error instanceof Error ? error.message : String(error);
-					logger.warn('[XstreamProvider] EPG fetch error for channel', {
-						channelId: channel.id,
-						streamId: xstreamData.streamId,
-						error: message
-					});
+					errorChannelCount++;
+					if (errorChannelSamples.length < sampleLimit) {
+						errorChannelSamples.push({
+							channelId: channel.id,
+							streamId: xstreamData.streamId,
+							error: message
+						});
+					}
 				}
+			}
+
+			if (failedChannelCount > 0 || errorChannelCount > 0) {
+				logger.warn('[XstreamProvider] EPG fetch completed with channel issues', {
+					accountId: account.id,
+					channelsChecked: channels.length,
+					failedChannels: failedChannelCount,
+					errorChannels: errorChannelCount,
+					failedChannelSamples,
+					errorChannelSamples,
+					suppressedFailedChannelLogs: Math.max(
+						0,
+						failedChannelCount - failedChannelSamples.length
+					),
+					suppressedErrorChannelLogs: Math.max(0, errorChannelCount - errorChannelSamples.length)
+				});
 			}
 
 			logger.info('[XstreamProvider] EPG fetch complete', {
@@ -623,6 +699,89 @@ export class XstreamProvider implements LiveTvProvider {
 		}
 	}
 
+	private async fetchChannelEpg(
+		baseUrl: string,
+		username: string,
+		password: string,
+		streamId: string,
+		actionOrder: string[]
+	): Promise<{ entries: XstreamEpgEntry[]; usedAction: string | null } | null> {
+		for (const action of actionOrder) {
+			const extraParams = action === 'get_short_epg' ? '&limit=200' : '';
+			const url =
+				`${baseUrl}/player_api.php?username=${encodeURIComponent(username)}` +
+				`&password=${encodeURIComponent(password)}&action=${action}&stream_id=${streamId}${extraParams}`;
+
+			const response = await fetch(url, {
+				headers: {
+					'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+				},
+				signal: AbortSignal.timeout(30000)
+			});
+
+			if (!response.ok) {
+				if (response.status === 400 || response.status === 404) {
+					continue;
+				}
+				throw new Error(`HTTP ${response.status} on action ${action}`);
+			}
+
+			const data = await response.json();
+			const entries = this.extractEpgEntries(data);
+			return { entries, usedAction: action };
+		}
+
+		return null;
+	}
+
+	private extractEpgEntries(data: unknown): XstreamEpgEntry[] {
+		if (Array.isArray(data)) {
+			return data as XstreamEpgEntry[];
+		}
+		if (data && typeof data === 'object') {
+			const record = data as Record<string, unknown>;
+			if (Array.isArray(record.epg_listings)) {
+				return record.epg_listings as XstreamEpgEntry[];
+			}
+			if (Array.isArray(record.listings)) {
+				return record.listings as XstreamEpgEntry[];
+			}
+		}
+		return [];
+	}
+
+	private parseEpgTime(value: number | string | undefined, isTimestamp: boolean): Date | null {
+		if (value === undefined || value === null) return null;
+
+		if (isTimestamp) {
+			const parsed = Number(value);
+			if (!Number.isFinite(parsed) || parsed <= 0) return null;
+			const millis = parsed > 1_000_000_000_000 ? parsed : parsed * 1000;
+			const date = new Date(millis);
+			return Number.isNaN(date.getTime()) ? null : date;
+		}
+
+		const date = new Date(String(value));
+		return Number.isNaN(date.getTime()) ? null : date;
+	}
+
+	private decodeMaybeBase64(value: string | undefined): string | null {
+		if (!value) return null;
+		const trimmed = value.trim();
+		if (!trimmed) return null;
+
+		if (!/^[A-Za-z0-9+/=]+$/.test(trimmed) || trimmed.length % 4 !== 0) {
+			return trimmed;
+		}
+
+		try {
+			const decoded = Buffer.from(trimmed, 'base64').toString('utf8').trim();
+			return decoded || trimmed;
+		} catch {
+			return trimmed;
+		}
+	}
+
 	private async makeAuthRequest(account: LiveTvAccount): Promise<XstreamAuthResponse> {
 		const config = account.xstreamConfig;
 		if (!config) {
@@ -651,7 +810,7 @@ export class XstreamProvider implements LiveTvProvider {
 		const baseUrl = config.baseUrl.replace(/\/$/, '');
 		const url = `${baseUrl}/player_api.php?username=${encodeURIComponent(config.username)}&password=${encodeURIComponent(config.password)}&action=get_live_categories`;
 
-		logger.debug('[XstreamProvider] Fetching categories', { url });
+		logger.debug('[XstreamProvider] Fetching categories', { serverUrl: baseUrl });
 
 		const response = await fetch(url, {
 			headers: {
@@ -673,7 +832,7 @@ export class XstreamProvider implements LiveTvProvider {
 
 		logger.info(
 			'[XstreamProvider] Fetching streams - this may take a while for large channel lists',
-			{ url }
+			{ serverUrl: baseUrl }
 		);
 
 		const response = await fetch(url, {
