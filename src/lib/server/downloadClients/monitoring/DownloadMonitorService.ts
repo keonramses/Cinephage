@@ -1423,19 +1423,26 @@ export class DownloadMonitorService extends EventEmitter implements BackgroundSe
 			throw new Error('Queue item not found');
 		}
 
-		// Remove from download client if requested
+		// Remove from download client if requested (best-effort — always cleans up queue)
 		if (options.removeFromClient) {
 			const manager = getDownloadClientManager();
 			const instance = await manager.getClientInstance(queueItem.downloadClientId);
 
 			if (instance) {
 				try {
-					await instance.removeDownload(queueItem.downloadId, options.deleteFiles);
+					const clientDownloadId = this.resolveClientDownloadId(queueItem, 'remove');
+					await instance.removeDownload(clientDownloadId, options.deleteFiles);
 				} catch (error) {
-					logger.warn('Failed to remove download from client', {
+					logger.warn('Failed to remove download from client, proceeding with queue cleanup', {
+						title: queueItem.title,
 						error: error instanceof Error ? error.message : String(error)
 					});
 				}
+			} else {
+				logger.warn('Download client not available, removing from queue only', {
+					title: queueItem.title,
+					downloadClientId: queueItem.downloadClientId
+				});
 			}
 		}
 
@@ -1467,7 +1474,8 @@ export class DownloadMonitorService extends EventEmitter implements BackgroundSe
 			throw new Error('Download client not available');
 		}
 
-		await instance.pauseDownload(queueItem.downloadId);
+		const clientDownloadId = this.resolveClientDownloadId(queueItem, 'pause');
+		await instance.pauseDownload(clientDownloadId);
 
 		// Update local status
 		await db.update(downloadQueue).set({ status: 'paused' }).where(eq(downloadQueue.id, id));
@@ -1500,7 +1508,8 @@ export class DownloadMonitorService extends EventEmitter implements BackgroundSe
 			throw new Error('Download client not available');
 		}
 
-		await instance.resumeDownload(queueItem.downloadId);
+		const clientDownloadId = this.resolveClientDownloadId(queueItem, 'resume');
+		await instance.resumeDownload(clientDownloadId);
 
 		// Update local status
 		await db.update(downloadQueue).set({ status: 'downloading' }).where(eq(downloadQueue.id, id));
@@ -1510,6 +1519,26 @@ export class DownloadMonitorService extends EventEmitter implements BackgroundSe
 			this.emit('queue:updated', updatedItem);
 			this.emitSSE('queue:updated', updatedItem);
 		}
+	}
+
+	/**
+	 * Resolve the identifier that should be sent to a download client command.
+	 * Torrents prefer infoHash; usenet clients prefer downloadId.
+	 */
+	private resolveClientDownloadId(
+		queueItem: typeof downloadQueue.$inferSelect,
+		action: 'pause' | 'resume' | 'remove'
+	): string {
+		const isTorrent = queueItem.protocol === 'torrent';
+		const identifier = isTorrent
+			? queueItem.infoHash || queueItem.downloadId
+			: queueItem.downloadId || queueItem.infoHash;
+
+		if (!identifier) {
+			throw new Error(`Queue item is missing a download identifier for ${action}`);
+		}
+
+		return identifier;
 	}
 
 	/**

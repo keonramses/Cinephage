@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { SvelteURLSearchParams } from 'svelte/reactivity';
+	import { onMount } from 'svelte';
 	import { goto, invalidateAll } from '$app/navigation';
 	import { resolvePath } from '$lib/utils/routing';
 	import { createSSE } from '$lib/sse';
@@ -38,6 +39,7 @@
 	let isLoadingMore = $state(false);
 
 	let hasInitialized = $state(false);
+	let refreshInFlight = $state(false);
 
 	function normalizeActivityStatus(status: unknown): ActivityStatus {
 		switch (status) {
@@ -250,6 +252,45 @@
 
 	const MOBILE_SSE_SOURCE = 'activity';
 
+	async function refreshActivityData(): Promise<void> {
+		if (refreshInFlight) return;
+		refreshInFlight = true;
+		try {
+			await invalidateAll();
+		} finally {
+			refreshInFlight = false;
+		}
+	}
+
+	onMount(() => {
+		// Ensure we don't show stale client-side snapshot state after route back/forward.
+		void refreshActivityData();
+
+		const handleFocus = () => {
+			void refreshActivityData();
+		};
+
+		const handleVisibilityChange = () => {
+			if (document.visibilityState === 'visible') {
+				void refreshActivityData();
+			}
+		};
+
+		const handlePageShow = () => {
+			void refreshActivityData();
+		};
+
+		window.addEventListener('focus', handleFocus);
+		document.addEventListener('visibilitychange', handleVisibilityChange);
+		window.addEventListener('pageshow', handlePageShow);
+
+		return () => {
+			window.removeEventListener('focus', handleFocus);
+			document.removeEventListener('visibilitychange', handleVisibilityChange);
+			window.removeEventListener('pageshow', handlePageShow);
+		};
+	});
+
 	$effect(() => {
 		mobileSSEStatus.publish(MOBILE_SSE_SOURCE, sse.status);
 		return () => {
@@ -453,7 +494,20 @@
 
 	async function handleRemove(id: string) {
 		const response = await fetch(`/api/queue/${id}`, { method: 'DELETE' });
-		if (!response.ok) throw new Error('Failed to remove');
+		if (!response.ok) {
+			let message = 'Failed to remove';
+			try {
+				const payload = await response.json();
+				if (payload?.message && typeof payload.message === 'string') {
+					message = payload.message;
+				} else if (payload?.error && typeof payload.error === 'string') {
+					message = payload.error;
+				}
+			} catch {
+				// Ignore JSON parse errors and fall back to default message.
+			}
+			throw new Error(message);
+		}
 		await invalidateAll();
 		closeModal();
 	}

@@ -68,11 +68,13 @@ ORIGIN=http://localhost         # Won't work externally
 
 ## Logging Configuration
 
-| Variable          | Description                 | Default |
-| ----------------- | --------------------------- | ------- |
-| `LOG_TO_FILE`     | Enable file logging         | true    |
-| `LOG_MAX_SIZE_MB` | Max log file size           | 10      |
-| `LOG_MAX_FILES`   | Number of log files to keep | 5       |
+| Variable            | Description                                       | Default                |
+| ------------------- | ------------------------------------------------- | ---------------------- |
+| `LOG_TO_FILE`       | Enable file logging                               | true                   |
+| `LOG_MAX_SIZE_MB`   | Max log file size                                 | 10                     |
+| `LOG_MAX_FILES`     | Number of log files to keep                       | 5                      |
+| `LOG_INCLUDE_STACK` | Include stack traces in logs (`true`/`false`)     | Dev: true, Prod: false |
+| `LOG_SENSITIVE`     | Disable redaction of secrets in logs (debug only) | false                  |
 
 ### Log Rotation
 
@@ -91,10 +93,13 @@ logs/
 
 ## Media Configuration
 
-| Variable                   | Description                  | Default                   |
-| -------------------------- | ---------------------------- | ------------------------- |
-| `FFPROBE_PATH`             | Path to ffprobe binary       | ffprobe (in PATH)         |
-| `INDEXER_DEFINITIONS_PATH` | Custom indexer YAML location | data/indexers/definitions |
+| Variable                             | Description                              | Default                            |
+| ------------------------------------ | ---------------------------------------- | ---------------------------------- |
+| `FFPROBE_PATH`                       | Path to ffprobe binary                   | ffprobe (in PATH)                  |
+| `INDEXER_DEFINITIONS_PATH`           | Base indexer YAML definitions path       | data/indexers/definitions          |
+| `INDEXER_CUSTOM_DEFINITIONS_PATH`    | Custom indexer definitions override path | data/indexers/definitions/custom   |
+| `EXTERNAL_LISTS_PRESETS_PATH`        | Smart list presets base directory        | data/external-lists/presets        |
+| `EXTERNAL_LISTS_CUSTOM_PRESETS_PATH` | Smart list custom presets directory      | data/external-lists/presets/custom |
 
 ### ffprobe Path
 
@@ -126,6 +131,7 @@ Control background task concurrency:
 | `WORKER_MAX_SEARCH`          | Max manual search workers         | 3                |
 | `WORKER_MAX_SUBTITLE_SEARCH` | Max subtitle search workers       | 3                |
 | `WORKER_MAX_PORTAL_SCANS`    | Max portal scan workers           | 2                |
+| `WORKER_MAX_CHANNEL_SYNCS`   | Max Live TV channel sync workers  | 3                |
 | `WORKER_CLEANUP_MS`          | Remove completed tasks after (ms) | 1800000 (30 min) |
 | `WORKER_MAX_LOGS`            | Max log entries per worker type   | 1000             |
 
@@ -250,6 +256,8 @@ FFPROBE_PATH=/usr/bin/ffprobe
 LOG_TO_FILE=true
 LOG_MAX_SIZE_MB=10
 LOG_MAX_FILES=5
+LOG_INCLUDE_STACK=false
+LOG_SENSITIVE=false
 
 # Workers
 WORKER_MAX_STREAMS=10
@@ -259,6 +267,7 @@ WORKER_MAX_MONITORING=5
 WORKER_MAX_SEARCH=3
 WORKER_MAX_SUBTITLE_SEARCH=3
 WORKER_MAX_PORTAL_SCANS=2
+WORKER_MAX_CHANNEL_SYNCS=3
 WORKER_CLEANUP_MS=1800000
 WORKER_MAX_LOGS=1000
 
