@@ -6,6 +6,7 @@
  */
 
 import iconv from 'iconv-lite';
+import { logger } from '$lib/logging/index.js';
 
 // Encoding name normalization mapping
 const ENCODING_ALIASES: Record<string, string> = {
@@ -93,7 +94,7 @@ export function decodeBuffer(
 			};
 		} catch {
 			// Fall through to UTF-8 if decoding fails
-			console.warn(`Failed to decode with ${normalizedEncoding}, falling back to UTF-8`);
+			logger.warn(`Failed to decode with ${normalizedEncoding}, falling back to UTF-8`);
 		}
 	}
 
