@@ -82,6 +82,8 @@ export interface LibraryMovie {
 	monitored: boolean | null;
 	minimumAvailability: string | null;
 	wantsSubtitles: boolean | null;
+	tmdbStatus?: string | null;
+	releaseDate?: string | null;
 	added: string;
 	hasFile: boolean | null;
 	files: MovieFile[];
@@ -114,6 +116,7 @@ export interface LibrarySeries {
 	episodeCount: number | null;
 	episodeFileCount: number | null;
 	percentComplete: number;
+	totalSize?: number;
 }
 
 export type LibraryItem = LibraryMovie | LibrarySeries;

@@ -5,7 +5,6 @@
 		Search,
 		Loader2,
 		RefreshCw,
-		Filter,
 		Package,
 		AlertCircle,
 		CheckCircle2,
@@ -13,10 +12,14 @@
 		ChevronDown,
 		ChevronUp,
 		Download,
-		Bug
+		Bug,
+		Check,
+		Play,
+		ExternalLink
 	} from 'lucide-svelte';
 	import SearchResultRow from './SearchResultRow.svelte';
 	import ModalWrapper from '$lib/components/ui/modal/ModalWrapper.svelte';
+	import { formatBytes } from '$lib/utils/format';
 
 	interface Release {
 		guid: string;
@@ -99,6 +102,7 @@
 		title: string;
 		tmdbId?: number;
 		imdbId?: string | null;
+		tvdbId?: number | null;
 		year?: number | null;
 		mediaType: 'movie' | 'tv';
 		scoringProfileId?: string | null;
@@ -117,6 +121,7 @@
 		title,
 		tmdbId,
 		imdbId,
+		tvdbId,
 		year,
 		mediaType,
 		scoringProfileId,
@@ -160,6 +165,7 @@
 				title,
 				tmdbId,
 				imdbId,
+				tvdbId,
 				year,
 				mediaType,
 				season,
@@ -178,6 +184,11 @@
 		a.download = `search-debug-${title.replace(/[^a-z0-9]/gi, '-')}-${Date.now()}.json`;
 		a.click();
 		URL.revokeObjectURL(url);
+	}
+
+	// Generate a unique key for a release (guid alone can collide across indexers)
+	function releaseKey(release: Release): string {
+		return `${release.guid}-${release.indexerId}`;
 	}
 
 	// Helper to check if a release is a multi-season pack
@@ -244,6 +255,39 @@
 		return result;
 	});
 
+	// Releases scoped to the active reporting mode
+	const modeBaseReleases = $derived.by(() => {
+		if (searchMode === 'multiSeasonPack') {
+			return releases.filter(isMultiSeasonPack);
+		}
+		return releases;
+	});
+
+	const modeRejectedCount = $derived.by(() => modeBaseReleases.filter((r) => r.rejected).length);
+
+	const reportedIndexerResults = $derived.by(() => {
+		if (!meta?.indexerResults) {
+			return [];
+		}
+
+		const modeCountsByIndexer = new SvelteMap<string, number>();
+		if (searchMode === 'multiSeasonPack') {
+			for (const release of modeBaseReleases) {
+				modeCountsByIndexer.set(
+					release.indexerId,
+					(modeCountsByIndexer.get(release.indexerId) ?? 0) + 1
+				);
+			}
+		}
+
+		return Object.entries(meta.indexerResults).map(([indexerId, result]) => ({
+			indexerId,
+			...result,
+			displayCount:
+				searchMode === 'multiSeasonPack' ? (modeCountsByIndexer.get(indexerId) ?? 0) : result.count
+		}));
+	});
+
 	// Auto-search when modal opens
 	$effect(() => {
 		if (open && releases.length === 0 && !searching && !searchTriggered) {
@@ -258,6 +302,7 @@
 			releases = [];
 			meta = null;
 			searchError = null;
+			showRejected = false;
 			grabbingIds.clear();
 			grabbedIds.clear();
 			streamingIds.clear();
@@ -280,6 +325,7 @@
 
 			if (tmdbId) params.set('tmdbId', tmdbId.toString());
 			if (imdbId) params.set('imdbId', imdbId);
+			if (tvdbId) params.set('tvdbId', tvdbId.toString());
 			if (year) params.set('year', year.toString());
 			if (scoringProfileId) params.set('scoringProfileId', scoringProfileId);
 			if (season !== undefined) params.set('season', season.toString());
@@ -307,24 +353,25 @@
 	}
 
 	async function handleGrab(release: Release, streaming?: boolean) {
-		grabbingIds.add(release.guid);
+		const key = releaseKey(release);
+		grabbingIds.add(key);
 		if (streaming) {
-			streamingIds.add(release.guid);
+			streamingIds.add(key);
 		}
-		grabErrors.delete(release.guid);
+		grabErrors.delete(key);
 
 		try {
 			const result = await onGrab(release, streaming);
 			if (result.success) {
-				grabbedIds.add(release.guid);
+				grabbedIds.add(key);
 			} else {
-				grabErrors.set(release.guid, result.error || 'Failed to grab');
+				grabErrors.set(key, result.error || 'Failed to grab');
 			}
 		} catch (err) {
-			grabErrors.set(release.guid, err instanceof Error ? err.message : 'Failed');
+			grabErrors.set(key, err instanceof Error ? err.message : 'Failed');
 		} finally {
-			grabbingIds.delete(release.guid);
-			streamingIds.delete(release.guid);
+			grabbingIds.delete(key);
+			streamingIds.delete(key);
 		}
 	}
 
@@ -338,266 +385,334 @@
 	}
 </script>
 
-<ModalWrapper {open} {onClose} maxWidth="5xl" labelledBy="interactive-search-modal-title">
-	<!-- Header -->
-	<div class="mb-4 flex items-center justify-between">
-		<div>
-			<h3 id="interactive-search-modal-title" class="flex items-center gap-2 text-lg font-bold">
-				{#if searchMode === 'multiSeasonPack'}
-					<Package size={20} class="text-primary" />
-					Multi-Season Pack Search
-				{:else}
-					Interactive Search
-				{/if}
-			</h3>
-			<p class="text-sm text-base-content/60">
-				{title}
-				{#if searchMode === 'multiSeasonPack'}
-					<span class="ml-2 badge badge-sm badge-primary">Complete Series / Multi-Season Only</span>
-				{/if}
-			</p>
-		</div>
-		<div class="flex items-center gap-2">
-			<button class="btn btn-ghost btn-sm" onclick={performSearch} disabled={searching}>
-				{#if searching}
-					<Loader2 size={16} class="animate-spin" />
-				{:else}
-					<RefreshCw size={16} />
-				{/if}
-				Refresh
-			</button>
-			<button class="btn btn-circle btn-ghost btn-sm" onclick={onClose}>
-				<X size={16} />
-			</button>
-		</div>
-	</div>
-
-	<!-- Search stats -->
-	{#if meta}
-		<div class="mb-4 space-y-2">
-			<div class="flex flex-wrap items-center gap-4 text-sm text-base-content/70">
-				<span>{releases.length} of {meta.afterEnrichment ?? meta.totalResults} results</span>
-				{#if meta.rejectedCount}
-					<span class="text-warning">{meta.rejectedCount} rejected</span>
-				{/if}
-				<span>Search: {meta.searchTimeMs}ms</span>
-				{#if meta.enrichTimeMs}
-					<span>Enrich: {meta.enrichTimeMs}ms</span>
-				{/if}
-				{#if meta.indexerCount !== undefined}
-					<button
-						class="btn gap-1 btn-ghost btn-xs"
-						onclick={() => (showIndexerDetails = !showIndexerDetails)}
-					>
-						{meta.indexerCount} indexers
-						{#if showIndexerDetails}
-							<ChevronUp size={12} />
-						{:else}
-							<ChevronDown size={12} />
-						{/if}
-					</button>
-				{/if}
-				<!-- Pipeline details button -->
-				{#if meta.afterDedup || meta.afterFiltering || meta.afterEnrichment}
-					<button
-						class="btn gap-1 btn-ghost btn-xs"
-						onclick={() => (showPipelineDetails = !showPipelineDetails)}
-					>
-						Pipeline
-						{#if showPipelineDetails}
-							<ChevronUp size={12} />
-						{:else}
-							<ChevronDown size={12} />
-						{/if}
-					</button>
-				{/if}
-			</div>
-
-			<!-- Pipeline breakdown panel -->
-			{#if showPipelineDetails && (meta.afterDedup || meta.afterFiltering || meta.afterEnrichment)}
-				<div class="rounded-lg bg-base-200 p-3 text-sm">
-					<div class="mb-2 font-medium text-base-content/80">Filtering Pipeline:</div>
-					<div class="space-y-1">
-						<div class="flex justify-between">
-							<span>1. Raw from indexers:</span>
-							<span class="font-mono">{meta.totalResults}</span>
-						</div>
-						{#if meta.afterDedup !== undefined}
-							<div class="flex justify-between">
-								<span>2. After deduplication:</span>
-								<span class="font-mono"
-									>{meta.afterDedup}
-									<span class="text-error">(-{meta.totalResults - meta.afterDedup})</span></span
-								>
-							</div>
-						{/if}
-						{#if meta.afterFiltering !== undefined}
-							<div class="flex justify-between">
-								<span>3. After season/category filter:</span>
-								<span class="font-mono"
-									>{meta.afterFiltering}
-									{#if meta.afterDedup !== undefined && meta.afterFiltering < meta.afterDedup}
-										<span class="text-error">(-{meta.afterDedup - meta.afterFiltering})</span>
-									{/if}</span
-								>
-							</div>
-						{/if}
-						{#if meta.afterEnrichment !== undefined}
-							<div class="flex justify-between">
-								<span>4. After quality scoring & smart dedup:</span>
-								<span class="font-mono"
-									>{meta.afterEnrichment}
-									{#if meta.afterFiltering !== undefined && meta.afterEnrichment < meta.afterFiltering}
-										<span class="text-error">(-{meta.afterFiltering - meta.afterEnrichment})</span>
-									{/if}</span
-								>
-							</div>
-						{/if}
-						{#if meta.rejectedCount}
-							<div class="flex justify-between text-warning">
-								<span>└ Quality rejected (hidden by default):</span>
-								<span class="font-mono">{meta.rejectedCount}</span>
-							</div>
-						{/if}
-						<div class="mt-1 flex justify-between border-t border-base-300 pt-1">
-							<span class="font-medium">5. Displayed (after limit):</span>
-							<span class="font-mono font-medium">{releases.length}</span>
-						</div>
-					</div>
-				</div>
-			{/if}
-
-			<!-- Indexer details panel -->
-			{#if showIndexerDetails && (meta.indexerResults || meta.rejectedIndexers?.length)}
-				<div class="rounded-lg bg-base-200 p-3 text-sm">
-					<!-- Searched indexers -->
-					{#if meta.indexerResults}
-						<div class="mb-2">
-							<span class="font-medium text-base-content/80">Searched:</span>
-							<div class="mt-1 flex flex-wrap gap-2">
-								{#each Object.entries(meta.indexerResults) as [, result] (result.name)}
-									<div
-										class="badge gap-1 {result.error
-											? 'badge-error'
-											: result.count > 0
-												? 'badge-success'
-												: 'badge-ghost'}"
-									>
-										{#if result.error}
-											<XCircle size={12} />
-										{:else if result.count > 0}
-											<CheckCircle2 size={12} />
-										{/if}
-										{result.name}: {result.count}
-										{#if result.error}
-											<span class="tooltip" data-tip={result.error}>
-												<AlertCircle size={12} />
-											</span>
-										{/if}
-									</div>
-								{/each}
-							</div>
-						</div>
-					{/if}
-
-					<!-- Rejected indexers -->
-					{#if meta.rejectedIndexers?.length}
-						<div>
-							<span class="font-medium text-base-content/80">Skipped:</span>
-							<div class="mt-1 flex flex-wrap gap-2">
-								{#each meta.rejectedIndexers as rejected (rejected.indexerId)}
-									<div
-										class="tooltip tooltip-right badge gap-1 badge-outline badge-warning before:max-w-72 before:text-left before:whitespace-normal"
-										data-tip={rejected.message}
-									>
-										<XCircle size={12} />
-										{rejected.indexerName}
-									</div>
-								{/each}
-							</div>
-						</div>
-					{/if}
-				</div>
-			{/if}
-
-			<!-- Debug tools -->
-			<div class="mt-2 flex gap-2">
-				<button
-					class="btn gap-1 btn-ghost btn-xs"
-					onclick={downloadDebugJson}
-					title="Download full debug JSON with all release details"
+<ModalWrapper
+	{open}
+	{onClose}
+	maxWidth="5xl"
+	labelledBy="interactive-search-modal-title"
+	flexContent
+>
+	<!-- Fixed top controls -->
+	<div class="shrink-0">
+		<!-- Header -->
+		<div class="mb-3 flex items-start justify-between gap-2">
+			<div class="min-w-0 flex-1">
+				<h3
+					id="interactive-search-modal-title"
+					class="flex items-center gap-2 text-base font-bold sm:text-lg"
 				>
-					<Download size={12} />
-					Download Debug JSON
-				</button>
-				<button
-					class="btn gap-1 btn-ghost btn-xs"
-					onclick={() => (showDebugPanel = !showDebugPanel)}
-					title="View raw JSON data"
-				>
-					<Bug size={12} />
-					{showDebugPanel ? 'Hide' : 'Show'} Debug Panel
-				</button>
-			</div>
-
-			<!-- Debug panel -->
-			{#if showDebugPanel}
-				<div class="mt-2 rounded-lg bg-base-300 p-3">
-					<div class="mb-2 flex gap-2">
-						<button
-							class="btn btn-xs {selectedDebugRelease === null ? 'btn-primary' : 'btn-ghost'}"
-							onclick={() => (selectedDebugRelease = null)}
+					{#if searchMode === 'multiSeasonPack'}
+						<Package size={18} class="shrink-0 text-primary" />
+						<span class="truncate">Multi-Season Pack Search</span>
+					{:else}
+						Interactive Search
+					{/if}
+				</h3>
+				<p class="truncate text-xs text-base-content/60 sm:text-sm">
+					{title}
+					{#if searchMode === 'multiSeasonPack'}
+						<span class="ml-1 badge badge-xs badge-primary sm:badge-sm"
+							>Complete Series / Multi-Season Only</span
 						>
-							All Releases ({releases.length})
+					{/if}
+				</p>
+			</div>
+			<div class="flex shrink-0 items-center gap-1">
+				<button class="btn btn-ghost btn-sm" onclick={performSearch} disabled={searching}>
+					{#if searching}
+						<Loader2 size={16} class="animate-spin" />
+					{:else}
+						<RefreshCw size={16} />
+					{/if}
+					<span class="hidden sm:inline">Refresh</span>
+				</button>
+				<button class="btn btn-circle btn-ghost btn-sm" onclick={onClose}>
+					<X size={16} />
+				</button>
+			</div>
+		</div>
+
+		<!-- Search stats -->
+		{#if meta}
+			<div class="mb-4 space-y-2">
+				<div class="flex flex-wrap items-center gap-4 text-sm text-base-content/70">
+					{#if searchMode === 'multiSeasonPack'}
+						<span>{filteredReleases.length} of {modeBaseReleases.length} results</span>
+						{#if modeRejectedCount}
+							<span class="text-warning">{modeRejectedCount} rejected</span>
+						{/if}
+					{:else}
+						<span
+							>{filteredReleases.length} of {meta.afterEnrichment ?? meta.totalResults} results</span
+						>
+						{#if meta.rejectedCount}
+							<span class="text-warning">{meta.rejectedCount} rejected</span>
+						{/if}
+					{/if}
+					<span>Search: {meta.searchTimeMs}ms</span>
+					{#if meta.enrichTimeMs}
+						<span>Enrich: {meta.enrichTimeMs}ms</span>
+					{/if}
+					{#if meta.indexerCount !== undefined}
+						<button
+							class="btn gap-1 btn-ghost btn-xs"
+							onclick={() => (showIndexerDetails = !showIndexerDetails)}
+						>
+							{meta.indexerCount} indexers
+							{#if showIndexerDetails}
+								<ChevronUp size={12} />
+							{:else}
+								<ChevronDown size={12} />
+							{/if}
 						</button>
-						{#if selectedDebugRelease}
-							<span class="text-sm text-base-content/70">
-								Selected: {selectedDebugRelease.title.substring(0, 50)}...
-							</span>
+					{/if}
+					<!-- Pipeline details button -->
+					{#if searchMode === 'multiSeasonPack' || meta.afterDedup || meta.afterFiltering || meta.afterEnrichment}
+						<button
+							class="btn gap-1 btn-ghost btn-xs"
+							onclick={() => (showPipelineDetails = !showPipelineDetails)}
+						>
+							Pipeline
+							{#if showPipelineDetails}
+								<ChevronUp size={12} />
+							{:else}
+								<ChevronDown size={12} />
+							{/if}
+						</button>
+					{/if}
+				</div>
+
+				<!-- Pipeline breakdown panel -->
+				{#if showPipelineDetails && (searchMode === 'multiSeasonPack' || meta.afterDedup || meta.afterFiltering || meta.afterEnrichment)}
+					<div class="rounded-lg bg-base-200 p-3 text-sm">
+						<div class="mb-2 font-medium text-base-content/80">
+							{searchMode === 'multiSeasonPack' ? 'Multi-Pack Pipeline:' : 'Filtering Pipeline:'}
+						</div>
+						{#if searchMode === 'multiSeasonPack'}
+							<div class="space-y-1">
+								<div class="flex justify-between">
+									<span>1. Multi-pack candidates:</span>
+									<span class="font-mono">{modeBaseReleases.length}</span>
+								</div>
+								{#if modeRejectedCount}
+									<div class="flex justify-between text-warning">
+										<span>2. Quality rejected (hidden by default):</span>
+										<span class="font-mono">{modeRejectedCount}</span>
+									</div>
+								{/if}
+								<div class="mt-1 flex justify-between border-t border-base-300 pt-1">
+									<span class="font-medium">3. Displayed (after limit):</span>
+									<span class="font-mono font-medium">{filteredReleases.length}</span>
+								</div>
+							</div>
+						{:else}
+							<div class="space-y-1">
+								<div class="flex justify-between">
+									<span>1. Raw from indexers:</span>
+									<span class="font-mono">{meta.totalResults}</span>
+								</div>
+								{#if meta.afterDedup !== undefined}
+									<div class="flex justify-between">
+										<span>2. After deduplication:</span>
+										<span class="font-mono"
+											>{meta.afterDedup}
+											<span class="text-error">(-{meta.totalResults - meta.afterDedup})</span></span
+										>
+									</div>
+								{/if}
+								{#if meta.afterFiltering !== undefined}
+									<div class="flex justify-between">
+										<span>3. After season/category filter:</span>
+										<span class="font-mono"
+											>{meta.afterFiltering}
+											{#if meta.afterDedup !== undefined && meta.afterFiltering < meta.afterDedup}
+												<span class="text-error">(-{meta.afterDedup - meta.afterFiltering})</span>
+											{/if}</span
+										>
+									</div>
+								{/if}
+								{#if meta.afterEnrichment !== undefined}
+									<div class="flex justify-between">
+										<span>4. After quality scoring & smart dedup:</span>
+										<span class="font-mono"
+											>{meta.afterEnrichment}
+											{#if meta.afterFiltering !== undefined && meta.afterEnrichment < meta.afterFiltering}
+												<span class="text-error"
+													>(-{meta.afterFiltering - meta.afterEnrichment})</span
+												>
+											{/if}</span
+										>
+									</div>
+								{/if}
+								{#if meta.rejectedCount}
+									<div class="flex justify-between text-warning">
+										<span>└ Quality rejected (hidden by default):</span>
+										<span class="font-mono">{meta.rejectedCount}</span>
+									</div>
+								{/if}
+								<div class="mt-1 flex justify-between border-t border-base-300 pt-1">
+									<span class="font-medium">5. Displayed (after limit):</span>
+									<span class="font-mono font-medium">{filteredReleases.length}</span>
+								</div>
+							</div>
 						{/if}
 					</div>
-					<div class="mb-2 text-xs text-base-content/60">
-						Click on any release row below to view its detailed JSON here
-					</div>
-					<pre
-						class="max-h-96 overflow-auto rounded bg-base-100 p-2 font-mono text-xs whitespace-pre-wrap">{JSON.stringify(
-							selectedDebugRelease ?? {
-								meta,
-								releases: releases.slice(0, 10),
-								note: 'Showing first 10 releases. Download JSON for full data.'
-							},
-							null,
-							2
-						)}</pre>
-				</div>
-			{/if}
-		</div>
-	{/if}
+				{/if}
 
-	<!-- Filters -->
-	<div class="mb-4 flex flex-wrap items-center gap-4">
-		<div class="form-control">
-			<div class="input-group input-group-sm">
-				<span class="bg-base-200">
-					<Filter size={14} />
-				</span>
+				<!-- Indexer details panel -->
+				{#if showIndexerDetails && (meta.indexerResults || meta.rejectedIndexers?.length)}
+					<div class="rounded-lg bg-base-200 p-3 text-sm">
+						<!-- Searched indexers -->
+						{#if reportedIndexerResults.length > 0}
+							<div class="mb-2">
+								<span class="font-medium text-base-content/80"
+									>{searchMode === 'multiSeasonPack'
+										? 'Searched (multi-pack matches):'
+										: 'Searched:'}</span
+								>
+								<div class="mt-1 flex flex-wrap gap-2">
+									{#each reportedIndexerResults as result (result.indexerId)}
+										<div
+											class="badge gap-1 {result.error
+												? 'badge-error'
+												: result.displayCount > 0
+													? 'badge-success'
+													: 'badge-ghost'}"
+										>
+											{#if result.error}
+												<XCircle size={12} />
+											{:else if result.displayCount > 0}
+												<CheckCircle2 size={12} />
+											{/if}
+											{result.name}: {result.displayCount}
+											{#if result.error}
+												<span class="tooltip" data-tip={result.error}>
+													<AlertCircle size={12} />
+												</span>
+											{/if}
+										</div>
+									{/each}
+								</div>
+							</div>
+						{/if}
+
+						<!-- Rejected indexers -->
+						{#if meta.rejectedIndexers?.length}
+							<div>
+								<span class="font-medium text-base-content/80">Skipped:</span>
+								<div class="mt-1 flex flex-wrap gap-2">
+									{#each meta.rejectedIndexers as rejected (rejected.indexerId)}
+										<div
+											class="tooltip tooltip-right badge gap-1 badge-outline badge-warning before:max-w-72 before:text-left before:whitespace-normal"
+											data-tip={rejected.message}
+										>
+											<XCircle size={12} />
+											{rejected.indexerName}
+										</div>
+									{/each}
+								</div>
+							</div>
+						{/if}
+					</div>
+				{/if}
+
+				<!-- Debug tools -->
+				<div class="mt-2 flex gap-2">
+					<button
+						class="btn gap-1 btn-ghost btn-xs"
+						onclick={downloadDebugJson}
+						title="Download full debug JSON with all release details"
+					>
+						<Download size={12} />
+						Download Debug JSON
+					</button>
+					<button
+						class="btn gap-1 btn-ghost btn-xs"
+						onclick={() => (showDebugPanel = !showDebugPanel)}
+						title="View raw JSON data"
+					>
+						<Bug size={12} />
+						{showDebugPanel ? 'Hide' : 'Show'} Debug Panel
+					</button>
+				</div>
+
+				<!-- Debug panel -->
+				{#if showDebugPanel}
+					<div class="mt-2 rounded-lg bg-base-300 p-3">
+						<div class="mb-2 flex gap-2">
+							<button
+								class="btn btn-xs {selectedDebugRelease === null ? 'btn-primary' : 'btn-ghost'}"
+								onclick={() => (selectedDebugRelease = null)}
+							>
+								All Releases ({releases.length})
+							</button>
+							{#if selectedDebugRelease}
+								<span class="text-sm text-base-content/70">
+									Selected: {selectedDebugRelease.title.substring(0, 50)}...
+								</span>
+							{/if}
+						</div>
+						<div class="mb-2 text-xs text-base-content/60">
+							Click on any release row below to view its detailed JSON here
+						</div>
+						<pre
+							class="max-h-96 overflow-auto rounded bg-base-100 p-2 font-mono text-xs whitespace-pre-wrap">{JSON.stringify(
+								selectedDebugRelease ?? {
+									meta,
+									releases: releases.slice(0, 10),
+									note: 'Showing first 10 releases. Download JSON for full data.'
+								},
+								null,
+								2
+							)}</pre>
+					</div>
+				{/if}
+			</div>
+		{/if}
+
+		<!-- Search & Sort -->
+		<div class="mb-3 flex flex-wrap items-center gap-2 sm:gap-4">
+			<div class="form-control w-full sm:w-auto">
 				<input
 					type="text"
-					placeholder="Filter results..."
-					class="input-bordered input input-sm w-full sm:w-48"
+					placeholder="Search results…"
+					class="input input-sm w-full rounded-full border-base-content/20 bg-base-200/60 px-4 transition-all duration-200 placeholder:text-base-content/40 hover:bg-base-200 focus:border-primary/50 focus:bg-base-200 focus:ring-1 focus:ring-primary/20 focus:outline-none sm:w-48"
 					bind:value={filterQuery}
 				/>
 			</div>
-		</div>
 
-		<label class="label cursor-pointer gap-2">
-			<input type="checkbox" class="checkbox checkbox-sm" bind:checked={showRejected} />
-			<span class="label-text">Show rejected</span>
-		</label>
+			<label class="label cursor-pointer gap-2">
+				<input type="checkbox" class="checkbox checkbox-sm" bind:checked={showRejected} />
+				<span class="label-text text-xs sm:text-sm">Show rejected</span>
+			</label>
+
+			<!-- Mobile sort control -->
+			<div class="ml-auto flex items-center gap-1 sm:hidden">
+				<span class="text-xs text-base-content/60">Sort:</span>
+				<select
+					class="select-bordered select select-xs"
+					value={sortBy}
+					onchange={(e) => {
+						sortBy = e.currentTarget.value as typeof sortBy;
+					}}
+				>
+					<option value="score">Score</option>
+					<option value="seeders">Seeders</option>
+					<option value="size">Size</option>
+					<option value="age">Age</option>
+				</select>
+				<button
+					class="btn btn-ghost btn-xs"
+					onclick={() => (sortDir = sortDir === 'desc' ? 'asc' : 'desc')}
+				>
+					{sortDir === 'desc' ? '↓' : '↑'}
+				</button>
+			</div>
+		</div>
 	</div>
 
-	<!-- Results -->
-	<div class="flex-1 overflow-auto">
+	<!-- Scrollable results -->
+	<div class="min-h-0 flex-1 overflow-y-auto">
 		{#if searching}
 			<div class="flex flex-col items-center justify-center py-12">
 				<Loader2 size={32} class="animate-spin text-primary" />
@@ -621,7 +736,8 @@
 				{/if}
 			</div>
 		{:else}
-			<div class="overflow-x-auto">
+			<!-- Desktop table -->
+			<div class="hidden overflow-x-auto sm:block">
 				<table class="table table-sm">
 					<thead class="sticky top-0 z-10 bg-base-100">
 						<tr>
@@ -655,14 +771,14 @@
 						</tr>
 					</thead>
 					<tbody>
-						{#each filteredReleases as release (release.guid)}
+						{#each filteredReleases as release (releaseKey(release))}
 							<SearchResultRow
 								{release}
 								onGrab={handleGrab}
-								grabbing={grabbingIds.has(release.guid)}
-								grabbed={grabbedIds.has(release.guid)}
-								streaming={streamingIds.has(release.guid)}
-								error={grabErrors.get(release.guid)}
+								grabbing={grabbingIds.has(releaseKey(release))}
+								grabbed={grabbedIds.has(releaseKey(release))}
+								streaming={streamingIds.has(releaseKey(release))}
+								error={grabErrors.get(releaseKey(release))}
 								onClick={showDebugPanel ? () => (selectedDebugRelease = release) : undefined}
 								clickable={showDebugPanel}
 							/>
@@ -670,11 +786,148 @@
 					</tbody>
 				</table>
 			</div>
+
+			<!-- Mobile card list -->
+			<div class="space-y-2 sm:hidden">
+				{#each filteredReleases as release (releaseKey(release))}
+					{@const key = releaseKey(release)}
+					{@const isGrabbing = grabbingIds.has(key)}
+					{@const isGrabbed = grabbedIds.has(key)}
+					{@const isStreaming = streamingIds.has(key)}
+					{@const grabError = grabErrors.get(key)}
+					<!-- svelte-ignore a11y_no_noninteractive_tabindex -->
+					<div
+						class="rounded-lg bg-base-200 p-3"
+						class:opacity-50={release.rejected}
+						class:cursor-pointer={showDebugPanel}
+						onclick={showDebugPanel ? () => (selectedDebugRelease = release) : undefined}
+						role={showDebugPanel ? 'button' : undefined}
+						tabindex={showDebugPanel ? 0 : undefined}
+					>
+						<!-- Release title -->
+						<p class="text-sm leading-snug font-medium break-all">{release.title}</p>
+
+						<!-- Quality badges -->
+						<div class="mt-1.5 flex flex-wrap gap-1">
+							<span
+								class="badge badge-xs {release.protocol === 'torrent'
+									? 'badge-info'
+									: release.protocol === 'streaming'
+										? 'badge-success'
+										: 'badge-warning'}"
+							>
+								{release.protocol === 'torrent'
+									? 'Torrent'
+									: release.protocol === 'streaming'
+										? 'Stream'
+										: 'Usenet'}
+							</span>
+							{#if release.parsed?.resolution && release.parsed.resolution.toLowerCase() !== 'unknown'}
+								<span class="badge badge-xs badge-primary">{release.parsed.resolution}</span>
+							{/if}
+							{#if release.parsed?.source && release.parsed.source.toLowerCase() !== 'unknown'}
+								<span class="badge badge-xs badge-primary">{release.parsed.source}</span>
+							{/if}
+							{#if release.parsed?.codec && release.parsed.codec.toLowerCase() !== 'unknown'}
+								<span class="badge badge-xs badge-primary">{release.parsed.codec}</span>
+							{/if}
+							{#if release.parsed?.hdr && release.parsed.hdr.toLowerCase() !== 'unknown'}
+								<span class="badge badge-xs badge-primary">{release.parsed.hdr}</span>
+							{/if}
+							{#if release.parsed?.releaseGroup && release.parsed.releaseGroup.toLowerCase() !== 'unknown'}
+								<span class="badge badge-ghost badge-xs">{release.parsed.releaseGroup}</span>
+							{/if}
+						</div>
+
+						<!-- Meta row: indexer, size, seeders, age, score -->
+						<div
+							class="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-base-content/70"
+						>
+							<span>{release.indexerName}</span>
+							{#if release.size > 0}
+								<span>{formatBytes(release.size)}</span>
+							{/if}
+							{#if release.protocol === 'torrent'}
+								<span>
+									<span class="text-success">{release.seeders ?? 0}</span>/<span class="text-error"
+										>{release.leechers ?? 0}</span
+									>
+								</span>
+							{/if}
+							{#if release.totalScore !== undefined}
+								<span
+									class="font-medium {release.totalScore >= 700
+										? 'text-success'
+										: release.totalScore >= 400
+											? 'text-warning'
+											: 'text-error'}"
+								>
+									Score: {release.totalScore}
+								</span>
+							{/if}
+						</div>
+
+						<!-- Actions -->
+						<div class="mt-2 flex items-center gap-1">
+							{#if isGrabbed}
+								<span class="badge gap-1 badge-sm badge-success">
+									<Check size={12} />
+									Grabbed
+								</span>
+							{:else if grabError}
+								<span class="badge gap-1 badge-sm badge-error" title={grabError}>
+									<X size={12} />
+									Failed
+								</span>
+							{:else}
+								{#if release.protocol === 'usenet'}
+									<button
+										class="btn btn-xs btn-accent"
+										onclick={() => handleGrab(release, true)}
+										disabled={isGrabbing || isStreaming}
+									>
+										{#if isStreaming}
+											<Loader2 size={12} class="animate-spin" />
+										{:else}
+											<Play size={12} />
+										{/if}
+										Stream
+									</button>
+								{/if}
+								<button
+									class="btn btn-xs btn-primary"
+									onclick={() => handleGrab(release, false)}
+									disabled={isGrabbing || isStreaming}
+								>
+									{#if isGrabbing}
+										<Loader2 size={12} class="animate-spin" />
+									{:else}
+										<Download size={12} />
+									{/if}
+									Grab
+								</button>
+							{/if}
+							{#if release.commentsUrl}
+								<!-- eslint-disable svelte/no-navigation-without-resolve -- External URL -->
+								<a
+									href={release.commentsUrl}
+									target="_blank"
+									rel="noopener noreferrer"
+									class="btn btn-ghost btn-xs"
+								>
+									<ExternalLink size={12} />
+								</a>
+								<!-- eslint-enable svelte/no-navigation-without-resolve -->
+							{/if}
+						</div>
+					</div>
+				{/each}
+			</div>
 		{/if}
 	</div>
 
-	<!-- Footer -->
-	<div class="modal-action">
+	<!-- Fixed footer -->
+	<div class="modal-action shrink-0 border-t border-base-300 pt-3">
 		<button class="btn" onclick={onClose}>Close</button>
 	</div>
 </ModalWrapper>

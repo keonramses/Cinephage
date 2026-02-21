@@ -5,6 +5,7 @@ import {
 	series,
 	episodes,
 	episodeFiles,
+	movieFiles,
 	downloadQueue,
 	downloadHistory,
 	unmatchedFiles,
@@ -13,7 +14,10 @@ import {
 import { count, eq, desc, and, inArray, sql, gte, ne } from 'drizzle-orm';
 import { logger } from '$lib/logging';
 import type { UnifiedActivity } from '$lib/types/activity';
-import { getMovieAvailabilityLevel } from '$lib/utils/movieAvailability';
+import {
+	computeMissingMovieAvailabilityCounts,
+	enrichMoviesWithAvailability
+} from '$lib/server/dashboard/movie-availability';
 
 export const load: PageServerLoad = async ({ fetch, url }) => {
 	try {
@@ -43,20 +47,6 @@ export const load: PageServerLoad = async ({ fetch, url }) => {
 
 		const now = new Date();
 		const today = now.toISOString().split('T')[0];
-		const currentYear = now.getFullYear();
-		const nowIso = now.toISOString();
-		const releasedMovieCondition = sql`(
-			${movies.year} IS NOT NULL
-			AND (
-				${movies.year} < ${currentYear}
-				OR (
-					${movies.year} = ${currentYear}
-					AND ${movies.added} IS NOT NULL
-					AND julianday(${movies.added}) IS NOT NULL
-					AND (julianday(${nowIso}) - julianday(${movies.added})) > 120
-				)
-			)
-		)`;
 
 		// Primary counters are monitored-only (actionable). We also keep a secondary
 		// unmonitored missing counter for visibility ("ignored" in UI).
@@ -64,7 +54,7 @@ export const load: PageServerLoad = async ({ fetch, url }) => {
 			airedMissingEpisodes,
 			unairedEpisodes,
 			unmonitoredAiredMissingEpisodes,
-			missingMovieStats
+			missingMoviesForAvailability
 		] = await Promise.all([
 			db
 				.select({ count: count() })
@@ -106,20 +96,20 @@ export const load: PageServerLoad = async ({ fetch, url }) => {
 				),
 			db
 				.select({
-					monitoredReleasedMissing: count(
-						sql`CASE WHEN ${movies.monitored} = 1 AND ${releasedMovieCondition} THEN 1 END`
-					),
-					monitoredUnreleased: count(
-						sql`CASE WHEN ${movies.monitored} = 1 AND NOT (${releasedMovieCondition}) THEN 1 END`
-					),
-					unmonitoredMissing: count(sql`CASE WHEN ${movies.monitored} = 0 THEN 1 END`)
+					tmdbId: movies.tmdbId,
+					year: movies.year,
+					added: movies.added,
+					monitored: movies.monitored
 				})
 				.from(movies)
 				.where(eq(movies.hasFile, false))
 		]);
-		const monitoredReleasedMissingMovies = missingMovieStats?.[0]?.monitoredReleasedMissing || 0;
-		const monitoredUnreleasedMovies = missingMovieStats?.[0]?.monitoredUnreleased || 0;
-		const unmonitoredMissingMovies = missingMovieStats?.[0]?.unmonitoredMissing || 0;
+		const missingMovieCounts = await computeMissingMovieAvailabilityCounts(
+			missingMoviesForAvailability
+		);
+		const monitoredReleasedMissingMovies = missingMovieCounts.monitoredReleasedMissing;
+		const monitoredUnreleasedMovies = missingMovieCounts.monitoredUnreleased;
+		const unmonitoredMissingMovies = missingMovieCounts.unmonitoredMissing;
 
 		const oneDayAgoIso = new Date(now.getTime() - 24 * 60 * 60 * 1000).toISOString();
 
@@ -161,6 +151,14 @@ export const load: PageServerLoad = async ({ fetch, url }) => {
 
 		// Get unmatched files count
 		const [unmatchedCount] = await db.select({ count: count() }).from(unmatchedFiles);
+
+		// Get storage size totals
+		const [[movieSizeResult], [episodeSizeResult]] = await Promise.all([
+			db.select({ total: sql<number>`COALESCE(SUM(${movieFiles.size}), 0)` }).from(movieFiles),
+			db.select({ total: sql<number>`COALESCE(SUM(${episodeFiles.size}), 0)` }).from(episodeFiles)
+		]);
+		const movieStorageBytes = Number(movieSizeResult?.total || 0);
+		const tvStorageBytes = Number(episodeSizeResult?.total || 0);
 
 		// Get missing root folder count (movies + series)
 		const [missingMovieRoots, missingSeriesRoots] = await Promise.all([
@@ -238,14 +236,8 @@ export const load: PageServerLoad = async ({ fetch, url }) => {
 			.from(movies)
 			.orderBy(desc(movies.added))
 			.limit(6);
-		const recentlyAddedMoviesWithAvailability = recentlyAddedMovies.map((movie) => {
-			const availability = getMovieAvailabilityLevel(movie);
-			return {
-				...movie,
-				availability,
-				isReleased: availability === 'released'
-			};
-		});
+		const recentlyAddedMoviesWithAvailability =
+			await enrichMoviesWithAvailability(recentlyAddedMovies);
 
 		const recentlyAddedSeries = await db
 			.select({
@@ -426,7 +418,12 @@ export const load: PageServerLoad = async ({ fetch, url }) => {
 				missingRootFolders: Math.max(
 					(missingMovieRoots?.[0]?.count || 0) + (missingSeriesRoots?.[0]?.count || 0),
 					missingRootFolderFallback
-				)
+				),
+				storage: {
+					movieBytes: movieStorageBytes,
+					tvBytes: tvStorageBytes,
+					totalBytes: movieStorageBytes + tvStorageBytes
+				}
 			},
 			recentActivity,
 			recentlyAdded: {
@@ -466,7 +463,12 @@ export const load: PageServerLoad = async ({ fetch, url }) => {
 				movingDownloads: 0,
 				completedDownloadsLast24h: 0,
 				unmatchedFiles: 0,
-				missingRootFolders: 0
+				missingRootFolders: 0,
+				storage: {
+					movieBytes: 0,
+					tvBytes: 0,
+					totalBytes: 0
+				}
 			},
 			recentActivity: [] as UnifiedActivity[],
 			recentlyAdded: {
