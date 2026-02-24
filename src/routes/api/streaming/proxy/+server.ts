@@ -31,6 +31,7 @@ import {
 	fetchWithTimeout,
 	MAX_REDIRECTS
 } from '$lib/server/http/ssrf-protection';
+import { rewriteHlsPlaylistUrls } from '$lib/server/streaming/utils/hls-rewrite.js';
 
 const streamLog = { logCategory: 'streams' as const };
 
@@ -348,7 +349,14 @@ export const GET: RequestHandler = async ({ url, request }) => {
 				}
 			}
 
-			const rewrittenPlaylist = rewritePlaylistUrls(text, decodedUrl, baseUrl, referer);
+			const rewrittenPlaylist = rewriteHlsPlaylistUrls(
+				text,
+				decodedUrl,
+				(absoluteUrl: string, isSegment: boolean): string => {
+					const extension = isSegment ? 'ts' : 'm3u8';
+					return `${baseUrl}/api/streaming/proxy/segment.${extension}?url=${encodeURIComponent(absoluteUrl)}&referer=${encodeURIComponent(referer)}`;
+				}
+			);
 			// Ensure VOD markers are present so players start from beginning
 			const vodPlaylist = ensureVodPlaylist(rewrittenPlaylist);
 
@@ -445,94 +453,6 @@ function ensureVodPlaylist(playlist: string): string {
 		rewritten.pop();
 	}
 	rewritten.push('#EXT-X-ENDLIST');
-
-	return rewritten.join('\n');
-}
-
-function rewritePlaylistUrls(
-	playlist: string,
-	baseUrl: string,
-	proxyBaseUrl: string,
-	referer: string
-): string {
-	const lines = playlist.split('\n');
-	const rewritten: string[] = [];
-
-	const base = new URL(baseUrl);
-	const basePath = base.pathname.substring(0, base.pathname.lastIndexOf('/') + 1);
-
-	const makeProxyUrl = (url: string, isSegment: boolean = false): string => {
-		let absoluteUrl: string;
-
-		if (url.startsWith('http://') || url.startsWith('https://')) {
-			absoluteUrl = url;
-		} else if (url.startsWith('/')) {
-			absoluteUrl = `${base.origin}${url}`;
-		} else {
-			absoluteUrl = `${base.origin}${basePath}${url}`;
-		}
-
-		// Use path-based proxy URL with proper extension for FFmpeg compatibility
-		// FFmpeg's HLS parser rejects URLs that don't end in recognized extensions
-		const extension = isSegment ? 'ts' : 'm3u8';
-		return `${proxyBaseUrl}/api/streaming/proxy/segment.${extension}?url=${encodeURIComponent(absoluteUrl)}&referer=${encodeURIComponent(referer)}`;
-	};
-
-	let previousWasExtinf = false;
-
-	for (const line of lines) {
-		const trimmedLine = line.trim();
-
-		// Handle HLS tags that contain URIs
-		if (line.startsWith('#EXT-X-MEDIA:') || line.startsWith('#EXT-X-I-FRAME-STREAM-INF:')) {
-			const uriMatch = line.match(/URI="([^"]+)"/);
-			if (uriMatch) {
-				const originalUri = uriMatch[1];
-				const proxiedUri = makeProxyUrl(originalUri, false);
-				rewritten.push(line.replace(`URI="${originalUri}"`, `URI="${proxiedUri}"`));
-			} else {
-				rewritten.push(line);
-			}
-			previousWasExtinf = false;
-			continue;
-		}
-
-		// Track #EXTINF lines - the next URL line is always a segment
-		if (trimmedLine.startsWith('#EXTINF:')) {
-			rewritten.push(line);
-			previousWasExtinf = true;
-			continue;
-		}
-
-		// Keep other comments and empty lines as-is
-		if (line.startsWith('#') || trimmedLine === '') {
-			rewritten.push(line);
-			previousWasExtinf = false;
-			continue;
-		}
-
-		// This is a URL line - could be a playlist or segment
-		if (!trimmedLine) {
-			rewritten.push(line);
-			previousWasExtinf = false;
-			continue;
-		}
-
-		try {
-			// If previous line was #EXTINF, this is definitely a segment URL
-			// regardless of its extension (providers use fake extensions like .txt, .jpg, .html)
-			// Otherwise, check for common segment extensions or assume playlist
-			const isSegment =
-				previousWasExtinf ||
-				trimmedLine.includes('.ts') ||
-				trimmedLine.includes('.aac') ||
-				trimmedLine.includes('.mp4');
-			rewritten.push(makeProxyUrl(trimmedLine, isSegment));
-		} catch {
-			rewritten.push(line);
-		}
-		previousWasExtinf = false;
-	}
 
 	return rewritten.join('\n');
 }

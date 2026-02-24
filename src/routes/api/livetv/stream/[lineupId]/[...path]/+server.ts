@@ -17,6 +17,8 @@ import {
 	getStreamUrlCache,
 	HLS_STREAM_TIMEOUT_MS
 } from '$lib/server/livetv/streaming/StreamUrlCache.js';
+import { rewriteHlsPlaylistUrls } from '$lib/server/streaming/utils/hls-rewrite.js';
+import { STB_USER_AGENT } from '$lib/server/livetv/stalker/StalkerPortalClient.js';
 import { logger } from '$lib/logging';
 
 // Streaming constants
@@ -25,8 +27,6 @@ const LIVETV_SEGMENT_MAX_SIZE = 50 * 1024 * 1024; // 50MB
 const LIVETV_SEGMENT_CACHE_MAX_AGE = 60; // Segments are immutable once created
 const LIVETV_MAX_RETRIES = 3;
 const LIVETV_RETRY_BASE_DELAY_MS = 1000;
-const LIVETV_PROXY_USER_AGENT =
-	'Mozilla/5.0 (QtEmbedded; U; Linux; C) AppleWebKit/533.3 (KHTML, like Gecko) MAG200 stbapp ver: 4 rev: 2116 Mobile Safari/533.3';
 
 /**
  * Fetch with retry logic for transient errors
@@ -96,7 +96,7 @@ async function fetchWithRetry(
  */
 function getStreamHeaders(providerHeaders?: Record<string, string>): HeadersInit {
 	return {
-		'User-Agent': LIVETV_PROXY_USER_AGENT,
+		'User-Agent': STB_USER_AGENT,
 		Accept: '*/*',
 		'Accept-Encoding': 'identity',
 		Connection: 'keep-alive',
@@ -160,118 +160,21 @@ function encodeProviderHeaders(headers?: Record<string, string>): string | undef
 }
 
 /**
- * Rewrite HLS playlist URLs to route through our segment proxy
+ * Build a LiveTV segment proxy URL builder for the shared HLS rewriter.
  */
-function rewriteHlsPlaylist(
-	playlist: string,
-	originalUrl: string,
+function makeLiveTvProxyUrlBuilder(
 	baseUrl: string,
 	lineupId: string,
 	encodedHeaders?: string
-): string {
-	const lines = playlist.split('\n');
-	const result: string[] = [];
-
-	const base = new URL(originalUrl);
-	const basePath = base.pathname.substring(0, base.pathname.lastIndexOf('/') + 1);
-
-	let previousWasExtinf = false;
-
-	for (const line of lines) {
-		const trimmed = line.trim();
-
-		// Handle URI= attributes in tags (EXT-X-MEDIA, EXT-X-KEY, EXT-X-MAP, EXT-X-STREAM-INF, etc.)
-		if (
-			trimmed.startsWith('#EXT-X-MEDIA:') ||
-			trimmed.startsWith('#EXT-X-KEY:') ||
-			trimmed.startsWith('#EXT-X-I-FRAME-STREAM-INF:') ||
-			trimmed.startsWith('#EXT-X-MAP:') ||
-			trimmed.startsWith('#EXT-X-STREAM-INF:')
-		) {
-			const uriMatch = line.match(/URI="([^"]+)"/);
-			if (uriMatch) {
-				const originalUri = uriMatch[1];
-				const absoluteUri = resolveUrl(originalUri, base, basePath);
-				const proxyUri = makeSegmentProxyUrl(absoluteUri, baseUrl, lineupId, false, encodedHeaders);
-				result.push(line.replace(`URI="${originalUri}"`, `URI="${proxyUri}"`));
-				continue;
-			}
+): (absoluteUrl: string, isSegment: boolean) => string {
+	return (absoluteUrl: string, isSegment: boolean): string => {
+		const extension = isSegment ? 'ts' : 'm3u8';
+		let proxyUrl = `${baseUrl}/api/livetv/stream/${lineupId}/segment.${extension}?url=${encodeURIComponent(absoluteUrl)}`;
+		if (encodedHeaders) {
+			proxyUrl += `&h=${encodeURIComponent(encodedHeaders)}`;
 		}
-
-		// Track EXTINF lines
-		if (trimmed.startsWith('#EXTINF:')) {
-			result.push(line);
-			previousWasExtinf = true;
-			continue;
-		}
-
-		// Keep comments and empty lines
-		if (line.startsWith('#') || trimmed === '') {
-			result.push(line);
-			previousWasExtinf = false;
-			continue;
-		}
-
-		// URL line - rewrite it
-		if (trimmed) {
-			const absoluteUrl = resolveUrl(trimmed, base, basePath);
-			const isSegment =
-				previousWasExtinf ||
-				trimmed.includes('.ts') ||
-				trimmed.includes('.aac') ||
-				trimmed.includes('.mp4');
-			const proxyUrl = makeSegmentProxyUrl(
-				absoluteUrl,
-				baseUrl,
-				lineupId,
-				isSegment,
-				encodedHeaders
-			);
-			result.push(proxyUrl);
-		} else {
-			result.push(line);
-		}
-		previousWasExtinf = false;
-	}
-
-	return result.join('\n');
-}
-
-/**
- * Resolve a potentially relative URL to absolute
- * Preserves query parameters from the base URL for authentication tokens
- */
-function resolveUrl(url: string, base: URL, basePath: string): string {
-	if (url.startsWith('http://') || url.startsWith('https://')) {
-		return url;
-	}
-	if (url.startsWith('//')) {
-		return `${base.protocol}${url}`;
-	}
-	if (url.startsWith('/')) {
-		return `${base.origin}${url}`;
-	}
-	// Preserve query parameters from base URL (e.g., auth tokens)
-	const queryString = base.search || '';
-	return `${base.origin}${basePath}${url}${queryString}`;
-}
-
-/**
- * Create a proxy URL for a segment or sub-playlist
- */
-function makeSegmentProxyUrl(
-	originalUrl: string,
-	baseUrl: string,
-	lineupId: string,
-	isSegment: boolean,
-	encodedHeaders?: string
-): string {
-	const extension = isSegment ? 'ts' : 'm3u8';
-	let proxyUrl = `${baseUrl}/api/livetv/stream/${lineupId}/segment.${extension}?url=${encodeURIComponent(originalUrl)}`;
-	if (encodedHeaders) {
-		proxyUrl += `&h=${encodeURIComponent(encodedHeaders)}`;
-	}
-	return proxyUrl;
+		return proxyUrl;
+	};
 }
 
 /**
@@ -465,12 +368,10 @@ export const GET: RequestHandler = async ({ params, url, request }) => {
 			if (playlist.includes('#EXTM3U')) {
 				const baseUrl = await getBaseUrlAsync(request);
 				// Pass through provider headers so nested sub-playlists/segments also get them
-				const rewritten = rewriteHlsPlaylist(
+				const rewritten = rewriteHlsPlaylistUrls(
 					playlist,
 					decodedUrl,
-					baseUrl,
-					lineupId,
-					encodeProviderHeaders(providerHeaders)
+					makeLiveTvProxyUrlBuilder(baseUrl, lineupId, encodeProviderHeaders(providerHeaders))
 				);
 
 				return new Response(rewritten, {
