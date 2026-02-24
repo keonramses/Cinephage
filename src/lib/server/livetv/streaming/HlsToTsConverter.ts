@@ -28,10 +28,11 @@
  * FLOW:
  * 1. Resolve a fresh stream URL via createLink (new play_token)
  * 2. Fetch the HLS playlist (consumes the token on 302 redirect)
- * 3. Parse segment URLs from the playlist
- * 4. Download segments in order, skipping already-delivered ones
- * 5. Write segment bytes to the output ReadableStream
- * 6. Wait for half the target duration, then repeat from step 1
+ * 3. If master playlist detected, fetch the best quality variant
+ * 4. Parse segment URLs from the media playlist
+ * 5. Download segments in order, skipping already-delivered ones
+ * 6. Write segment bytes to the output ReadableStream
+ * 7. Wait for half the target duration, then repeat from step 1
  *
  * SEGMENT TRACKING:
  * Uses EXT-X-MEDIA-SEQUENCE + position to assign a global sequence number
@@ -65,6 +66,14 @@ interface ParsedPlaylist {
 	segments: HlsSegment[];
 	mediaSequence: number;
 	targetDuration: number;
+}
+
+/** HLS variant stream from a master playlist */
+interface HlsVariant {
+	url: string;
+	bandwidth: number;
+	resolution?: string;
+	codecs?: string;
 }
 
 /**
@@ -111,6 +120,99 @@ function parseHlsPlaylist(playlistText: string, playlistUrl: string): ParsedPlay
 	}
 
 	return { segments, mediaSequence, targetDuration };
+}
+
+/**
+ * Check if the playlist is a master playlist (contains variant streams)
+ */
+function isMasterPlaylist(playlistText: string): boolean {
+	return playlistText.includes('#EXT-X-STREAM-INF');
+}
+
+/**
+ * Parse an HLS master playlist and extract variant streams.
+ *
+ * @param playlistText - Raw master playlist text
+ * @param playlistUrl - The final URL of the playlist for resolving relative URLs
+ * @returns Array of variant streams sorted by bandwidth (highest first)
+ */
+function parseMasterPlaylist(playlistText: string, playlistUrl: string): HlsVariant[] {
+	const lines = playlistText.split('\n');
+	const variants: HlsVariant[] = [];
+
+	const base = new URL(playlistUrl);
+	const basePath = base.pathname.substring(0, base.pathname.lastIndexOf('/') + 1);
+
+	let currentVariant: Partial<HlsVariant> = {};
+
+	for (const line of lines) {
+		const trimmed = line.trim();
+
+		if (trimmed.startsWith('#EXT-X-STREAM-INF:')) {
+			// Parse variant attributes: BANDWIDTH, RESOLUTION, CODECS
+			const attributes = trimmed.substring(18); // Remove '#EXT-X-STREAM-INF:'
+
+			// Extract BANDWIDTH
+			const bandwidthMatch = attributes.match(/BANDWIDTH=(\d+)/);
+			currentVariant.bandwidth = bandwidthMatch ? parseInt(bandwidthMatch[1], 10) : 0;
+
+			// Extract RESOLUTION
+			const resolutionMatch = attributes.match(/RESOLUTION=(\d+x\d+)/);
+			currentVariant.resolution = resolutionMatch ? resolutionMatch[1] : undefined;
+
+			// Extract CODECS
+			const codecsMatch = attributes.match(/CODECS="([^"]+)"/);
+			currentVariant.codecs = codecsMatch ? codecsMatch[1] : undefined;
+		} else if (trimmed && !trimmed.startsWith('#') && currentVariant.bandwidth !== undefined) {
+			// This is a variant URL line
+			const absoluteUrl = resolveHlsUrl(trimmed, base, basePath);
+			variants.push({
+				url: absoluteUrl,
+				bandwidth: currentVariant.bandwidth || 0,
+				resolution: currentVariant.resolution,
+				codecs: currentVariant.codecs
+			});
+			currentVariant = {};
+		}
+	}
+
+	// Sort by bandwidth (highest first)
+	variants.sort((a, b) => b.bandwidth - a.bandwidth);
+
+	return variants;
+}
+
+/**
+ * Select the best variant from a master playlist.
+ * Prefers variants with video codecs, falling back to highest bandwidth.
+ *
+ * @param variants - Array of variant streams (should be sorted by bandwidth desc)
+ * @returns The best variant URL or null if no variants found
+ */
+function selectBestVariant(variants: HlsVariant[]): string | null {
+	if (variants.length === 0) {
+		return null;
+	}
+
+	// Prefer variants with video codecs (avc1, hvc1, etc.)
+	// Filter out audio-only streams
+	const videoVariants = variants.filter((v) => {
+		if (!v.codecs) return true; // Assume video if no codec info
+		const hasVideoCodec = /avc1|hvc1|hev1|av01|vp9/.test(v.codecs);
+		return hasVideoCodec;
+	});
+
+	// Use first video variant, or fallback to first variant overall
+	const selected = videoVariants.length > 0 ? videoVariants[0] : variants[0];
+
+	logger.debug('[HlsToTsConverter] Selected variant from master playlist', {
+		bandwidth: selected.bandwidth,
+		resolution: selected.resolution,
+		codecs: selected.codecs,
+		totalVariants: variants.length
+	});
+
+	return selected.url;
 }
 
 /** Options for the HLS-to-TS converter */
@@ -222,13 +324,47 @@ export function createHlsToTsStream(options: HlsToTsConverterOptions): ReadableS
 					throw new Error(`Playlist fetch failed: ${response.status}`);
 				}
 
-				const playlistText = await response.text();
+				let playlistText = await response.text();
 
 				if (!playlistText.includes('#EXTM3U')) {
 					throw new Error('Invalid HLS playlist (no #EXTM3U header)');
 				}
 
-				// 4. Parse the playlist
+				// 4. Check if this is a master playlist and fetch the best variant
+				if (isMasterPlaylist(playlistText)) {
+					logger.info('[HlsToTsConverter] Detected master playlist, selecting best variant', {
+						lineupItemId
+					});
+
+					const variants = parseMasterPlaylist(playlistText, finalUrl);
+					const bestVariantUrl = selectBestVariant(variants);
+
+					if (!bestVariantUrl) {
+						throw new Error('Master playlist has no valid variants');
+					}
+
+					// Fetch the media playlist from the variant URL
+					const variantResponse = await fetch(bestVariantUrl, {
+						headers: {
+							'User-Agent':
+								'Mozilla/5.0 (QtEmbedded; U; Linux; C) AppleWebKit/533.3 (KHTML, like Gecko) MAG200 stbapp ver: 4 rev: 2116 Mobile Safari/533.3',
+							Accept: '*/*',
+							...resolved.providerHeaders
+						}
+					});
+
+					if (!variantResponse.ok) {
+						throw new Error(`Variant playlist fetch failed: ${variantResponse.status}`);
+					}
+
+					playlistText = await variantResponse.text();
+					logger.debug('[HlsToTsConverter] Fetched variant playlist', {
+						lineupItemId,
+						variantUrl: bestVariantUrl.substring(0, 80)
+					});
+				}
+
+				// 5. Parse the media playlist
 				const playlist = parseHlsPlaylist(playlistText, finalUrl);
 
 				if (playlist.segments.length === 0) {
@@ -245,7 +381,7 @@ export function createHlsToTsStream(options: HlsToTsConverterOptions): ReadableS
 					lastDeliveredSequence
 				});
 
-				// 5. Download and pipe new segments
+				// 6. Download and pipe new segments
 				let newSegmentsDelivered = 0;
 
 				for (const segment of playlist.segments) {
@@ -293,7 +429,7 @@ export function createHlsToTsStream(options: HlsToTsConverterOptions): ReadableS
 
 				if (cancelled) break;
 
-				// 6. Calculate wait time before next playlist refresh
+				// 7. Calculate wait time before next playlist refresh
 				// Use half the target duration, but at least MIN_PLAYLIST_REFRESH_MS
 				const refreshInterval = Math.max(
 					playlist.targetDuration * 1000 * PLAYLIST_REFRESH_RATIO,

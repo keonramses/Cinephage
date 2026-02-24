@@ -54,10 +54,9 @@ function buildM3UPlaylist(lineup: ChannelLineupItemWithDetails[], baseUrl: strin
 		lines.push(`${extinf},${tvgName}`);
 
 		// Proxy URL - media servers will request this
-		// Use HLS mode (default) so the proxy can refresh tokens per playlist fetch.
-		// Direct TS mode causes 30s replay loops on stalker portals because play_tokens
-		// are single-use and the server restarts from its buffer origin on reconnect.
-		lines.push(`${baseUrl}/api/livetv/stream/${item.id}`);
+		// Append .ts extension so Jellyfin/Emby auto-detect as MPEG-TS format.
+		// Without extension, Jellyfin defaults to -f hls which causes format mismatch errors.
+		lines.push(`${baseUrl}/api/livetv/stream/${item.id}.ts`);
 	}
 
 	return lines.join('\n');
