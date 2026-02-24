@@ -26,9 +26,48 @@ import {
 	PROXY_REFERER_MAP
 } from '$lib/server/streaming/constants';
 import { validatePlaylist, sanitizePlaylist, isHLSPlaylist } from '$lib/server/streaming/hls';
-import { isUrlSafe, fetchWithTimeout, MAX_REDIRECTS } from '$lib/server/http/ssrf-protection';
+import {
+	resolveAndValidateUrl,
+	fetchWithTimeout,
+	MAX_REDIRECTS
+} from '$lib/server/http/ssrf-protection';
 
 const streamLog = { logCategory: 'streams' as const };
+
+/**
+ * Read response body with a maximum size limit.
+ * Throws if the response exceeds maxBytes (protects against responses
+ * without Content-Length header).
+ */
+async function readBodyWithLimit(response: Response, maxBytes: number): Promise<ArrayBuffer> {
+	if (!response.body) {
+		return new ArrayBuffer(0);
+	}
+
+	const reader = response.body.getReader();
+	const chunks: Uint8Array[] = [];
+	let totalSize = 0;
+
+	while (true) {
+		const { done, value } = await reader.read();
+		if (done) break;
+		totalSize += value.byteLength;
+		if (totalSize > maxBytes) {
+			reader.cancel();
+			throw new Error(`Response body exceeds ${maxBytes} bytes`);
+		}
+		chunks.push(value);
+	}
+
+	// Combine chunks into a single ArrayBuffer
+	const result = new Uint8Array(totalSize);
+	let offset = 0;
+	for (const chunk of chunks) {
+		result.set(chunk, offset);
+		offset += chunk.byteLength;
+	}
+	return result.buffer;
+}
 
 /**
  * Infer the appropriate referer based on stream URL domain
@@ -108,14 +147,16 @@ export const GET: RequestHandler = async ({ url, request }) => {
 		});
 	}
 
-	const decodedUrl = decodeURIComponent(targetUrl);
+	// Note: url.searchParams.get() already returns decoded value
+	// Do NOT call decodeURIComponent again - it would double-decode and corrupt URLs
+	const decodedUrl = targetUrl;
 
 	// Use provided referer, or infer from stream URL domain
 	const referer = url.searchParams.get('referer') || inferReferer(decodedUrl);
 
 	try {
-		// SSRF protection: validate URL is safe before proxying
-		const safetyCheck = isUrlSafe(decodedUrl);
+		// SSRF protection: validate URL is safe before proxying (includes DNS resolution)
+		const safetyCheck = await resolveAndValidateUrl(decodedUrl);
 		if (!safetyCheck.safe) {
 			logger.warn('Blocked unsafe URL', {
 				url: decodedUrl,
@@ -177,8 +218,8 @@ export const GET: RequestHandler = async ({ url, request }) => {
 				if (location) {
 					const redirectUrl = new URL(location, currentUrl).toString();
 
-					// Validate redirect target for SSRF
-					const redirectSafetyCheck = isUrlSafe(redirectUrl);
+					// Validate redirect target for SSRF (with DNS resolution)
+					const redirectSafetyCheck = await resolveAndValidateUrl(redirectUrl);
 					if (!redirectSafetyCheck.safe) {
 						logger.warn('Blocked unsafe redirect', {
 							url: redirectUrl,
@@ -235,7 +276,19 @@ export const GET: RequestHandler = async ({ url, request }) => {
 			}
 		}
 
-		const arrayBuffer = await response.arrayBuffer();
+		// Read body with size enforcement (protects against missing Content-Length)
+		let arrayBuffer: ArrayBuffer;
+		try {
+			arrayBuffer = await readBodyWithLimit(response, PROXY_SEGMENT_MAX_SIZE);
+		} catch {
+			return new Response(
+				JSON.stringify({
+					error: 'Segment too large',
+					maxSize: PROXY_SEGMENT_MAX_SIZE
+				}),
+				{ status: 413, headers: { 'Content-Type': 'application/json' } }
+			);
+		}
 		const firstBytes = new Uint8Array(arrayBuffer.slice(0, 4));
 		const isMpegTs = firstBytes[0] === 0x47;
 		const isFmp4 = firstBytes[0] === 0x00 && firstBytes[1] === 0x00 && firstBytes[2] === 0x00;

@@ -4,12 +4,19 @@
  * Proxies HLS segments and sub-playlists for Live TV streams.
  * Handles URL rewriting for nested playlists and passes through segment data.
  *
+ * KEY FEATURE: Automatic stream URL refresh when tokens expire.
+ * Based on Stalkerhek pattern - validates and refreshes URLs on each request.
+ *
  * GET /api/livetv/stream/:lineupId/:path?url=<encoded_url>
  */
 
 import type { RequestHandler } from './$types';
 import { getBaseUrlAsync } from '$lib/server/streaming/url';
-import { isUrlSafe, fetchWithTimeout } from '$lib/server/http/ssrf-protection';
+import { resolveAndValidateUrl, fetchWithTimeout } from '$lib/server/http/ssrf-protection';
+import {
+	getStreamUrlCache,
+	HLS_STREAM_TIMEOUT_MS
+} from '$lib/server/livetv/streaming/StreamUrlCache.js';
 import { logger } from '$lib/logging';
 
 // Streaming constants
@@ -23,17 +30,41 @@ const LIVETV_PROXY_USER_AGENT =
 
 /**
  * Fetch with retry logic for transient errors
+ * Includes automatic URL refresh on authentication failures (403)
  */
 async function fetchWithRetry(
 	url: string,
 	options: RequestInit,
-	maxRetries: number = LIVETV_MAX_RETRIES
+	lineupId: string,
+	maxRetries: number = LIVETV_MAX_RETRIES,
+	allowUrlRefresh: boolean = true
 ): Promise<Response> {
 	let lastError: Error | null = null;
+	const urlCache = getStreamUrlCache();
 
 	for (let attempt = 0; attempt <= maxRetries; attempt++) {
 		try {
 			const response = await fetchWithTimeout(url, options, LIVETV_SEGMENT_FETCH_TIMEOUT_MS);
+
+			// Handle 403 Forbidden - likely expired token
+			if (response.status === 403 && allowUrlRefresh && attempt < maxRetries) {
+				logger.warn('[LiveTV Segment] Got 403, refreshing stream URL', {
+					lineupId,
+					attempt: attempt + 1
+				});
+
+				// Refresh the URL and retry
+				const refreshed = await urlCache.refreshStream(lineupId);
+				url = refreshed.url;
+
+				// Update headers with new provider headers if available
+				if (refreshed.providerHeaders) {
+					options.headers = getStreamHeaders(refreshed.providerHeaders);
+				}
+
+				// Retry immediately with new URL
+				continue;
+			}
 
 			// Only retry on 5xx server errors
 			if (response.status >= 500 && attempt < maxRetries) {
@@ -74,8 +105,24 @@ function getStreamHeaders(providerHeaders?: Record<string, string>): HeadersInit
 }
 
 /**
+ * Allowed header names that can be passed through from provider headers.
+ * This prevents injection of security-sensitive headers like Host, Authorization, etc.
+ */
+const ALLOWED_PROVIDER_HEADERS = new Set([
+	'cookie',
+	'user-agent',
+	'referer',
+	'accept',
+	'accept-language',
+	'accept-encoding',
+	'x-forwarded-for',
+	'x-real-ip'
+]);
+
+/**
  * Decode provider headers from base64-encoded query parameter.
  * Returns undefined if not present or invalid.
+ * Filters to only allowed header names to prevent header injection.
  */
 function decodeProviderHeaders(encoded: string | null): Record<string, string> | undefined {
 	if (!encoded) return undefined;
@@ -83,7 +130,19 @@ function decodeProviderHeaders(encoded: string | null): Record<string, string> |
 		const json = atob(encoded);
 		const headers = JSON.parse(json);
 		if (typeof headers === 'object' && headers !== null && !Array.isArray(headers)) {
-			return headers as Record<string, string>;
+			// Filter to allowed headers only
+			const filtered: Record<string, string> = {};
+			for (const [key, value] of Object.entries(headers)) {
+				if (
+					ALLOWED_PROVIDER_HEADERS.has(key.toLowerCase()) &&
+					typeof value === 'string' &&
+					!value.includes('\r') &&
+					!value.includes('\n')
+				) {
+					filtered[key] = value;
+				}
+			}
+			return Object.keys(filtered).length > 0 ? filtered : undefined;
 		}
 	} catch {
 		// Invalid base64 or JSON - ignore silently
@@ -215,6 +274,47 @@ function makeSegmentProxyUrl(
 	return proxyUrl;
 }
 
+/**
+ * Validate and potentially refresh stream URL before use
+ * Based on Stalkerhek pattern - checks URL age and refreshes if stale
+ */
+async function validateAndRefreshUrl(
+	lineupId: string,
+	originalUrl: string,
+	providerHeaders?: Record<string, string>
+): Promise<{ url: string; headers: Record<string, string> }> {
+	const urlCache = getStreamUrlCache();
+	const cached = urlCache.getCached(lineupId);
+
+	// Check if we have a cached entry and if the URL matches
+	if (cached && cached.url === originalUrl) {
+		// Check if still valid
+		if (urlCache.isValid(cached)) {
+			logger.debug('[LiveTV Segment] Using valid cached URL', {
+				lineupId,
+				age: Date.now() - cached.createdAt
+			});
+			return { url: originalUrl, headers: providerHeaders || {} };
+		}
+
+		// URL is stale - refresh it
+		logger.info('[LiveTV Segment] Stream URL expired, refreshing', {
+			lineupId,
+			age: Date.now() - cached.createdAt,
+			maxAge: cached.type === 'hls' ? HLS_STREAM_TIMEOUT_MS : 5000
+		});
+
+		const refreshed = await urlCache.refreshStream(lineupId);
+		return {
+			url: refreshed.url,
+			headers: refreshed.providerHeaders || {}
+		};
+	}
+
+	// No cached entry or URL doesn't match cache - just use provided URL
+	return { url: originalUrl, headers: providerHeaders || {} };
+}
+
 export const GET: RequestHandler = async ({ params, url, request }) => {
 	const { lineupId, path } = params;
 
@@ -229,14 +329,27 @@ export const GET: RequestHandler = async ({ params, url, request }) => {
 
 	// Note: url.searchParams.get() already returns decoded value
 	// Do NOT call decodeURIComponent again - it would double-decode and corrupt URLs
-	const decodedUrl = segmentUrl;
+	let decodedUrl = segmentUrl;
 
 	// Decode provider-specific headers from query param (forwarded from main proxy)
 	const encodedHeaders = url.searchParams.get('h');
-	const providerHeaders = decodeProviderHeaders(encodedHeaders);
+	let providerHeaders = decodeProviderHeaders(encodedHeaders);
 
-	// SSRF protection
-	const safetyCheck = isUrlSafe(decodedUrl);
+	// Validate and refresh URL if needed (Stalkerhek pattern)
+	try {
+		const validated = await validateAndRefreshUrl(lineupId, decodedUrl, providerHeaders);
+		decodedUrl = validated.url;
+		providerHeaders = validated.headers;
+	} catch (error) {
+		logger.error('[LiveTV Segment] Failed to validate/refresh stream URL', error, { lineupId });
+		return new Response(JSON.stringify({ error: 'Failed to refresh stream URL' }), {
+			status: 502,
+			headers: { 'Content-Type': 'application/json' }
+		});
+	}
+
+	// SSRF protection (with DNS resolution)
+	const safetyCheck = await resolveAndValidateUrl(decodedUrl);
 	if (!safetyCheck.safe) {
 		logger.warn('[LiveTV Segment] Blocked unsafe URL', {
 			lineupId,
@@ -249,10 +362,69 @@ export const GET: RequestHandler = async ({ params, url, request }) => {
 	}
 
 	try {
-		const response = await fetchWithRetry(decodedUrl, {
-			headers: getStreamHeaders(providerHeaders),
-			redirect: 'follow'
-		});
+		// Follow redirects manually to validate each redirect target for SSRF
+		let currentUrl = decodedUrl;
+		let redirectCount = 0;
+		const MAX_SEGMENT_REDIRECTS = 5;
+		const visitedUrls = new Set<string>();
+		let response: Response;
+
+		while (true) {
+			if (visitedUrls.has(currentUrl)) {
+				logger.warn('[LiveTV Segment] Redirect loop detected', { lineupId, url: currentUrl });
+				return new Response(JSON.stringify({ error: 'Redirect loop detected' }), {
+					status: 508,
+					headers: { 'Content-Type': 'application/json' }
+				});
+			}
+			visitedUrls.add(currentUrl);
+
+			if (redirectCount >= MAX_SEGMENT_REDIRECTS) {
+				logger.warn('[LiveTV Segment] Max redirects exceeded', { lineupId });
+				return new Response(JSON.stringify({ error: 'Too many redirects' }), {
+					status: 508,
+					headers: { 'Content-Type': 'application/json' }
+				});
+			}
+
+			response = await fetchWithRetry(
+				currentUrl,
+				{
+					headers: getStreamHeaders(providerHeaders),
+					redirect: 'manual'
+				},
+				lineupId
+			);
+
+			// Handle redirects with SSRF validation
+			if (response.status >= 300 && response.status < 400) {
+				const location = response.headers.get('location');
+				if (location) {
+					const redirectUrl = new URL(location, currentUrl).toString();
+					const redirectSafetyCheck = await resolveAndValidateUrl(redirectUrl);
+					if (!redirectSafetyCheck.safe) {
+						logger.warn('[LiveTV Segment] Blocked unsafe redirect', {
+							lineupId,
+							url: redirectUrl,
+							reason: redirectSafetyCheck.reason
+						});
+						return new Response(
+							JSON.stringify({
+								error: 'Redirect target not allowed',
+								reason: redirectSafetyCheck.reason
+							}),
+							{ status: 403, headers: { 'Content-Type': 'application/json' } }
+						);
+					}
+					currentUrl = redirectUrl;
+					redirectCount++;
+					continue;
+				}
+			}
+
+			// Not a redirect, break out of loop
+			break;
+		}
 
 		if (!response.ok) {
 			return new Response(JSON.stringify({ error: `Segment fetch failed: ${response.status}` }), {
@@ -298,7 +470,7 @@ export const GET: RequestHandler = async ({ params, url, request }) => {
 					decodedUrl,
 					baseUrl,
 					lineupId,
-					encodedHeaders ?? encodeProviderHeaders(providerHeaders)
+					encodeProviderHeaders(providerHeaders)
 				);
 
 				return new Response(rewritten, {

@@ -12,7 +12,7 @@ import { getProvider } from '$lib/server/livetv/providers';
 import { db } from '$lib/server/db';
 import { livetvAccounts, type LivetvAccountRecord } from '$lib/server/db/schema';
 import { eq } from 'drizzle-orm';
-import { isUrlSafe } from '$lib/server/http/ssrf-protection';
+import { resolveAndValidateUrl } from '$lib/server/http/ssrf-protection';
 import type { BackgroundService, ServiceStatus } from '$lib/server/services/background-service.js';
 import { ValidationError, ExternalServiceError } from '$lib/errors';
 import type { FetchStreamResult, StreamError, LiveTvAccount } from '$lib/types/livetv';
@@ -202,8 +202,8 @@ export class LiveTvStreamService implements BackgroundService {
 		const streamUrl = resolutionResult.url;
 		const type = resolutionResult.type;
 
-		// SSRF protection: validate resolved URL before fetching
-		const safetyCheck = isUrlSafe(streamUrl);
+		// SSRF protection: validate resolved URL before fetching (with DNS resolution)
+		const safetyCheck = await resolveAndValidateUrl(streamUrl);
 		if (!safetyCheck.safe) {
 			logger.warn('Blocked unsafe stream URL', {
 				url: streamUrl.substring(0, 100)
@@ -231,11 +231,48 @@ export class LiveTvStreamService implements BackgroundService {
 			headers: Object.keys(requestHeaders)
 		});
 
-		// Fetch the stream
-		const response = await fetch(streamUrl, {
-			headers: requestHeaders,
-			redirect: 'follow'
-		});
+		// Fetch the stream with manual redirect handling for SSRF protection
+		const MAX_STREAM_REDIRECTS = 5;
+		let currentStreamUrl = streamUrl;
+		let redirectCount = 0;
+		const visitedUrls = new Set<string>();
+		let response: Response;
+
+		while (true) {
+			if (visitedUrls.has(currentStreamUrl)) {
+				throw new ExternalServiceError(providerType, 'Redirect loop detected', 508);
+			}
+			visitedUrls.add(currentStreamUrl);
+
+			if (redirectCount >= MAX_STREAM_REDIRECTS) {
+				throw new ExternalServiceError(providerType, 'Too many redirects', 508);
+			}
+
+			response = await fetch(currentStreamUrl, {
+				headers: requestHeaders,
+				redirect: 'manual'
+			});
+
+			if (response.status >= 300 && response.status < 400) {
+				const location = response.headers.get('location');
+				if (location) {
+					const redirectUrl = new URL(location, currentStreamUrl).toString();
+					const redirectSafetyCheck = await resolveAndValidateUrl(redirectUrl);
+					if (!redirectSafetyCheck.safe) {
+						logger.warn('Blocked unsafe stream redirect', {
+							url: redirectUrl.substring(0, 100),
+							reason: redirectSafetyCheck.reason
+						});
+						throw new ValidationError(`Stream redirect blocked: ${redirectSafetyCheck.reason}`);
+					}
+					currentStreamUrl = redirectUrl;
+					redirectCount++;
+					continue;
+				}
+			}
+
+			break;
+		}
 
 		const fetchMs = Date.now() - fetchStart;
 

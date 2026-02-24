@@ -4,40 +4,21 @@
  * Proxies Live TV streams from all provider sources (Stalker, XStream, M3U).
  * Handles stream URL resolution, HLS manifest rewriting, and direct stream passthrough.
  *
+ * ARCHITECTURE:
+ * - HLS streams: Use cached URLs with segment-level validation/refresh
+ * - Direct TS streams: Just-in-time URL generation with resilient wrapper (no caching)
+ *
+ * Based on Stalkerhek pattern for token expiration handling.
+ *
  * GET /api/livetv/stream/:lineupId
  */
 
 import type { RequestHandler } from './$types';
-import { getLiveTvStreamService } from '$lib/server/livetv/streaming/LiveTvStreamService';
+import { getStreamUrlCache } from '$lib/server/livetv/streaming/StreamUrlCache.js';
+import { getLiveTvStreamService } from '$lib/server/livetv/streaming/LiveTvStreamService.js';
+import { createResilientStream } from '$lib/server/livetv/streaming/ResilientStream.js';
 import { getBaseUrlAsync } from '$lib/server/streaming/url';
 import { logger } from '$lib/logging';
-
-/**
- * Detect if content is an HLS playlist
- */
-function isHlsContent(contentType: string, url: string, body?: string): boolean {
-	// Check content type
-	if (
-		contentType.includes('mpegurl') ||
-		contentType.includes('m3u8') ||
-		contentType.includes('x-mpegurl')
-	) {
-		return true;
-	}
-
-	// Check URL patterns
-	const lowerUrl = url.toLowerCase();
-	if (lowerUrl.includes('.m3u8') || lowerUrl.includes('/hls/')) {
-		return true;
-	}
-
-	// Check content
-	if (body && body.startsWith('#EXTM3U')) {
-		return true;
-	}
-
-	return false;
-}
 
 /**
  * Rewrite HLS playlist URLs to route through our segment proxy
@@ -178,25 +159,85 @@ export const GET: RequestHandler = async ({ params, request }) => {
 
 	try {
 		const baseUrl = await getBaseUrlAsync(request);
-		const streamService = getLiveTvStreamService();
+		const urlCache = getStreamUrlCache();
 
-		// Fetch stream directly - gets fresh token and immediately fetches
-		// This eliminates delay between token generation and fetch
-		const stream = await streamService.fetchStream(lineupId);
-		const response = stream.response;
+		// Get or resolve stream URL using the cache
+		// This ensures the URL is cached and can be refreshed by the segment proxy
+		const stream = await urlCache.getStream(lineupId);
 
 		logger.debug('[LiveTV Stream] Stream fetched', {
 			lineupId,
 			type: stream.type,
 			providerType: stream.providerType,
-			accountId: stream.accountId
+			accountId: stream.accountId,
+			url: stream.url.substring(0, 50)
 		});
 
-		const contentType = response.headers.get('content-type') || '';
+		// For HLS streams, we need to fetch the playlist content
+		if (stream.type === 'hls' || stream.url.toLowerCase().includes('.m3u8')) {
+			// Fetch the playlist directly
+			const response = await fetch(stream.url, {
+				headers: {
+					'User-Agent':
+						'Mozilla/5.0 (QtEmbedded; U; Linux; C) AppleWebKit/533.3 (KHTML, like Gecko) MAG200 stbapp ver: 4 rev: 2116 Mobile Safari/533.3',
+					Accept: '*/*',
+					Connection: 'keep-alive',
+					...stream.providerHeaders
+				},
+				redirect: 'follow'
+			});
 
-		// Check if this is HLS content
-		if (stream.type === 'hls' || isHlsContent(contentType, stream.url)) {
-			// Read the playlist and rewrite URLs
+			if (!response.ok) {
+				// If fetch fails, invalidate cache and try once more with fresh URL
+				logger.warn('[LiveTV Stream] Initial playlist fetch failed, refreshing URL', {
+					lineupId,
+					status: response.status
+				});
+				urlCache.invalidate(lineupId);
+				const refreshed = await urlCache.getStream(lineupId);
+
+				const retryResponse = await fetch(refreshed.url, {
+					headers: {
+						'User-Agent':
+							'Mozilla/5.0 (QtEmbedded; U; Linux; C) AppleWebKit/533.3 (KHTML, like Gecko) MAG200 stbapp ver: 4 rev: 2116 Mobile Safari/533.3',
+						Accept: '*/*',
+						Connection: 'keep-alive',
+						...refreshed.providerHeaders
+					},
+					redirect: 'follow'
+				});
+
+				if (!retryResponse.ok) {
+					throw new Error(`Failed to fetch playlist: ${retryResponse.status}`);
+				}
+
+				const playlist = await retryResponse.text();
+				if (!playlist.includes('#EXTM3U')) {
+					throw new Error('Invalid HLS playlist received');
+				}
+
+				const rewritten = rewriteHlsPlaylist(
+					playlist,
+					refreshed.url,
+					baseUrl,
+					lineupId,
+					refreshed.providerHeaders
+				);
+
+				return new Response(rewritten, {
+					status: 200,
+					headers: {
+						'Content-Type': 'application/vnd.apple.mpegurl',
+						'Accept-Ranges': 'none',
+						'Access-Control-Allow-Origin': '*',
+						'Access-Control-Allow-Methods': 'GET, HEAD, OPTIONS',
+						'Access-Control-Allow-Headers': 'Range, Content-Type',
+						'Cache-Control': 'public, max-age=2, stale-while-revalidate=5',
+						'X-Content-Type-Options': 'nosniff'
+					}
+				});
+			}
+
 			const playlist = await response.text();
 
 			if (!playlist.includes('#EXTM3U')) {
@@ -205,7 +246,7 @@ export const GET: RequestHandler = async ({ params, request }) => {
 				return new Response(playlist, {
 					status: 200,
 					headers: {
-						'Content-Type': contentType || 'video/mp2t',
+						'Content-Type': response.headers.get('content-type') || 'video/mp2t',
 						'Access-Control-Allow-Origin': '*',
 						'Cache-Control': 'no-store'
 					}
@@ -234,12 +275,33 @@ export const GET: RequestHandler = async ({ params, request }) => {
 			});
 		}
 
-		// Direct stream - pipe through
-		// Note: For very long streams, this keeps the connection open
-		return new Response(response.body, {
+		// Direct stream - use resilient stream wrapper for automatic reconnection
+		// CRITICAL: For direct TS streams, we must generate URLs JUST-IN-TIME (not ahead of time)
+		// The play_token expires within seconds, so we generate the URL right before connecting
+		logger.info('[LiveTV Stream] Using resilient stream wrapper with just-in-time URL generation', {
+			lineupId,
+			strategy: 'no-cache-direct-stream'
+		});
+
+		const streamService = getLiveTvStreamService();
+
+		// Create a provider function that generates FRESH URLs on each connection
+		// This bypasses all caching to ensure the token is as fresh as possible
+		const streamProvider = async () => {
+			// Fetch fresh stream URL right before connection
+			// Don't use cache - generate new token each time
+			logger.debug('[LiveTV Stream] Generating fresh stream URL for connection', { lineupId });
+			return streamService.fetchStream(lineupId);
+		};
+
+		// Create resilient stream that auto-reconnects on failure
+		// The stream wrapper will call streamProvider() each time it needs to reconnect
+		const resilientStream = createResilientStream(lineupId, streamProvider);
+
+		return new Response(resilientStream, {
 			status: 200,
 			headers: {
-				'Content-Type': contentType || 'video/mp2t',
+				'Content-Type': 'video/mp2t',
 				'Transfer-Encoding': 'chunked',
 				'Accept-Ranges': 'none',
 				'Access-Control-Allow-Origin': '*',
