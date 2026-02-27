@@ -17,6 +17,7 @@
 	import { viewPreferences } from '$lib/stores/view-preferences.svelte';
 	import { enhance } from '$app/forms';
 	import { Eye } from 'lucide-svelte';
+	import { createSearchProgress } from '$lib/stores/searchProgress.svelte';
 
 	let { data } = $props();
 
@@ -37,6 +38,8 @@
 	let pendingDeleteMovieId = $state<string | null>(null);
 	let isSearchModalOpen = $state(false);
 	let selectedMovieForSearch = $state<(typeof data.movies)[number] | null>(null);
+	let autoSearchingIds = new SvelteSet<string>();
+	const searchProgress = createSearchProgress();
 
 	const selectedCount = $derived(selectedMovies.size);
 
@@ -207,22 +210,31 @@
 
 	async function handleAutoGrab(movieId: string) {
 		const movie = data.movies.find((m) => m.id === movieId);
-		if (!movie) return;
+		if (!movie || autoSearchingIds.has(movieId)) return;
+
+		autoSearchingIds.add(movieId);
 
 		try {
-			const response = await fetch(`/api/library/movies/${movieId}/auto-search`, {
-				method: 'POST'
-			});
-			const result = await response.json();
-			if (result.grabbed) {
-				toasts.success(`Auto-grabbed "${result.releaseName}" for "${movie.title}"`);
-			} else if (result.found) {
-				toasts.info(`Found releases but none met criteria for "${movie.title}"`);
-			} else {
-				toasts.info(`No releases found for "${movie.title}"`);
+			await searchProgress.startSearch(`/api/library/movies/${movieId}/auto-search`);
+
+			if (searchProgress.results) {
+				if (searchProgress.results.grabbed) {
+					toasts.success(
+						`Auto-grabbed "${searchProgress.results.releaseName}" for "${movie.title}"`
+					);
+				} else if (searchProgress.results.found) {
+					toasts.info(`Found releases but none met criteria for "${movie.title}"`);
+				} else {
+					toasts.info(`No releases found for "${movie.title}"`);
+				}
 			}
-		} catch {
-			toasts.error(`Failed to auto-grab for "${movie.title}"`);
+		} catch (error) {
+			toasts.error(
+				error instanceof Error ? error.message : `Failed to auto-grab for "${movie.title}"`
+			);
+		} finally {
+			autoSearchingIds.delete(movieId);
+			searchProgress.reset();
 		}
 	}
 
@@ -718,6 +730,7 @@
 							selectedItems={selectedMovies}
 							selectable={showCheckboxes}
 							downloadingIds={downloadingMovieIdSet}
+							{autoSearchingIds}
 							onSelectChange={handleItemSelectChange}
 							onMonitorToggle={handleMonitorToggle}
 							onDelete={handleDeleteMovie}

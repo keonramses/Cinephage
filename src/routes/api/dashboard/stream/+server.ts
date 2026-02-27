@@ -3,6 +3,7 @@ import { downloadMonitor } from '$lib/server/downloadClients/monitoring';
 import { librarySchedulerService } from '$lib/server/library/library-scheduler';
 import { diskScanService } from '$lib/server/library/disk-scan';
 import { db } from '$lib/server/db';
+import { logger } from '$lib/logging';
 import {
 	movies,
 	series,
@@ -539,8 +540,10 @@ export const GET: RequestHandler = async () => {
 					missingEpisodes,
 					recentActivity
 				});
-			} catch {
-				// Error fetching initial state
+			} catch (error) {
+				logger.error('[DashboardStream] Failed to fetch initial state', {
+					error: error instanceof Error ? error.message : String(error)
+				});
 			}
 		};
 
@@ -556,8 +559,10 @@ export const GET: RequestHandler = async () => {
 				send('dashboard:stats', stats);
 				send('dashboard:recentlyAdded', recentlyAdded);
 				send('dashboard:missingEpisodes', missingEpisodes);
-			} catch {
-				// Error fetching dashboard data
+			} catch (error) {
+				logger.error('[DashboardStream] Failed to fetch dashboard update', {
+					error: error instanceof Error ? error.message : String(error)
+				});
 			}
 		};
 
@@ -571,8 +576,10 @@ export const GET: RequestHandler = async () => {
 				if (!queueItem) return;
 				const activity = await queueItemToActivity(queueItem);
 				send('activity:new', activity);
-			} catch {
-				// Error converting item
+			} catch (error) {
+				logger.error('[DashboardStream] Failed to convert queue item to activity', {
+					error: error instanceof Error ? error.message : String(error)
+				});
 			}
 		};
 
@@ -585,8 +592,10 @@ export const GET: RequestHandler = async () => {
 					progress: Math.round((queueItem.progress ?? 0) * 100),
 					status: mapQueueStatusToActivityStatus(queueItem.status)
 				});
-			} catch {
-				// Error
+			} catch (error) {
+				logger.error('[DashboardStream] Failed to handle queue update', {
+					error: error instanceof Error ? error.message : String(error)
+				});
 			}
 		};
 
@@ -597,8 +606,10 @@ export const GET: RequestHandler = async () => {
 				if (!queueItem) return;
 				const activity = await queueItemToActivity(queueItem);
 				send('activity:updated', { ...activity, status: 'imported' });
-			} catch {
-				// Error
+			} catch (error) {
+				logger.error('[DashboardStream] Failed to handle imported queue item', {
+					error: error instanceof Error ? error.message : String(error)
+				});
 			}
 
 			// Update dashboard data
@@ -615,8 +626,10 @@ export const GET: RequestHandler = async () => {
 					status: 'failed',
 					statusReason: getQueueErrorFromPayload(data) ?? activity.statusReason
 				});
-			} catch {
-				// Error
+			} catch (error) {
+				logger.error('[DashboardStream] Failed to handle failed queue item', {
+					error: error instanceof Error ? error.message : String(error)
+				});
 			}
 		};
 

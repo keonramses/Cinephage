@@ -4,6 +4,7 @@ import { downloadMonitor } from '$lib/server/downloadClients/monitoring';
 import { mediaResolver } from '$lib/server/activity';
 import { extractReleaseGroup } from '$lib/server/indexers/parser/patterns/releaseGroup';
 import type { UnifiedActivity, ActivityStatus } from '$lib/types/activity';
+import { logger } from '$lib/logging';
 
 interface QueueItem {
 	id: string;
@@ -134,8 +135,10 @@ export const GET: RequestHandler = async () => {
 				if (!queueItem) return;
 				const activity = await queueItemToActivity(queueItem);
 				send('activity:new', activity);
-			} catch {
-				// Error converting item
+			} catch (error) {
+				logger.error('[ActivityStream] Failed to convert queue:added to activity', {
+					error: error instanceof Error ? error.message : String(error)
+				});
 			}
 		};
 
@@ -151,8 +154,10 @@ export const GET: RequestHandler = async () => {
 					progress: Math.round((queueItem.progress ?? 0) * 100),
 					status: activity.status
 				});
-			} catch {
-				// Error
+			} catch (error) {
+				logger.error('[ActivityStream] Failed to convert queue:updated to activity', {
+					error: error instanceof Error ? error.message : String(error)
+				});
 			}
 		};
 
@@ -162,8 +167,10 @@ export const GET: RequestHandler = async () => {
 				if (!queueItem) return;
 				const activity = await queueItemToActivity(queueItem);
 				send('activity:updated', activity);
-			} catch {
-				// Error
+			} catch (error) {
+				logger.error('[ActivityStream] Failed to convert queue:completed to activity', {
+					error: error instanceof Error ? error.message : String(error)
+				});
 			}
 		};
 
@@ -173,8 +180,10 @@ export const GET: RequestHandler = async () => {
 				if (!queueItem) return;
 				const activity = await queueItemToActivity(queueItem);
 				send('activity:updated', activity);
-			} catch {
-				// Error
+			} catch (error) {
+				logger.error('[ActivityStream] Failed to convert queue:imported to activity', {
+					error: error instanceof Error ? error.message : String(error)
+				});
 			}
 		};
 
@@ -188,8 +197,10 @@ export const GET: RequestHandler = async () => {
 					status: 'failed',
 					statusReason: getQueueErrorFromPayload(data) ?? activity.statusReason
 				});
-			} catch {
-				// Error
+			} catch (error) {
+				logger.error('[ActivityStream] Failed to convert queue:failed to activity', {
+					error: error instanceof Error ? error.message : String(error)
+				});
 			}
 		};
 
@@ -202,8 +213,10 @@ export const GET: RequestHandler = async () => {
 					if (activity.status !== 'downloading') continue;
 					send('activity:new', activity);
 				}
-			} catch {
-				// Error loading initial queue state
+			} catch (error) {
+				logger.error('[ActivityStream] Failed to send initial queue items', {
+					error: error instanceof Error ? error.message : String(error)
+				});
 			}
 		};
 

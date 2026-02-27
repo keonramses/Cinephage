@@ -17,15 +17,19 @@ const logger = createChildLogger({ module: 'StrmUpdateAPI' });
 
 export const POST: RequestHandler = async ({ request }) => {
 	try {
-		// Parse optional body for custom base URL
+		// Parse request body
 		let customBaseUrl: string | undefined;
+		let apiKey: string | undefined;
 		try {
 			const body = await request.json();
 			if (body.baseUrl && typeof body.baseUrl === 'string') {
 				customBaseUrl = body.baseUrl;
 			}
+			if (body.apiKey && typeof body.apiKey === 'string') {
+				apiKey = body.apiKey;
+			}
 		} catch {
-			// No body or invalid JSON - that's fine, we'll use default
+			// No body or invalid JSON - that's fine, we'll use defaults
 		}
 
 		// Determine the base URL to use
@@ -40,10 +44,10 @@ export const POST: RequestHandler = async ({ request }) => {
 			baseUrl = await getStreamingBaseUrl(requestBaseUrl);
 		}
 
-		logger.info('[StrmUpdateAPI] Starting bulk .strm update', { baseUrl });
+		logger.info('[StrmUpdateAPI] Starting bulk .strm update', { baseUrl, hasApiKey: !!apiKey });
 
-		// Perform the bulk update
-		const result = await strmService.bulkUpdateStrmUrls(baseUrl);
+		// Perform the bulk update with API key if provided
+		const result = await strmService.bulkUpdateStrmUrls(baseUrl, apiKey ? { apiKey } : undefined);
 
 		logger.info('[StrmUpdateAPI] Bulk update complete', {
 			success: result.success,

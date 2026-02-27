@@ -1,18 +1,55 @@
 import type { RequestHandler } from '@sveltejs/kit';
-import type { SSESendFunction, SSESetupFunction } from '$lib/types/sse';
+
+/**
+ * Server-side SSE types
+ */
+
+/**
+ * Server-side SSE send function type
+ */
+export type SSESendFunction = (event: string, data: unknown) => void;
+
+/**
+ * Server-side SSE cleanup function type
+ */
+export type SSECleanupFunction = () => void;
+
+/**
+ * Server-side SSE handler setup function type
+ * Supports both sync and async setup functions
+ */
+export type SSESetupFunction = (
+	send: SSESendFunction
+) => SSECleanupFunction | Promise<SSECleanupFunction>;
+
+/**
+ * SSE connected event payload
+ */
+export interface SSEConnectedEvent {
+	timestamp: string;
+}
+
+/**
+ * SSE heartbeat event payload
+ */
+export interface SSEHeartbeatEvent {
+	timestamp: string;
+}
 
 /**
  * Creates a standard SSE Response with proper headers and lifecycle management
  *
- * @param setup - Function that receives a send function and returns a cleanup function
+ * @param setup - Function that receives a send function and returns a cleanup function.
+ *   Can be async to allow initial data fetching before registering event handlers.
  * @param options - Optional configuration
  * @returns SvelteKit Response with SSE stream
  *
  * @example
  * export const GET: RequestHandler = async ({ request }) => {
- *   return createSSEStream((send) => {
- *     // Send initial data
- *     send('connected', { timestamp: new Date().toISOString() });
+ *   return createSSEStream(async (send) => {
+ *     // Send initial data (async operation)
+ *     const data = await fetchInitialData();
+ *     send('initial', data);
  *
  *     // Set up event listeners
  *     const handler = (data) => send('update', data);
@@ -35,11 +72,10 @@ export function createSSEStream(
 	let cleanupStream: (() => void) | null = null;
 
 	const stream = new ReadableStream({
-		start(controller) {
+		async start(controller) {
 			const encoder = new TextEncoder();
 			let cleanedUp = false;
 			let heartbeatInterval: ReturnType<typeof setInterval> | null = null;
-			let userCleanup: () => void = () => {};
 
 			/**
 			 * Send an SSE event
@@ -60,7 +96,6 @@ export function createSSEStream(
 				if (heartbeatInterval) {
 					clearInterval(heartbeatInterval);
 				}
-				userCleanup();
 				cleanupStream = null;
 				try {
 					controller.close();
@@ -78,10 +113,14 @@ export function createSSEStream(
 			}, heartbeatIntervalMs);
 
 			// Set up event handlers and get cleanup function
-			userCleanup = setup(send);
+			// Supports both sync and async setup functions
+			const userCleanup = await Promise.resolve(setup(send));
 
 			// ReadableStream.start() return value is ignored; use cancel() for cleanup
-			cleanupStream = cleanup;
+			cleanupStream = () => {
+				cleanup();
+				userCleanup?.();
+			};
 		},
 		cancel() {
 			cleanupStream?.();

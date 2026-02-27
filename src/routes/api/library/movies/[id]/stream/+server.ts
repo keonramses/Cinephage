@@ -1,6 +1,7 @@
 import { createSSEStream } from '$lib/server/sse';
 import { downloadMonitor } from '$lib/server/downloadClients/monitoring';
 import { importService } from '$lib/server/downloadClients/import';
+import { eventBuffer } from '$lib/server/sse/EventBuffer.js';
 import { db } from '$lib/server/db';
 import { movies, movieFiles, rootFolders, downloadQueue, subtitles } from '$lib/server/db/schema';
 import { eq, and, inArray } from 'drizzle-orm';
@@ -167,6 +168,7 @@ async function getQueueItem(movieId: string): Promise<QueueItem | null> {
  *
  * Events emitted:
  * - media:initial - Full movie state on connect
+ * - queue:added - New download added for this movie
  * - queue:updated - Queue item progress/status change
  * - file:added - New file imported
  * - file:removed - File deleted
@@ -191,13 +193,49 @@ export const GET: RequestHandler = async ({ params }) => {
 				if (movie) {
 					send('media:initial', { movie, queueItem });
 				}
-			} catch {
-				// Error fetching initial state
+				return { movie, queueItem };
+			} catch (error) {
+				logger.error('[MovieStream] Failed to fetch initial state', {
+					movieId,
+					error: error instanceof Error ? error.message : String(error)
+				});
+				return { movie: null, queueItem: null };
 			}
 		};
 
-		// Send initial state immediately
-		sendInitialState();
+		// Send initial state and replay buffered events after connection is established
+		void sendInitialState().then(() => {
+			// Replay recent buffered events (handles race condition where events fired before connection)
+			const recentEvents = eventBuffer.getRecentMovieEvents(movieId);
+			logger.debug('[MovieStream] Replaying buffered events', {
+				movieId,
+				count: recentEvents.length
+			});
+			for (const event of recentEvents) {
+				send('file:added', {
+					file: event.file,
+					wasUpgrade: event.wasUpgrade,
+					replacedFileIds: event.replacedFileIds
+				});
+			}
+		});
+
+		// Handle new queue items added for this movie
+		const onQueueAdded = (item: unknown) => {
+			const typedItem = item as QueueItem & { movieId?: string };
+			if (typedItem.movieId === movieId) {
+				logger.debug('[MovieStream] Queue item added for movie', {
+					movieId,
+					queueItemId: typedItem.id
+				});
+				send('queue:added', {
+					id: typedItem.id,
+					title: typedItem.title,
+					status: typedItem.status,
+					progress: typedItem.progress ? parseFloat(typedItem.progress) : null
+				});
+			}
+		};
 
 		// Handle queue updates for this movie
 		const onQueueUpdated = (item: unknown) => {
@@ -216,6 +254,10 @@ export const GET: RequestHandler = async ({ params }) => {
 		const onFileImported = (data: unknown) => {
 			const typedData = data as FileImportedEvent;
 			if (typedData.mediaType === 'movie' && typedData.movieId === movieId) {
+				logger.debug('[MovieStream] File imported for movie', {
+					movieId,
+					fileId: typedData.file.id
+				});
 				send('file:added', {
 					file: typedData.file,
 					wasUpgrade: typedData.wasUpgrade,
@@ -242,22 +284,41 @@ export const GET: RequestHandler = async ({ params }) => {
 		// Handle metadata/subtitle/settings updates for this movie
 		const onMovieUpdated = (event: { movieId: string }) => {
 			if (event.movieId === movieId) {
-				sendInitialState();
+				void sendInitialState();
+			}
+		};
+
+		// Handle search status updates
+		const onMovieSearchStarted = (event: { movieId: string }) => {
+			if (event.movieId === movieId) {
+				send('search:started', { movieId });
+			}
+		};
+
+		const onMovieSearchCompleted = (event: { movieId: string }) => {
+			if (event.movieId === movieId) {
+				send('search:completed', { movieId });
 			}
 		};
 
 		// Register handlers
+		downloadMonitor.on('queue:added', onQueueAdded);
 		downloadMonitor.on('queue:updated', onQueueUpdated);
 		importService.on('file:imported', onFileImported);
 		importService.on('file:deleted', onFileDeleted);
 		libraryMediaEvents.onMovieUpdated(onMovieUpdated);
+		libraryMediaEvents.onMovieSearchStarted(onMovieSearchStarted);
+		libraryMediaEvents.onMovieSearchCompleted(onMovieSearchCompleted);
 
 		// Return cleanup function
 		return () => {
+			downloadMonitor.off('queue:added', onQueueAdded);
 			downloadMonitor.off('queue:updated', onQueueUpdated);
 			importService.off('file:imported', onFileImported);
 			importService.off('file:deleted', onFileDeleted);
 			libraryMediaEvents.offMovieUpdated(onMovieUpdated);
+			libraryMediaEvents.offMovieSearchStarted(onMovieSearchStarted);
+			libraryMediaEvents.offMovieSearchCompleted(onMovieSearchCompleted);
 		};
 	});
 };

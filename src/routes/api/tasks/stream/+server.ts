@@ -4,14 +4,16 @@
  * GET /api/tasks/stream
  *
  * Events emitted:
- * - task:started      - A task began execution (scheduled or manual)
- * - task:completed    - A task finished successfully
- * - task:failed       - A task encountered an error
- * - task:cancelled    - A running task was cancelled
- * - task:updated      - Task settings changed (enabled, interval, etc.)
+ * - tasks:initial    - Full initial task state
+ * - task:started     - A task began execution (scheduled or manual)
+ * - task:completed   - A task finished successfully
+ * - task:failed      - A task encountered an error
+ * - task:cancelled   - A running task was cancelled
+ * - task:updated     - Task settings changed (enabled, interval, etc.)
  */
 
 import type { RequestHandler } from './$types';
+import { createSSEStream } from '$lib/server/sse';
 import { monitoringScheduler } from '$lib/server/monitoring/MonitoringScheduler';
 import { taskSettingsService } from '$lib/server/tasks/TaskSettingsService';
 import { taskHistoryService } from '$lib/server/tasks/TaskHistoryService';
@@ -22,16 +24,17 @@ import {
 	type UnifiedTaskDefinition
 } from '$lib/server/tasks/UnifiedTaskRegistry';
 import { librarySchedulerService } from '$lib/server/library/index';
+import type { TaskHistoryEntry } from '$lib/types/task';
 
 /**
  * SSE event payload types
  */
-interface TaskStartedEvent {
+export interface TaskStartedEvent {
 	taskId: string;
 	startedAt: string;
 }
 
-interface TaskCompletedEvent {
+export interface TaskCompletedEvent {
 	taskId: string;
 	completedAt: string;
 	lastRunTime: string;
@@ -41,42 +44,42 @@ interface TaskCompletedEvent {
 		itemsGrabbed: number;
 		errors: number;
 	};
-	historyEntry?: {
-		id: string;
-		taskId: string;
-		status: 'completed';
-		results: Record<string, unknown> | null;
-		errors: null;
-		startedAt: string;
-		completedAt: string;
-	};
+	historyEntry?: TaskHistoryEntry;
 }
 
-interface TaskFailedEvent {
+export interface TaskFailedEvent {
 	taskId: string;
 	completedAt: string;
 	error: string;
-	historyEntry?: {
-		id: string;
-		taskId: string;
-		status: 'failed';
-		results: null;
-		errors: string[];
-		startedAt: string;
-		completedAt: string;
-	};
+	historyEntry?: TaskHistoryEntry;
 }
 
-interface TaskCancelledEvent {
+export interface TaskCancelledEvent {
 	taskId: string;
 	cancelledAt: string;
 }
 
-interface TaskUpdatedEvent {
+export interface TaskUpdatedEvent {
 	taskId: string;
 	enabled?: boolean;
 	intervalHours?: number;
 	nextRunTime?: string | null;
+}
+
+export interface TasksInitialEvent {
+	tasks: UnifiedTask[];
+}
+
+/**
+ * All events for the tasks stream endpoint
+ */
+export interface TaskStreamEvents {
+	'tasks:initial': TasksInitialEvent;
+	'task:started': TaskStartedEvent;
+	'task:completed': TaskCompletedEvent;
+	'task:failed': TaskFailedEvent;
+	'task:cancelled': TaskCancelledEvent;
+	'task:updated': TaskUpdatedEvent;
 }
 
 /**
@@ -136,283 +139,201 @@ async function getInitialTaskState(): Promise<UnifiedTask[]> {
 	);
 }
 
-export const GET: RequestHandler = async ({ request }) => {
-	const stream = new ReadableStream({
-		async start(controller) {
-			const encoder = new TextEncoder();
+/**
+ * Helper to compute the next run time after a task completes.
+ * Reads the interval from settings, calculates based on completion time.
+ */
+async function getNextRunTimeForTask(taskId: string, completionTime: Date): Promise<string | null> {
+	const interval = await taskSettingsService.getTaskInterval(taskId);
+	if (interval === null) return null;
+	return new Date(completionTime.getTime() + interval * 60 * 60 * 1000).toISOString();
+}
 
-			const send = (event: string, data: unknown) => {
-				try {
-					controller.enqueue(encoder.encode(`event: ${event}\n`));
-					controller.enqueue(encoder.encode(`data: ${JSON.stringify(data)}\n\n`));
-				} catch {
-					// Connection closed
-				}
-			};
-
-			// Send initial connection event
-			send('connected', { timestamp: new Date().toISOString() });
-
-			// Send initial task state immediately (queries DB directly, bypasses cache)
-			try {
-				const initialTasks = await getInitialTaskState();
-				send('tasks:initial', { tasks: initialTasks });
-			} catch (error) {
-				// Log error but don't fail the connection - client will rely on server-rendered data
-				console.error('[Tasks SSE] Failed to fetch initial task state:', error);
-			}
-
-			// Heartbeat to keep connection alive
-			const heartbeatInterval = setInterval(() => {
-				try {
-					send('heartbeat', { timestamp: new Date().toISOString() });
-				} catch {
-					clearInterval(heartbeatInterval);
-				}
-			}, 30000);
-
-			/**
-			 * Helper to compute the next run time after a task completes.
-			 * Reads the interval from settings, calculates based on completion time.
-			 */
-			async function getNextRunTimeForTask(
-				taskId: string,
-				completionTime: Date
-			): Promise<string | null> {
-				const interval = await taskSettingsService.getTaskInterval(taskId);
-				if (interval === null) return null;
-				return new Date(completionTime.getTime() + interval * 60 * 60 * 1000).toISOString();
-			}
-
-			// --- Scheduled task events ---
-
-			const onTaskStarted = (taskType: string) => {
-				const payload: TaskStartedEvent = {
-					taskId: taskType,
-					startedAt: new Date().toISOString()
-				};
-				send('task:started', payload);
-			};
-
-			const onTaskCompleted = async (taskType: string, result: TaskResult) => {
-				const completionTime = new Date();
-				const nextRunTime = await getNextRunTimeForTask(taskType, completionTime);
-
-				// Fetch the latest history entry for this task
-				let historyEntry: TaskCompletedEvent['historyEntry'] | undefined;
-				try {
-					const lastRun = await taskHistoryService.getLastRunForTask(taskType);
-					if (lastRun && lastRun.status === 'completed') {
-						historyEntry = {
-							id: lastRun.id,
-							taskId: lastRun.taskId,
-							status: 'completed',
-							results: lastRun.results,
-							errors: null,
-							startedAt: lastRun.startedAt,
-							completedAt: lastRun.completedAt!
-						};
-					}
-				} catch {
-					// Non-critical: skip history entry
-				}
-
-				const payload: TaskCompletedEvent = {
-					taskId: taskType,
-					completedAt: completionTime.toISOString(),
-					lastRunTime: completionTime.toISOString(),
-					nextRunTime,
-					result: {
-						itemsProcessed: result.itemsProcessed,
-						itemsGrabbed: result.itemsGrabbed,
-						errors: result.errors
-					},
-					historyEntry
-				};
-				send('task:completed', payload);
-			};
-
-			const onTaskFailed = async (taskType: string, error: unknown) => {
-				const completionTime = new Date();
-
-				// Fetch the latest history entry for this task
-				let historyEntry: TaskFailedEvent['historyEntry'] | undefined;
-				try {
-					const lastRun = await taskHistoryService.getLastRunForTask(taskType);
-					if (lastRun && lastRun.status === 'failed') {
-						historyEntry = {
-							id: lastRun.id,
-							taskId: lastRun.taskId,
-							status: 'failed',
-							results: null,
-							errors: lastRun.errors ?? [String(error)],
-							startedAt: lastRun.startedAt,
-							completedAt: lastRun.completedAt ?? completionTime.toISOString()
-						};
-					}
-				} catch {
-					// Non-critical: skip history entry
-				}
-
-				const payload: TaskFailedEvent = {
-					taskId: taskType,
-					completedAt: completionTime.toISOString(),
-					error: error instanceof Error ? error.message : String(error),
-					historyEntry
-				};
-				send('task:failed', payload);
-			};
-
-			const onTaskCancelled = (taskType: string) => {
-				const payload: TaskCancelledEvent = {
-					taskId: taskType,
-					cancelledAt: new Date().toISOString()
-				};
-				send('task:cancelled', payload);
-			};
-
-			// --- Manual task events (same payloads, same SSE events) ---
-
-			const onManualTaskStarted = (taskType: string) => {
-				const payload: TaskStartedEvent = {
-					taskId: taskType,
-					startedAt: new Date().toISOString()
-				};
-				send('task:started', payload);
-			};
-
-			const onManualTaskCompleted = async (taskType: string, result: TaskResult) => {
-				const completionTime = new Date();
-				const nextRunTime = await getNextRunTimeForTask(taskType, completionTime);
-
-				// Fetch the latest history entry for this task
-				let historyEntry: TaskCompletedEvent['historyEntry'] | undefined;
-				try {
-					const lastRun = await taskHistoryService.getLastRunForTask(taskType);
-					if (lastRun && lastRun.status === 'completed') {
-						historyEntry = {
-							id: lastRun.id,
-							taskId: lastRun.taskId,
-							status: 'completed',
-							results: lastRun.results,
-							errors: null,
-							startedAt: lastRun.startedAt,
-							completedAt: lastRun.completedAt!
-						};
-					}
-				} catch {
-					// Non-critical: skip history entry
-				}
-
-				const payload: TaskCompletedEvent = {
-					taskId: taskType,
-					completedAt: completionTime.toISOString(),
-					lastRunTime: completionTime.toISOString(),
-					nextRunTime,
-					result: {
-						itemsProcessed: result.itemsProcessed,
-						itemsGrabbed: result.itemsGrabbed,
-						errors: result.errors
-					},
-					historyEntry
-				};
-				send('task:completed', payload);
-			};
-
-			const onManualTaskFailed = async (taskType: string, error: unknown) => {
-				const completionTime = new Date();
-
-				// Fetch the latest history entry for this task
-				let historyEntry: TaskFailedEvent['historyEntry'] | undefined;
-				try {
-					const lastRun = await taskHistoryService.getLastRunForTask(taskType);
-					if (lastRun && lastRun.status === 'failed') {
-						historyEntry = {
-							id: lastRun.id,
-							taskId: lastRun.taskId,
-							status: 'failed',
-							results: null,
-							errors: lastRun.errors ?? [String(error)],
-							startedAt: lastRun.startedAt,
-							completedAt: lastRun.completedAt ?? completionTime.toISOString()
-						};
-					}
-				} catch {
-					// Non-critical: skip history entry
-				}
-
-				const payload: TaskFailedEvent = {
-					taskId: taskType,
-					completedAt: completionTime.toISOString(),
-					error: error instanceof Error ? error.message : String(error),
-					historyEntry
-				};
-				send('task:failed', payload);
-			};
-
-			const onManualTaskCancelled = (taskType: string) => {
-				const payload: TaskCancelledEvent = {
-					taskId: taskType,
-					cancelledAt: new Date().toISOString()
-				};
-				send('task:cancelled', payload);
-			};
-
-			// --- Settings change events ---
-
-			const onTaskSettingsUpdated = (data: {
-				taskId: string;
-				enabled?: boolean;
-				intervalHours?: number;
-				nextRunTime?: string | null;
-			}) => {
-				const payload: TaskUpdatedEvent = {
-					taskId: data.taskId,
-					enabled: data.enabled,
-					intervalHours: data.intervalHours,
-					nextRunTime: data.nextRunTime
-				};
-				send('task:updated', payload);
-			};
-
-			// Register all event handlers
-			monitoringScheduler.on('taskStarted', onTaskStarted);
-			monitoringScheduler.on('taskCompleted', onTaskCompleted);
-			monitoringScheduler.on('taskFailed', onTaskFailed);
-			monitoringScheduler.on('taskCancelled', onTaskCancelled);
-			monitoringScheduler.on('manualTaskStarted', onManualTaskStarted);
-			monitoringScheduler.on('manualTaskCompleted', onManualTaskCompleted);
-			monitoringScheduler.on('manualTaskFailed', onManualTaskFailed);
-			monitoringScheduler.on('manualTaskCancelled', onManualTaskCancelled);
-			monitoringScheduler.on('taskSettingsUpdated', onTaskSettingsUpdated);
-
-			// Cleanup on disconnect
-			request.signal.addEventListener('abort', () => {
-				clearInterval(heartbeatInterval);
-				monitoringScheduler.off('taskStarted', onTaskStarted);
-				monitoringScheduler.off('taskCompleted', onTaskCompleted);
-				monitoringScheduler.off('taskFailed', onTaskFailed);
-				monitoringScheduler.off('taskCancelled', onTaskCancelled);
-				monitoringScheduler.off('manualTaskStarted', onManualTaskStarted);
-				monitoringScheduler.off('manualTaskCompleted', onManualTaskCompleted);
-				monitoringScheduler.off('manualTaskFailed', onManualTaskFailed);
-				monitoringScheduler.off('manualTaskCancelled', onManualTaskCancelled);
-				monitoringScheduler.off('taskSettingsUpdated', onTaskSettingsUpdated);
-				try {
-					controller.close();
-				} catch {
-					// Already closed
-				}
-			});
+/**
+ * Fetch the latest history entry for a completed task
+ */
+async function getCompletedHistoryEntry(taskType: string): Promise<TaskHistoryEntry | undefined> {
+	try {
+		const lastRun = await taskHistoryService.getLastRunForTask(taskType);
+		if (lastRun && lastRun.status === 'completed') {
+			return lastRun;
 		}
-	});
+	} catch {
+		// Non-critical: skip history entry
+	}
+	return undefined;
+}
 
-	return new Response(stream, {
-		headers: {
-			'Content-Type': 'text/event-stream',
-			'Cache-Control': 'no-cache',
-			Connection: 'keep-alive',
-			'X-Accel-Buffering': 'no'
+/**
+ * Fetch the latest history entry for a failed task
+ */
+async function getFailedHistoryEntry(
+	taskType: string,
+	error: unknown
+): Promise<TaskHistoryEntry | undefined> {
+	try {
+		const lastRun = await taskHistoryService.getLastRunForTask(taskType);
+		if (lastRun && lastRun.status === 'failed') {
+			return lastRun;
 		}
+	} catch {
+		// Non-critical: skip history entry
+	}
+	return undefined;
+}
+
+export const GET: RequestHandler = async () => {
+	return createSSEStream(async (send) => {
+		// Send initial task state immediately (queries DB directly, bypasses cache)
+		try {
+			const initialTasks = await getInitialTaskState();
+			send('tasks:initial', { tasks: initialTasks });
+		} catch (error) {
+			// Log error but don't fail the connection - client will rely on server-rendered data
+			console.error('[Tasks SSE] Failed to fetch initial task state:', error);
+		}
+
+		// --- Scheduled task event handlers ---
+
+		const onTaskStarted = (taskType: string) => {
+			const payload: TaskStartedEvent = {
+				taskId: taskType,
+				startedAt: new Date().toISOString()
+			};
+			send('task:started', payload);
+		};
+
+		const onTaskCompleted = async (taskType: string, result: TaskResult) => {
+			const completionTime = new Date();
+			const nextRunTime = await getNextRunTimeForTask(taskType, completionTime);
+			const historyEntry = await getCompletedHistoryEntry(taskType);
+
+			const payload: TaskCompletedEvent = {
+				taskId: taskType,
+				completedAt: completionTime.toISOString(),
+				lastRunTime: completionTime.toISOString(),
+				nextRunTime,
+				result: {
+					itemsProcessed: result.itemsProcessed,
+					itemsGrabbed: result.itemsGrabbed,
+					errors: result.errors
+				},
+				historyEntry
+			};
+			send('task:completed', payload);
+		};
+
+		const onTaskFailed = async (taskType: string, error: unknown) => {
+			const completionTime = new Date();
+			const historyEntry = await getFailedHistoryEntry(taskType, error);
+
+			const payload: TaskFailedEvent = {
+				taskId: taskType,
+				completedAt: completionTime.toISOString(),
+				error: error instanceof Error ? error.message : String(error),
+				historyEntry
+			};
+			send('task:failed', payload);
+		};
+
+		const onTaskCancelled = (taskType: string) => {
+			const payload: TaskCancelledEvent = {
+				taskId: taskType,
+				cancelledAt: new Date().toISOString()
+			};
+			send('task:cancelled', payload);
+		};
+
+		// --- Manual task event handlers ---
+
+		const onManualTaskStarted = (taskType: string) => {
+			const payload: TaskStartedEvent = {
+				taskId: taskType,
+				startedAt: new Date().toISOString()
+			};
+			send('task:started', payload);
+		};
+
+		const onManualTaskCompleted = async (taskType: string, result: TaskResult) => {
+			const completionTime = new Date();
+			const nextRunTime = await getNextRunTimeForTask(taskType, completionTime);
+			const historyEntry = await getCompletedHistoryEntry(taskType);
+
+			const payload: TaskCompletedEvent = {
+				taskId: taskType,
+				completedAt: completionTime.toISOString(),
+				lastRunTime: completionTime.toISOString(),
+				nextRunTime,
+				result: {
+					itemsProcessed: result.itemsProcessed,
+					itemsGrabbed: result.itemsGrabbed,
+					errors: result.errors
+				},
+				historyEntry
+			};
+			send('task:completed', payload);
+		};
+
+		const onManualTaskFailed = async (taskType: string, error: unknown) => {
+			const completionTime = new Date();
+			const historyEntry = await getFailedHistoryEntry(taskType, error);
+
+			const payload: TaskFailedEvent = {
+				taskId: taskType,
+				completedAt: completionTime.toISOString(),
+				error: error instanceof Error ? error.message : String(error),
+				historyEntry
+			};
+			send('task:failed', payload);
+		};
+
+		const onManualTaskCancelled = (taskType: string) => {
+			const payload: TaskCancelledEvent = {
+				taskId: taskType,
+				cancelledAt: new Date().toISOString()
+			};
+			send('task:cancelled', payload);
+		};
+
+		// --- Settings change event handler ---
+
+		const onTaskSettingsUpdated = (data: {
+			taskId: string;
+			enabled?: boolean;
+			intervalHours?: number;
+			nextRunTime?: string | null;
+		}) => {
+			const payload: TaskUpdatedEvent = {
+				taskId: data.taskId,
+				enabled: data.enabled,
+				intervalHours: data.intervalHours,
+				nextRunTime: data.nextRunTime
+			};
+			send('task:updated', payload);
+		};
+
+		// Register all event handlers
+		monitoringScheduler.on('taskStarted', onTaskStarted);
+		monitoringScheduler.on('taskCompleted', onTaskCompleted);
+		monitoringScheduler.on('taskFailed', onTaskFailed);
+		monitoringScheduler.on('taskCancelled', onTaskCancelled);
+		monitoringScheduler.on('manualTaskStarted', onManualTaskStarted);
+		monitoringScheduler.on('manualTaskCompleted', onManualTaskCompleted);
+		monitoringScheduler.on('manualTaskFailed', onManualTaskFailed);
+		monitoringScheduler.on('manualTaskCancelled', onManualTaskCancelled);
+		monitoringScheduler.on('taskSettingsUpdated', onTaskSettingsUpdated);
+
+		// Return cleanup function
+		return () => {
+			monitoringScheduler.off('taskStarted', onTaskStarted);
+			monitoringScheduler.off('taskCompleted', onTaskCompleted);
+			monitoringScheduler.off('taskFailed', onTaskFailed);
+			monitoringScheduler.off('taskCancelled', onTaskCancelled);
+			monitoringScheduler.off('manualTaskStarted', onManualTaskStarted);
+			monitoringScheduler.off('manualTaskCompleted', onManualTaskCompleted);
+			monitoringScheduler.off('manualTaskFailed', onManualTaskFailed);
+			monitoringScheduler.off('manualTaskCancelled', onManualTaskCancelled);
+			monitoringScheduler.off('taskSettingsUpdated', onTaskSettingsUpdated);
+		};
 	});
 };

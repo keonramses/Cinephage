@@ -17,6 +17,7 @@ import {
 import { fetchAndStoreMovieAlternateTitles } from '$lib/server/services/AlternateTitleService.js';
 import { ValidationError } from '$lib/errors';
 import { logger } from '$lib/logging';
+import { requireAuth } from '$lib/server/auth/requireAuth.js';
 
 /**
  * Schema for adding a movie to the library
@@ -50,7 +51,11 @@ function generateMovieFolderName(title: string, year?: number, tmdbId?: number):
  * GET /api/library/movies
  * List all movies in the library
  */
-export const GET: RequestHandler = async () => {
+export const GET: RequestHandler = async (event) => {
+	// Require authentication
+	const authError = requireAuth(event);
+	if (authError) return authError;
+
 	try {
 		// Fetch all movies (1 query)
 		const allMovies = await db
@@ -131,7 +136,13 @@ export const GET: RequestHandler = async () => {
  * POST /api/library/movies
  * Add a movie to the library by TMDB ID
  */
-export const POST: RequestHandler = async ({ request }) => {
+export const POST: RequestHandler = async (event) => {
+	const { request } = event;
+
+	// Require authentication
+	const authError = requireAuth(event);
+	if (authError) return authError;
+
 	try {
 		const body = await request.json();
 		const result = addMovieSchema.safeParse(body);

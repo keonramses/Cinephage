@@ -3,10 +3,12 @@
 	import { ThemeSelector } from '$lib/components/ui';
 	import Toasts from '$lib/components/ui/Toasts.svelte';
 	import { layoutState } from '$lib/layout.svelte';
-	import { mobileSSEStatus } from '$lib/sse/mobileStatus.svelte';
+
 	import { page } from '$app/stores';
 	import { resolvePath } from '$lib/utils/routing';
 	import { env } from '$env/dynamic/public';
+	import { authClient } from '$lib/auth/client.js';
+	import { goto } from '$app/navigation';
 	import {
 		Menu,
 		Home,
@@ -26,17 +28,30 @@
 		Radio,
 		Calendar,
 		Activity,
-		Loader2,
-		Wifi,
-		WifiOff,
-		FileQuestion
+		FileQuestion,
+		LogOut,
+		Server
 	} from 'lucide-svelte';
 
 	let { children } = $props();
 	let isMobileDrawerOpen = $state(false);
+	let isLoggingOut = $state(false);
 
 	function closeMobileDrawer(): void {
 		isMobileDrawerOpen = false;
+	}
+
+	async function handleLogout(): Promise<void> {
+		if (isLoggingOut) return;
+		isLoggingOut = true;
+		try {
+			await authClient.signOut();
+			await goto('/login');
+		} catch {
+			// Error handled by auth client
+		} finally {
+			isLoggingOut = false;
+		}
 	}
 
 	const menuItems = [
@@ -67,6 +82,7 @@
 			icon: Settings,
 			children: [
 				{ href: '/settings/general', label: 'General', icon: Settings },
+				{ href: '/settings/system', label: 'System', icon: Server },
 				{ href: '/settings/naming', label: 'Naming', icon: FileSignature },
 				{ href: '/settings/quality', label: 'Quality Settings', icon: Shield },
 				{ href: '/settings/integrations', label: 'Integrations', icon: Compass },
@@ -106,29 +122,6 @@
 				</div>
 			</div>
 			<div class="flex flex-none items-center gap-2">
-				{#if mobileSSEStatus.visible}
-					{#if mobileSSEStatus.status === 'connected'}
-						<span class="badge gap-1 badge-sm badge-success">
-							<Wifi class="h-3 w-3" />
-							Live
-						</span>
-					{:else if mobileSSEStatus.status === 'error'}
-						<span class="badge gap-1 badge-sm badge-error">
-							<Loader2 class="h-3 w-3 animate-spin" />
-							Reconnecting...
-						</span>
-					{:else if mobileSSEStatus.status === 'connecting'}
-						<span class="badge gap-1 badge-sm badge-warning">
-							<Loader2 class="h-3 w-3 animate-spin" />
-							Connecting...
-						</span>
-					{:else}
-						<span class="badge gap-1 badge-ghost badge-sm">
-							<WifiOff class="h-3 w-3" />
-							Offline
-						</span>
-					{/if}
-				{/if}
 				<ThemeSelector showLabel={false} />
 			</div>
 		</header>
@@ -250,6 +243,22 @@
 				{#if appVersion}
 					<div class="mb-2 text-xs text-base-content/50">{appVersion}</div>
 				{/if}
+				<button
+					class="btn mb-2 w-full btn-ghost btn-sm"
+					class:justify-center={!layoutState.isSidebarExpanded}
+					onclick={handleLogout}
+					disabled={isLoggingOut}
+					title="Logout"
+				>
+					{#if isLoggingOut}
+						<span class="loading loading-xs loading-spinner"></span>
+					{:else}
+						<LogOut class="h-4 w-4" />
+					{/if}
+					{#if layoutState.isSidebarExpanded}
+						<span class="ml-2">Logout</span>
+					{/if}
+				</button>
 				<ThemeSelector
 					class={layoutState.isSidebarExpanded ? 'dropdown-top' : 'dropdown-right'}
 					showLabel={layoutState.isSidebarExpanded}

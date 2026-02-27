@@ -4,11 +4,10 @@
 	import { ConfirmationModal } from '$lib/components/ui/modal';
 	import type { LiveTvAccount, LiveTvAccountTestResult } from '$lib/types/livetv';
 	import type { FormData, TestConfig } from '$lib/components/livetv/LiveTvAccountModal.svelte';
-	import { onMount } from 'svelte';
 	import { createSSE } from '$lib/sse';
-	import { mobileSSEStatus } from '$lib/sse/mobileStatus.svelte';
 	import { resolvePath } from '$lib/utils/routing';
 	import { toasts } from '$lib/stores/toast.svelte';
+	import type { AccountStreamEvents } from '$lib/types/sse/events/livetv-account-events.js';
 
 	// State
 	let accounts = $state<LiveTvAccount[]>([]);
@@ -31,8 +30,7 @@
 	let syncingId = $state<string | null>(null);
 
 	// SSE Connection - internally handles browser/SSR
-	// eslint-disable-next-line @typescript-eslint/no-explicit-any
-	const sse = createSSE<Record<string, any>>(resolvePath('/api/livetv/accounts/stream'), {
+	const sse = createSSE<AccountStreamEvents>(resolvePath('/api/livetv/accounts/stream'), {
 		'accounts:initial': (payload) => {
 			accounts = payload.accounts || [];
 			loading = false;
@@ -61,22 +59,9 @@
 		}
 	});
 
-	const MOBILE_SSE_SOURCE = 'livetv-accounts';
-
-	$effect(() => {
-		mobileSSEStatus.publish(MOBILE_SSE_SOURCE, sse.status);
-		return () => {
-			mobileSSEStatus.clear(MOBILE_SSE_SOURCE);
-		};
-	});
-
 	// Load accounts on mount
-	onMount(() => {
+	$effect(() => {
 		loadAccounts();
-
-		return () => {
-			sse.close();
-		};
 	});
 
 	async function loadAccounts() {

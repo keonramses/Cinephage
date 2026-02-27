@@ -80,8 +80,11 @@ interface MigrationDefinition {
  * Version 53: Add iptv_org_config column to livetv_accounts for IPTV-Org provider support
  * Version 54: Add cookies and cookies_expiration_date columns to indexer_status for persistent session storage
  * Version 55: Add health tracking columns to download_clients
+ * Version 56: Add Better Auth username-based authentication support
+ * Version 57: Add email columns for Better Auth
+ * Version 60: Add user_api_key_secrets table for encrypted API key storage
  */
-export const CURRENT_SCHEMA_VERSION = 55;
+export const CURRENT_SCHEMA_VERSION = 61;
 
 /**
  * All table definitions with CREATE TABLE IF NOT EXISTS
@@ -89,8 +92,55 @@ export const CURRENT_SCHEMA_VERSION = 55;
  */
 const TABLE_DEFINITIONS: string[] = [
 	// Core tables (no foreign keys)
+
+	// Better Auth tables - we manage these to have full control over schema
+	// Better Auth expects camelCase column names
 	`CREATE TABLE IF NOT EXISTS "user" (
-		"id" text PRIMARY KEY NOT NULL
+		"id" text PRIMARY KEY NOT NULL,
+		"name" text,
+		"email" text NOT NULL,
+		"emailVerified" integer DEFAULT 0,
+		"image" text,
+		"username" text UNIQUE,
+		"displayUsername" text,
+		"createdAt" date NOT NULL,
+		"updatedAt" date NOT NULL
+	)`,
+
+	`CREATE TABLE IF NOT EXISTS "session" (
+		"id" text PRIMARY KEY NOT NULL,
+		"userId" text NOT NULL REFERENCES "user"("id") ON DELETE CASCADE,
+		"token" text NOT NULL UNIQUE,
+		"expiresAt" date NOT NULL,
+		"ipAddress" text,
+		"userAgent" text,
+		"createdAt" date NOT NULL,
+		"updatedAt" date NOT NULL
+	)`,
+
+	`CREATE TABLE IF NOT EXISTS "account" (
+		"id" text PRIMARY KEY NOT NULL,
+		"userId" text NOT NULL REFERENCES "user"("id") ON DELETE CASCADE,
+		"accountId" text NOT NULL,
+		"providerId" text NOT NULL,
+		"accessToken" text,
+		"refreshToken" text,
+		"accessTokenExpiresAt" date,
+		"refreshTokenExpiresAt" date,
+		"scope" text,
+		"idToken" text,
+		"password" text,
+		"createdAt" date NOT NULL,
+		"updatedAt" date NOT NULL
+	)`,
+
+	`CREATE TABLE IF NOT EXISTS "verification" (
+		"id" text PRIMARY KEY NOT NULL,
+		"identifier" text NOT NULL,
+		"value" text NOT NULL,
+		"expiresAt" date NOT NULL,
+		"createdAt" date,
+		"updatedAt" date
 	)`,
 
 	`CREATE TABLE IF NOT EXISTS "settings" (
@@ -107,6 +157,9 @@ const TABLE_DEFINITIONS: string[] = [
 		"execution_time_ms" integer,
 		"success" integer DEFAULT 1
 	)`,
+
+	// NOTE: Auth tables (user, session, account, verification) are managed by Better Auth
+	// Do not define them here - Better Auth creates them automatically,
 
 	`CREATE TABLE IF NOT EXISTS "indexer_definitions" (
 		"id" text PRIMARY KEY NOT NULL,
@@ -1100,6 +1153,13 @@ const TABLE_DEFINITIONS: string[] = [
  * Index definitions for performance
  */
 const INDEX_DEFINITIONS: string[] = [
+	// Better Auth indexes
+	`CREATE INDEX IF NOT EXISTS "idx_session_user" ON "session" ("userId")`,
+	`CREATE INDEX IF NOT EXISTS "idx_account_user" ON "account" ("userId")`,
+	`CREATE UNIQUE INDEX IF NOT EXISTS "idx_account_provider" ON "account" ("providerId", "accountId")`,
+	`CREATE INDEX IF NOT EXISTS "idx_user_email" ON "user" ("email")`,
+	`CREATE UNIQUE INDEX IF NOT EXISTS "idx_user_username" ON "user" ("username")`,
+
 	`CREATE INDEX IF NOT EXISTS "idx_indexer_definitions_protocol" ON "indexer_definitions" ("protocol")`,
 	`CREATE INDEX IF NOT EXISTS "idx_indexer_definitions_type" ON "indexer_definitions" ("type")`,
 	`CREATE INDEX IF NOT EXISTS "idx_indexers_definition" ON "indexers" ("definition_id")`,
@@ -1200,7 +1260,14 @@ const INDEX_DEFINITIONS: string[] = [
 	`CREATE INDEX IF NOT EXISTS "idx_alternate_titles_source" ON "alternate_titles" ("source")`,
 	// Activity details indexes
 	`CREATE INDEX IF NOT EXISTS "idx_activity_details_activity" ON "activity_details" ("activity_id")`,
-	`CREATE INDEX IF NOT EXISTS "idx_activity_details_replaced_movie" ON "activity_details" ("replaced_movie_file_id")`
+	`CREATE INDEX IF NOT EXISTS "idx_activity_details_replaced_movie" ON "activity_details" ("replaced_movie_file_id")`,
+	// Better Auth indexes
+	`CREATE INDEX IF NOT EXISTS "idx_session_user" ON "session" ("user_id")`,
+	`CREATE INDEX IF NOT EXISTS "idx_account_user" ON "account" ("user_id")`,
+	`CREATE UNIQUE INDEX IF NOT EXISTS "idx_account_provider" ON "account" ("provider_id", "account_id")`,
+	`CREATE INDEX IF NOT EXISTS "idx_user_settings_user" ON "user_settings" ("user_id")`,
+	`CREATE UNIQUE INDEX IF NOT EXISTS "idx_user_email" ON "user" ("email")`,
+	`CREATE UNIQUE INDEX IF NOT EXISTS "idx_user_username" ON "user" ("username")`
 ];
 
 /**
@@ -4102,6 +4169,112 @@ const MIGRATIONS: MigrationDefinition[] = [
 			if (!columnExists(sqlite, 'download_clients', 'last_checked_at')) {
 				sqlite.prepare(`ALTER TABLE "download_clients" ADD COLUMN "last_checked_at" text`).run();
 				logger.info('[SchemaSync] Added last_checked_at column to download_clients');
+			}
+		}
+	},
+
+	// Migration 60: Add user_api_key_secrets table for encrypted API key storage
+	{
+		version: 60,
+		name: 'add_user_api_key_secrets_table',
+		apply: (sqlite) => {
+			if (!tableExists(sqlite, 'userApiKeySecrets')) {
+				sqlite
+					.prepare(
+						`
+					CREATE TABLE "userApiKeySecrets" (
+						"id" TEXT PRIMARY KEY NOT NULL,
+						"userId" TEXT NOT NULL,
+						"encryptedKey" TEXT NOT NULL,
+						"createdAt" TEXT NOT NULL,
+						FOREIGN KEY ("userId") REFERENCES "user"("id") ON DELETE CASCADE
+					)
+				`
+					)
+					.run();
+				sqlite
+					.prepare(`CREATE INDEX "idx_userApiKeySecrets_userId" ON "userApiKeySecrets"("userId")`)
+					.run();
+				logger.info('[SchemaSync] Created userApiKeySecrets table');
+			} else {
+				logger.info('[SchemaSync] userApiKeySecrets table already exists');
+			}
+		}
+	},
+
+	// NOTE: Better Auth migrations removed (versions 56-57)
+	// Auth tables (user, session, account, verification) are now managed by Better Auth
+	// Do not add auth-related migrations here - Better Auth handles its own schema
+
+	// Version 61: Rename Live TV API Key to Media Streaming API Key
+	// Expands permissions to include both livetv and streaming endpoints
+	{
+		version: 61,
+		name: 'rename_live_tv_to_media_streaming_api_key',
+		apply: (sqlite) => {
+			logger.info(
+				'[SchemaSync] Running migration: Rename Live TV API Key to Media Streaming API Key'
+			);
+
+			// Update Better Auth API key table to migrate livetv keys to streaming keys
+			// Better Auth stores keys in the 'apiKey' table
+			try {
+				// Check if apiKey table exists (Better Auth managed)
+				const tableExists = sqlite
+					.prepare(`SELECT name FROM sqlite_master WHERE type='table' AND name='apiKey'`)
+					.get();
+
+				if (tableExists) {
+					// Update keys with metadata.type = 'livetv' to type = 'streaming'
+					const updateNameResult = sqlite
+						.prepare(
+							`UPDATE apiKey SET name = 'Media Streaming API Key' WHERE name = 'Live TV API Key'`
+						)
+						.run();
+
+					// Update metadata - we need to parse and update the JSON
+					const keysToUpdate = sqlite
+						.prepare(
+							`SELECT id, metadata, permissions FROM apiKey WHERE metadata LIKE '%"type":"livetv"%'`
+						)
+						.all() as Array<{ id: string; metadata: string; permissions: string }>;
+
+					for (const key of keysToUpdate) {
+						try {
+							const metadata = JSON.parse(key.metadata);
+							const permissions = JSON.parse(key.permissions);
+
+							// Update metadata type and description
+							metadata.type = 'streaming';
+							metadata.description =
+								'Access to Live TV and Media Streaming endpoints for media server integration';
+
+							// Add streaming permission alongside livetv
+							permissions.streaming = ['*'];
+
+							// Update the key
+							sqlite
+								.prepare(`UPDATE apiKey SET metadata = ?, permissions = ? WHERE id = ?`)
+								.run(JSON.stringify(metadata), JSON.stringify(permissions), key.id);
+
+							logger.info(`[SchemaSync] Migrated API key ${key.id} to Media Streaming API Key`);
+						} catch (parseError) {
+							logger.warn(`[SchemaSync] Failed to parse metadata for key ${key.id}: ${parseError}`);
+						}
+					}
+
+					logger.info(
+						'[SchemaSync] Migration completed: Live TV API Keys renamed to Media Streaming API Keys',
+						{
+							updatedCount: updateNameResult.changes
+						}
+					);
+				} else {
+					logger.info('[SchemaSync] apiKey table not found, skipping migration');
+				}
+			} catch (error) {
+				logger.error('[SchemaSync] Migration failed', error);
+				throw error;
 			}
 		}
 	}

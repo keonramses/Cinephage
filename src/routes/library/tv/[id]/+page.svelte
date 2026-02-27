@@ -19,7 +19,7 @@
 	import { page } from '$app/stores';
 	import { goto } from '$app/navigation';
 	import { createDynamicSSE } from '$lib/sse';
-	import { mobileSSEStatus } from '$lib/sse/mobileStatus.svelte';
+	import { createSearchProgress } from '$lib/stores/searchProgress.svelte';
 
 	let { data }: { data: PageData } = $props();
 
@@ -86,20 +86,24 @@
 	});
 
 	// SSE Connection - internally handles browser/SSR
+	// Shared type for queue SSE payloads
+	type QueueEventPayload = {
+		id: string;
+		title: string;
+		status: string;
+		progress: number | null;
+		episodeIds?: string[];
+		seasonNumber?: number;
+	};
+
 	const sse = createDynamicSSE<{
 		'media:initial': {
 			series: typeof series;
 			seasons: typeof seasons;
 			queueItems: typeof queueItems;
 		};
-		'queue:updated': {
-			id: string;
-			title: string;
-			status: string;
-			progress: number | null;
-			episodeIds?: string[];
-			seasonNumber?: number;
-		};
+		'queue:added': QueueEventPayload;
+		'queue:updated': QueueEventPayload;
 		'file:added': {
 			file: EpisodeFileInfo;
 			episodeIds: string[];
@@ -108,11 +112,31 @@
 			replacedFileIds?: string[];
 		};
 		'file:removed': { fileId: string; episodeIds: string[] };
+		'search:started': { seriesId: string };
+		'search:completed': { seriesId: string };
 	}>(() => `/api/library/series/${series.id}/stream`, {
 		'media:initial': (payload) => {
+			console.log('[TVPage] media:initial received, seasons count:', payload.seasons?.length);
 			seriesState = payload.series;
 			seasonsState = payload.seasons;
 			queueItemsState = payload.queueItems;
+		},
+		'queue:added': (payload) => {
+			// Add new queue item if not already tracked
+			const exists = queueItems.some((q) => q.id === payload.id);
+			if (!exists) {
+				queueItemsState = [
+					...queueItems,
+					{
+						id: payload.id,
+						title: payload.title,
+						status: payload.status,
+						progress: payload.progress,
+						episodeIds: payload.episodeIds || null,
+						seasonNumber: payload.seasonNumber || null
+					}
+				];
+			}
 		},
 		'queue:updated': (payload) => {
 			if (!ACTIVE_QUEUE_STATUSES.has(payload.status)) {
@@ -130,92 +154,128 @@
 					seasonNumber: payload.seasonNumber || null
 				};
 				if (existingIndex >= 0) {
-					queueItems[existingIndex] = newQueueItem;
+					queueItemsState = queueItems.map((q, idx) => (idx === existingIndex ? newQueueItem : q));
 				} else {
 					queueItemsState = [...queueItems, newQueueItem];
 				}
 			}
 		},
 		'file:added': (payload) => {
-			// Find the season
-			const seasonIndex = seasons.findIndex((s) => s.seasonNumber === payload.seasonNumber);
-			if (seasonIndex === -1) return;
+			console.log('[TVPage] file:added event received:', {
+				seasonNumber: payload.seasonNumber,
+				episodeIds: payload.episodeIds,
+				fileId: payload.file?.id,
+				hasSeasonsState: !!seasonsState
+			});
 
-			// Update episodes with the new file
-			for (const episodeId of payload.episodeIds) {
-				const episodeIndex = seasons[seasonIndex].episodes.findIndex((e) => e.id === episodeId);
-				if (episodeIndex !== -1) {
-					seasons[seasonIndex].episodes[episodeIndex].file = payload.file;
-					seasons[seasonIndex].episodes[episodeIndex].hasFile = true;
-				}
+			// Work with seasonsState to ensure reactivity
+			if (!seasonsState) {
+				console.log('[TVPage] seasonsState is null, skipping update');
+				return;
 			}
 
-			// Update season stats
-			seasons[seasonIndex].episodeFileCount = seasons[seasonIndex].episodes.filter(
-				(e) => e.file !== null
-			).length;
+			const seasonIndex = seasonsState.findIndex((s) => s.seasonNumber === payload.seasonNumber);
+			console.log(
+				'[TVPage] Found season at index:',
+				seasonIndex,
+				'for seasonNumber:',
+				payload.seasonNumber
+			);
 
-			// Update series stats
-			const { totalEpisodes, totalFiles } = computeSeriesEpisodeStats(seasons);
-			series.episodeFileCount = totalFiles;
-			series.percentComplete =
-				totalEpisodes > 0 ? Math.round((totalFiles / totalEpisodes) * 100) : 0;
+			if (seasonIndex === -1) {
+				console.log(
+					'[TVPage] Season not found, available seasons:',
+					seasonsState.map((s) => s.seasonNumber)
+				);
+				return;
+			}
+
+			// Create new seasons array with immutable updates
+			seasonsState = seasonsState.map((season, sIdx) => {
+				if (sIdx !== seasonIndex) return season;
+
+				// Update episodes immutably
+				const updatedEpisodes = season.episodes.map((episode) => {
+					if (!payload.episodeIds.includes(episode.id)) return episode;
+					return {
+						...episode,
+						file: payload.file,
+						hasFile: true
+					};
+				});
+
+				// Calculate new file count
+				const episodeFileCount = updatedEpisodes.filter((e) => e.file !== null).length;
+
+				console.log(
+					'[TVPage] Updated season',
+					payload.seasonNumber,
+					'file count:',
+					episodeFileCount
+				);
+
+				return {
+					...season,
+					episodes: updatedEpisodes,
+					episodeFileCount
+				};
+			});
+
+			console.log('[TVPage] seasonsState updated, new length:', seasonsState.length);
+
+			// Update series state immutably
+			if (seriesState) {
+				const { totalEpisodes, totalFiles } = computeSeriesEpisodeStats(seasonsState);
+				seriesState = {
+					...seriesState,
+					episodeFileCount: totalFiles,
+					percentComplete: totalEpisodes > 0 ? Math.round((totalFiles / totalEpisodes) * 100) : 0
+				};
+				console.log('[TVPage] seriesState updated, totalFiles:', totalFiles);
+			}
 		},
 		'file:removed': (payload) => {
-			// Update episodes that had this file
-			for (const season of seasons) {
-				for (const episode of season.episodes) {
-					if (episode.file?.id === payload.fileId) {
-						episode.file = null;
-						episode.hasFile = false;
-					}
-				}
-				// Update season stats
-				season.episodeFileCount = season.episodes.filter((e) => e.file !== null).length;
-			}
+			// Work with seasonsState to ensure reactivity
+			if (!seasonsState) return;
 
-			// Update series stats
-			const { totalEpisodes, totalFiles } = computeSeriesEpisodeStats(seasons);
-			series.episodeFileCount = totalFiles;
-			series.percentComplete =
-				totalEpisodes > 0 ? Math.round((totalFiles / totalEpisodes) * 100) : 0;
+			// Create new seasons array with immutable updates
+			seasonsState = seasonsState.map((season) => {
+				// Update episodes immutably
+				const updatedEpisodes = season.episodes.map((episode) => {
+					if (episode.file?.id !== payload.fileId) return episode;
+					return {
+						...episode,
+						file: null,
+						hasFile: false
+					};
+				});
+
+				// Calculate new file count
+				const episodeFileCount = updatedEpisodes.filter((e) => e.file !== null).length;
+
+				return {
+					...season,
+					episodes: updatedEpisodes,
+					episodeFileCount
+				};
+			});
+
+			// Update series state immutably
+			if (seriesState) {
+				const { totalEpisodes, totalFiles } = computeSeriesEpisodeStats(seasonsState);
+				seriesState = {
+					...seriesState,
+					episodeFileCount: totalFiles,
+					percentComplete: totalEpisodes > 0 ? Math.round((totalFiles / totalEpisodes) * 100) : 0
+				};
+			}
+		},
+		'search:started': () => {
+			searchingMissing = true;
+		},
+		'search:completed': () => {
+			searchingMissing = false;
 		}
-	});
-
-	const MOBILE_SSE_SOURCE = 'library-series';
-
-	$effect(() => {
-		mobileSSEStatus.publish(MOBILE_SSE_SOURCE, sse.status);
-		return () => {
-			mobileSSEStatus.clear(MOBILE_SSE_SOURCE);
-		};
-	});
-
-	const prefetchProfileId = $derived.by(
-		() => series.scoringProfileId ?? data.qualityProfiles.find((p) => p.isDefault)?.id ?? null
-	);
-	let prefetchedStreamKey = $state<string | null>(null);
-
-	// Prefetch stream for first episode when page loads (warms cache for faster playback)
-	$effect(() => {
-		if (!(prefetchProfileId === 'streamer' && series?.tmdbId && seasons?.length > 0)) return;
-
-		// Find first season with episodes (skip specials/season 0)
-		const firstSeason = seasons.find((s) => s.seasonNumber > 0 && s.episodes?.length > 0);
-		if (!firstSeason || !firstSeason.episodes?.[0]) return;
-
-		const ep = firstSeason.episodes[0];
-		const key = `tv:${series.tmdbId}:${ep.seasonNumber}:${ep.episodeNumber}`;
-		if (prefetchedStreamKey === key) return;
-		prefetchedStreamKey = key;
-
-		fetch(
-			`/api/streaming/resolve/tv/${series.tmdbId}/${ep.seasonNumber}/${ep.episodeNumber}?prefetch=1`,
-			{
-				signal: AbortSignal.timeout(5000),
-				headers: { 'X-Prefetch': 'true' }
-			}
-		).catch(() => {});
 	});
 
 	// State
@@ -244,7 +304,7 @@
 		string,
 		{ found: boolean; grabbed: boolean; releaseName?: string; error?: string }
 	>();
-	let searchingMissing = $state(false);
+	let searchingMissing = $state(data.isSearching);
 	let missingSearchProgress = $state<{ current: number; total: number } | null>(null);
 	let missingSearchResult = $state<{ searched: number; found: number; grabbed: number } | null>(
 		null
@@ -257,6 +317,9 @@
 		title: string;
 	} | null>(null);
 	let subtitleAutoSearchingEpisodes = new SvelteSet<string>();
+
+	// Search progress store for auto-search
+	const searchProgress = createSearchProgress();
 
 	// Search context
 	let searchContext = $state<{
@@ -765,10 +828,11 @@
 
 	// Auto-search handlers
 	async function handleAutoSearchEpisode(episode: Episode & { id: string }) {
+		if (autoSearchingEpisodes.has(episode.id)) return;
 		autoSearchingEpisodes.add(episode.id);
 
 		try {
-			const response = await fetch(`/api/library/series/${series.id}/auto-search`, {
+			await searchProgress.startSearch(`/api/library/series/${series.id}/auto-search`, {
 				method: 'POST',
 				headers: { 'Content-Type': 'application/json' },
 				body: JSON.stringify({
@@ -777,20 +841,22 @@
 				})
 			});
 
-			const result = await response.json();
-			const itemResult = result.results?.[0];
+			if (searchProgress.results) {
+				const itemResult = searchProgress.results.results?.[0] as
+					| { found?: boolean; grabbed?: boolean; releaseName?: string; error?: string }
+					| undefined;
+				autoSearchEpisodeResults.set(episode.id, {
+					found: itemResult?.found ?? false,
+					grabbed: itemResult?.grabbed ?? false,
+					releaseName: itemResult?.releaseName,
+					error: itemResult?.error ?? searchProgress.results.error
+				});
 
-			autoSearchEpisodeResults.set(episode.id, {
-				found: itemResult?.found ?? false,
-				grabbed: itemResult?.grabbed ?? false,
-				releaseName: itemResult?.releaseName,
-				error: itemResult?.error
-			});
-
-			// Clear result after 5 seconds
-			setTimeout(() => {
-				autoSearchEpisodeResults.delete(episode.id);
-			}, 5000);
+				// Clear result after 5 seconds
+				setTimeout(() => {
+					autoSearchEpisodeResults.delete(episode.id);
+				}, 5000);
+			}
 		} catch (error) {
 			autoSearchEpisodeResults.set(episode.id, {
 				found: false,
@@ -799,14 +865,16 @@
 			});
 		} finally {
 			autoSearchingEpisodes.delete(episode.id);
+			searchProgress.reset();
 		}
 	}
 
 	async function handleAutoSearchSeason(season: Season) {
+		if (autoSearchingSeasons.has(season.id)) return;
 		autoSearchingSeasons.add(season.id);
 
 		try {
-			const response = await fetch(`/api/library/series/${series.id}/auto-search`, {
+			await searchProgress.startSearch(`/api/library/series/${series.id}/auto-search`, {
 				method: 'POST',
 				headers: { 'Content-Type': 'application/json' },
 				body: JSON.stringify({
@@ -815,20 +883,22 @@
 				})
 			});
 
-			const result = await response.json();
-			const itemResult = result.results?.[0];
+			if (searchProgress.results) {
+				const itemResult = searchProgress.results.results?.[0] as
+					| { found?: boolean; grabbed?: boolean; releaseName?: string; error?: string }
+					| undefined;
+				autoSearchSeasonResults.set(season.id, {
+					found: itemResult?.found ?? false,
+					grabbed: itemResult?.grabbed ?? false,
+					releaseName: itemResult?.releaseName,
+					error: itemResult?.error ?? searchProgress.results.error
+				});
 
-			autoSearchSeasonResults.set(season.id, {
-				found: itemResult?.found ?? false,
-				grabbed: itemResult?.grabbed ?? false,
-				releaseName: itemResult?.releaseName,
-				error: itemResult?.error
-			});
-
-			// Clear result after 5 seconds
-			setTimeout(() => {
-				autoSearchSeasonResults.delete(season.id);
-			}, 5000);
+				// Clear result after 5 seconds
+				setTimeout(() => {
+					autoSearchSeasonResults.delete(season.id);
+				}, 5000);
+			}
 		} catch (error) {
 			autoSearchSeasonResults.set(season.id, {
 				found: false,
@@ -837,28 +907,33 @@
 			});
 		} finally {
 			autoSearchingSeasons.delete(season.id);
+			searchProgress.reset();
 		}
 	}
 
 	async function handleSearchMissing() {
+		if (searchingMissing) return;
 		searchingMissing = true;
 		missingSearchProgress = null;
 		missingSearchResult = null;
 
 		try {
-			const response = await fetch(`/api/library/series/${series.id}/auto-search`, {
+			await searchProgress.startSearch(`/api/library/series/${series.id}/auto-search`, {
 				method: 'POST',
 				headers: { 'Content-Type': 'application/json' },
 				body: JSON.stringify({ type: 'missing' })
 			});
 
-			const result = await response.json();
-
-			missingSearchResult = result.summary ?? {
-				searched: result.results?.length ?? 0,
-				found: result.results?.filter((r: { found: boolean }) => r.found).length ?? 0,
-				grabbed: result.results?.filter((r: { grabbed: boolean }) => r.grabbed).length ?? 0
-			};
+			if (searchProgress.results) {
+				const results = searchProgress.results.results as
+					| Array<{ found?: boolean; grabbed?: boolean }>
+					| undefined;
+				missingSearchResult = searchProgress.results.summary ?? {
+					searched: results?.length ?? 0,
+					found: results?.filter((r) => r.found).length ?? 0,
+					grabbed: results?.filter((r) => r.grabbed).length ?? 0
+				};
+			}
 
 			// Clear result after 10 seconds
 			setTimeout(() => {
@@ -869,6 +944,7 @@
 		} finally {
 			searchingMissing = false;
 			missingSearchProgress = null;
+			searchProgress.reset();
 		}
 	}
 
@@ -882,7 +958,7 @@
 		}
 
 		try {
-			const response = await fetch(`/api/library/series/${series.id}/auto-search`, {
+			await searchProgress.startSearch(`/api/library/series/${series.id}/auto-search`, {
 				method: 'POST',
 				headers: { 'Content-Type': 'application/json' },
 				body: JSON.stringify({
@@ -891,16 +967,28 @@
 				})
 			});
 
-			const result = await response.json();
+			if (searchProgress.results) {
+				const results = searchProgress.results.results as
+					| Array<{
+							itemId?: string;
+							found?: boolean;
+							grabbed?: boolean;
+							releaseName?: string;
+							error?: string;
+					  }>
+					| undefined;
 
-			// Update results for each episode
-			for (const itemResult of result.results ?? []) {
-				autoSearchEpisodeResults.set(itemResult.itemId, {
-					found: itemResult.found,
-					grabbed: itemResult.grabbed,
-					releaseName: itemResult.releaseName,
-					error: itemResult.error
-				});
+				// Update results for each episode
+				for (const itemResult of results ?? []) {
+					if (itemResult.itemId) {
+						autoSearchEpisodeResults.set(itemResult.itemId, {
+							found: itemResult.found ?? false,
+							grabbed: itemResult.grabbed ?? false,
+							releaseName: itemResult.releaseName,
+							error: itemResult.error
+						});
+					}
+				}
 			}
 
 			// Clear selection after search
@@ -919,6 +1007,7 @@
 			for (const id of episodeIds) {
 				autoSearchingEpisodes.delete(id);
 			}
+			searchProgress.reset();
 		}
 	}
 

@@ -165,7 +165,7 @@ function base32ToHex(base32: string): string {
 
 	let hex = '';
 	for (let i = 0; i < bits.length - 3; i += 4) {
-		hex += parseInt(bits.substr(i, 4), 2).toString(16);
+		hex += parseInt(bits.slice(i, i + 4), 2).toString(16);
 	}
 
 	return hex.toLowerCase();

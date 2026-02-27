@@ -12,6 +12,11 @@ import { movies } from '$lib/server/db/schema.js';
 import { eq } from 'drizzle-orm';
 import { tmdb } from '$lib/server/tmdb.js';
 import { logger } from '$lib/logging';
+import {
+	startRefresh,
+	stopRefresh,
+	isMovieRefreshing
+} from '$lib/server/library/ActiveSearchTracker.js';
 
 export const POST: RequestHandler = async ({ params }) => {
 	const { id } = params;
@@ -22,6 +27,15 @@ export const POST: RequestHandler = async ({ params }) => {
 	if (!movieData) {
 		error(404, 'Movie not found');
 	}
+
+	// Check if a refresh is already running for this movie
+	if (isMovieRefreshing(id)) {
+		error(409, 'A refresh is already in progress for this movie');
+	}
+
+	// Track this refresh
+	const refreshId = `movie-refresh-${id}`;
+	startRefresh(refreshId, { movieId: id });
 
 	try {
 		// Fetch fresh data from TMDB
@@ -85,5 +99,7 @@ export const POST: RequestHandler = async ({ params }) => {
 		});
 
 		error(500, err instanceof Error ? err.message : 'Failed to refresh movie metadata');
+	} finally {
+		stopRefresh(refreshId);
 	}
 };

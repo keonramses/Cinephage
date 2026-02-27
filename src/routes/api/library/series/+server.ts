@@ -5,19 +5,20 @@ import { series, seasons, episodes, rootFolders } from '$lib/server/db/schema.js
 import { eq } from 'drizzle-orm';
 import { tmdb } from '$lib/server/tmdb.js';
 import { z } from 'zod';
-import { NamingService, type MediaNamingInfo } from '$lib/server/library/naming/NamingService.js';
-import { namingSettingsService } from '$lib/server/library/naming/NamingSettingsService.js';
 import {
+	fetchSeriesDetails,
+	fetchSeriesExternalIds,
 	validateRootFolder,
 	getEffectiveScoringProfileId,
 	getLanguageProfileId,
-	fetchSeriesDetails,
-	fetchSeriesExternalIds,
 	triggerSeriesSearch
 } from '$lib/server/library/LibraryAddService.js';
 import { fetchAndStoreSeriesAlternateTitles } from '$lib/server/services/AlternateTitleService.js';
 import { ValidationError } from '$lib/errors';
 import { logger } from '$lib/logging';
+import { requireAuth } from '$lib/server/auth/requireAuth.js';
+import { NamingService, type MediaNamingInfo } from '$lib/server/library/naming/NamingService.js';
+import { namingSettingsService } from '$lib/server/library/naming/NamingSettingsService.js';
 
 /**
  * Schema for adding a series to the library
@@ -68,7 +69,11 @@ function generateSeriesFolderName(title: string, year?: number, tvdbId?: number)
  * GET /api/library/series
  * List all series in the library
  */
-export const GET: RequestHandler = async () => {
+export const GET: RequestHandler = async (event) => {
+	// Require authentication
+	const authError = requireAuth(event);
+	if (authError) return authError;
+
 	try {
 		const allSeries = await db
 			.select({
@@ -130,7 +135,13 @@ export const GET: RequestHandler = async () => {
  * POST /api/library/series
  * Add a TV series to the library by TMDB ID
  */
-export const POST: RequestHandler = async ({ request }) => {
+export const POST: RequestHandler = async (event) => {
+	const { request } = event;
+
+	// Require authentication
+	const authError = requireAuth(event);
+	if (authError) return authError;
+
 	try {
 		const body = await request.json();
 		const result = addSeriesSchema.safeParse(body);

@@ -26,6 +26,7 @@ export interface ResolveParams {
 	season?: number;
 	episode?: number;
 	baseUrl: string;
+	apiKey?: string;
 }
 
 /** Cached stream data including subtitles */
@@ -240,7 +241,8 @@ type SourceValidationOutcome = SourceValidationResult | SourceValidationFailure;
 async function tryStreamSources(
 	sources: StreamSource[],
 	baseUrl: string,
-	cacheKey: string
+	cacheKey: string,
+	apiKey?: string
 ): Promise<{ response: Response; source: StreamSource } | null> {
 	if (sources.length === 0) {
 		return null;
@@ -257,7 +259,8 @@ async function tryStreamSources(
 				bestResult.rawUrl,
 				source.referer,
 				baseUrl,
-				source.subtitles
+				source.subtitles,
+				apiKey
 			);
 
 			return { success: true, response, source, rawUrl: bestResult.rawUrl };
@@ -325,7 +328,7 @@ async function tryStreamSources(
  * 6. Returns first working stream
  */
 export async function resolveStream(params: ResolveParams): Promise<Response> {
-	const { tmdbId, type, season, episode, baseUrl } = params;
+	const { tmdbId, type, season, episode, baseUrl, apiKey } = params;
 
 	// Dynamic import to avoid circular dependencies
 	const { extractStreams } = await import('./providers');
@@ -346,7 +349,8 @@ export async function resolveStream(params: ResolveParams): Promise<Response> {
 				cached.rawUrl,
 				cached.referer,
 				baseUrl,
-				cached.subtitles
+				cached.subtitles,
+				apiKey
 			);
 		} catch {
 			// Invalid cache entry, continue with extraction
@@ -406,7 +410,7 @@ export async function resolveStream(params: ResolveParams): Promise<Response> {
 	});
 
 	// Try matching language streams first
-	const matchingResult = await tryStreamSources(matching, baseUrl, cacheKey);
+	const matchingResult = await tryStreamSources(matching, baseUrl, cacheKey, apiKey);
 	if (matchingResult) {
 		logger.info('Using stream source', {
 			provider: matchingResult.source.provider,
@@ -428,7 +432,7 @@ export async function resolveStream(params: ResolveParams): Promise<Response> {
 			...streamLog
 		});
 
-		const fallbackResult = await tryStreamSources(fallback, baseUrl, cacheKey);
+		const fallbackResult = await tryStreamSources(fallback, baseUrl, cacheKey, apiKey);
 		if (fallbackResult) {
 			logger.info('Using fallback language stream', {
 				provider: fallbackResult.source.provider,

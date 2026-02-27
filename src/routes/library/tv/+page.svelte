@@ -17,6 +17,7 @@
 	import { viewPreferences } from '$lib/stores/view-preferences.svelte';
 	import { enhance } from '$app/forms';
 	import { Eye } from 'lucide-svelte';
+	import { createSearchProgress } from '$lib/stores/searchProgress.svelte';
 
 	let { data } = $props();
 
@@ -37,6 +38,8 @@
 	let pendingDeleteSeriesId = $state<string | null>(null);
 	let isSearchModalOpen = $state(false);
 	let selectedSeriesForSearch = $state<(typeof data.series)[number] | null>(null);
+	let autoSearchingIds = new SvelteSet<string>();
+	const searchProgress = createSearchProgress();
 
 	const selectedCount = $derived(selectedSeries.size);
 
@@ -209,22 +212,34 @@
 
 	async function handleAutoGrab(seriesId: string) {
 		const show = data.series.find((s) => s.id === seriesId);
-		if (!show) return;
+		if (!show || autoSearchingIds.has(seriesId)) return;
+
+		autoSearchingIds.add(seriesId);
 
 		try {
-			const response = await fetch(`/api/library/series/${seriesId}/auto-search`, {
-				method: 'POST'
+			await searchProgress.startSearch(`/api/library/series/${seriesId}/auto-search`, {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({ type: 'missing' })
 			});
-			const result = await response.json();
-			if (result.grabbed) {
-				toasts.success(`Auto-grabbed "${result.releaseName}" for "${show.title}"`);
-			} else if (result.found) {
-				toasts.info(`Found releases but none met criteria for "${show.title}"`);
-			} else {
-				toasts.info(`No releases found for "${show.title}"`);
+
+			if (searchProgress.results) {
+				const summary = searchProgress.results.summary;
+				if (summary && summary.grabbed > 0) {
+					toasts.success(`Auto-grabbed ${summary.grabbed} release(s) for "${show.title}"`);
+				} else if (summary && summary.found > 0) {
+					toasts.info(`Found ${summary.found} releases but none met criteria for "${show.title}"`);
+				} else {
+					toasts.info(`No releases found for "${show.title}"`);
+				}
 			}
-		} catch {
-			toasts.error(`Failed to auto-grab for "${show.title}"`);
+		} catch (error) {
+			toasts.error(
+				error instanceof Error ? error.message : `Failed to auto-grab for "${show.title}"`
+			);
+		} finally {
+			autoSearchingIds.delete(seriesId);
+			searchProgress.reset();
 		}
 	}
 
@@ -734,6 +749,7 @@
 							selectable={showCheckboxes}
 							qualityProfiles={data.qualityProfiles}
 							downloadingIds={downloadingSeriesIdSet}
+							{autoSearchingIds}
 							onSelectChange={handleItemSelectChange}
 							onMonitorToggle={handleMonitorToggle}
 							onDelete={handleDeleteSeries}

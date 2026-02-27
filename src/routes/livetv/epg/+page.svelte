@@ -14,17 +14,12 @@
 		EpgProgramWithProgress,
 		UpdateChannelRequest
 	} from '$lib/types/livetv';
-	import { onMount } from 'svelte';
 	import { createSSE } from '$lib/sse';
-	import { mobileSSEStatus } from '$lib/sse/mobileStatus.svelte';
 	import { resolvePath } from '$lib/utils/routing';
+	import type { EpgStreamEvents } from '$lib/types/sse/events/livetv-epg-events.js';
+	import type { NowNextEntry } from '$lib/types/sse/events/livetv-channel-events.js';
 
 	type TabId = 'status' | 'coverage' | 'guide';
-
-	interface NowNextEntry {
-		now: EpgProgramWithProgress | null;
-		next: EpgProgram | null;
-	}
 
 	// Tab state
 	let activeTab = $state<TabId>('status');
@@ -55,8 +50,7 @@
 	];
 
 	// SSE Connection - internally handles browser/SSR
-	// eslint-disable-next-line @typescript-eslint/no-explicit-any
-	const sse = createSSE<Record<string, any>>(resolvePath('/api/livetv/epg/stream'), {
+	const sse = createSSE<EpgStreamEvents>(resolvePath('/api/livetv/epg/stream'), {
 		'epg:initial': (payload) => {
 			epgStatus = payload.status;
 			epgSyncingAll = payload.status?.isSyncing ?? false;
@@ -110,16 +104,7 @@
 		}
 	});
 
-	const MOBILE_SSE_SOURCE = 'livetv-epg';
-
 	$effect(() => {
-		mobileSSEStatus.publish(MOBILE_SSE_SOURCE, sse.status);
-		return () => {
-			mobileSSEStatus.clear(MOBILE_SSE_SOURCE);
-		};
-	});
-
-	onMount(() => {
 		loadLineup();
 		fetchEpgData();
 
@@ -127,10 +112,6 @@
 		setTimeout(() => {
 			epgStatusLoading = false;
 		}, 5000);
-
-		return () => {
-			sse.close();
-		};
 	});
 
 	async function loadLineup() {

@@ -16,6 +16,11 @@ import { eq } from 'drizzle-orm';
 import { tmdb } from '$lib/server/tmdb.js';
 import { logger } from '$lib/logging';
 import { libraryMediaEvents } from '$lib/server/library/LibraryMediaEvents';
+import {
+	startRefresh,
+	stopRefresh,
+	isSeriesRefreshing
+} from '$lib/server/library/ActiveSearchTracker.js';
 
 interface ProgressEvent {
 	type: 'progress';
@@ -48,6 +53,15 @@ export const POST: RequestHandler = async ({ params, request }) => {
 		error(404, 'Series not found');
 	}
 
+	// Check if a refresh is already running for this series
+	if (isSeriesRefreshing(id)) {
+		error(409, 'A refresh is already in progress for this series');
+	}
+
+	// Track this refresh
+	const refreshId = `series-refresh-${id}`;
+	startRefresh(refreshId, { seriesId: id });
+
 	// Create a streaming response
 	const stream = new ReadableStream({
 		async start(controller) {
@@ -74,6 +88,7 @@ export const POST: RequestHandler = async ({ params, request }) => {
 			// Cleanup on abort
 			request.signal.addEventListener('abort', () => {
 				clearInterval(heartbeatInterval);
+				stopRefresh(refreshId);
 				try {
 					controller.close();
 				} catch {
@@ -289,6 +304,7 @@ export const POST: RequestHandler = async ({ params, request }) => {
 				});
 			} finally {
 				clearInterval(heartbeatInterval);
+				stopRefresh(refreshId);
 				try {
 					controller.close();
 				} catch {

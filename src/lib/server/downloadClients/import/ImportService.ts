@@ -13,6 +13,7 @@ import { stat } from 'fs/promises';
 import { join, basename, extname } from 'path';
 import { randomUUID } from 'node:crypto';
 import { db } from '$lib/server/db';
+import { eventBuffer } from '$lib/server/sse/EventBuffer.js';
 import {
 	downloadQueue,
 	downloadHistory,
@@ -917,9 +918,9 @@ export class ImportService extends EventEmitter {
 			category: 'imports'
 		});
 
-		// Emit event for SSE clients
-		this.emit('file:imported', {
-			mediaType: 'movie',
+		// Emit event for SSE clients and buffer for replay
+		const movieEvent = {
+			mediaType: 'movie' as const,
 			movieId: movie.id,
 			file: {
 				id: fileId,
@@ -930,11 +931,14 @@ export class ImportService extends EventEmitter {
 				releaseGroup: fileData.releaseGroup,
 				quality: fileData.quality,
 				mediaInfo,
-				edition: undefined
+				edition: undefined as string | undefined
 			},
 			wasUpgrade: isUpgrade,
-			replacedFileIds: deletedFileIds.length > 0 ? deletedFileIds : undefined
-		});
+			replacedFileIds: deletedFileIds.length > 0 ? deletedFileIds : undefined,
+			timestamp: Date.now()
+		};
+		this.emit('file:imported', movieEvent);
+		eventBuffer.add(movieEvent);
 		libraryMediaEvents.emitMovieUpdated(movie.id);
 
 		// Trigger subtitle search asynchronously (don't await to avoid blocking)
@@ -1337,9 +1341,9 @@ export class ImportService extends EventEmitter {
 			await db.update(episodes).set({ hasFile: true }).where(eq(episodes.id, episodeId));
 		}
 
-		// Emit event for SSE clients
-		this.emit('file:imported', {
-			mediaType: 'episode',
+		// Emit event for SSE clients and buffer for replay
+		const episodeEvent = {
+			mediaType: 'episode' as const,
 			seriesId: seriesData.id,
 			episodeIds,
 			seasonNumber: seasonNum,
@@ -1353,11 +1357,14 @@ export class ImportService extends EventEmitter {
 				releaseType: fileData.releaseType,
 				quality: fileData.quality,
 				mediaInfo,
-				languages: undefined
+				languages: undefined as string[] | undefined
 			},
 			wasUpgrade: isUpgrade,
-			replacedFileIds: filesToReplace.length > 0 ? filesToReplace : undefined
-		});
+			replacedFileIds: filesToReplace.length > 0 ? filesToReplace : undefined,
+			timestamp: Date.now()
+		};
+		this.emit('file:imported', episodeEvent);
+		eventBuffer.add(episodeEvent);
 		libraryMediaEvents.emitSeriesUpdated(seriesData.id);
 
 		// Delete old files if this was an upgrade

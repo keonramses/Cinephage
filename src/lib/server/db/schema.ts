@@ -11,11 +11,91 @@ import {
 import { relations } from 'drizzle-orm';
 import { randomUUID } from 'node:crypto';
 
-export const user = sqliteTable('user', {
-	id: text('id')
-		.primaryKey()
-		.$defaultFn(() => randomUUID())
+// ============================================================================
+// Better Auth Tables
+// ============================================================================
+// These tables are managed by us in schema-sync.ts for full control
+// Column names use camelCase as Better Auth expects
+
+export const user = sqliteTable(
+	'user',
+	{
+		id: text('id').primaryKey(),
+		name: text('name'),
+		email: text('email').notNull(),
+		emailVerified: integer('emailVerified').default(0),
+		image: text('image'),
+		username: text('username').unique(),
+		displayUsername: text('displayUsername'),
+		createdAt: text('createdAt').notNull(),
+		updatedAt: text('updatedAt').notNull()
+	},
+	(table) => [
+		uniqueIndex('idx_user_email').on(table.email),
+		uniqueIndex('idx_user_username').on(table.username)
+	]
+);
+
+export type UserRecord = typeof user.$inferSelect;
+export type NewUserRecord = typeof user.$inferInsert;
+
+export const session = sqliteTable(
+	'session',
+	{
+		id: text('id').primaryKey(),
+		userId: text('userId')
+			.notNull()
+			.references(() => user.id, { onDelete: 'cascade' }),
+		token: text('token').notNull().unique(),
+		expiresAt: text('expiresAt').notNull(),
+		ipAddress: text('ipAddress'),
+		userAgent: text('userAgent'),
+		createdAt: text('createdAt').notNull(),
+		updatedAt: text('updatedAt').notNull()
+	},
+	(table) => [index('idx_session_user').on(table.userId)]
+);
+
+export const account = sqliteTable(
+	'account',
+	{
+		id: text('id').primaryKey(),
+		userId: text('userId')
+			.notNull()
+			.references(() => user.id, { onDelete: 'cascade' }),
+		accountId: text('accountId').notNull(),
+		providerId: text('providerId').notNull(),
+		accessToken: text('accessToken'),
+		refreshToken: text('refreshToken'),
+		accessTokenExpiresAt: text('accessTokenExpiresAt'),
+		refreshTokenExpiresAt: text('refreshTokenExpiresAt'),
+		scope: text('scope'),
+		idToken: text('idToken'),
+		password: text('password'),
+		createdAt: text('createdAt').notNull(),
+		updatedAt: text('updatedAt').notNull()
+	},
+	(table) => [
+		index('idx_account_user').on(table.userId),
+		uniqueIndex('idx_account_provider').on(table.providerId, table.accountId)
+	]
+);
+
+export const verification = sqliteTable('verification', {
+	id: text('id').primaryKey(),
+	identifier: text('identifier').notNull(),
+	value: text('value').notNull(),
+	expiresAt: text('expiresAt').notNull(),
+	createdAt: text('createdAt'),
+	updatedAt: text('updatedAt')
 });
+
+export type SessionRecord = typeof session.$inferSelect;
+export type NewSessionRecord = typeof session.$inferInsert;
+export type AccountRecord = typeof account.$inferSelect;
+export type NewAccountRecord = typeof account.$inferInsert;
+export type VerificationRecord = typeof verification.$inferSelect;
+export type NewVerificationRecord = typeof verification.$inferInsert;
 
 export const settings = sqliteTable('settings', {
 	key: text('key').primaryKey(),
@@ -3347,5 +3427,34 @@ export const portalScanHistoryRelations = relations(portalScanHistory, ({ one })
 	portal: one(stalkerPortals, {
 		fields: [portalScanHistory.portalId],
 		references: [stalkerPortals.id]
+	})
+}));
+
+// ============================================================================
+// API Key Secrets Table
+// ============================================================================
+// Stores encrypted full API keys so users can view them anytime
+// Encryption uses AES-256-GCM with key derived from BETTER_AUTH_SECRET
+
+export const userApiKeySecrets = sqliteTable(
+	'userApiKeySecrets',
+	{
+		id: text('id').primaryKey(),
+		userId: text('userId')
+			.notNull()
+			.references(() => user.id, { onDelete: 'cascade' }),
+		encryptedKey: text('encryptedKey').notNull(),
+		createdAt: text('createdAt').notNull()
+	},
+	(table) => [index('idx_userApiKeySecrets_userId').on(table.userId)]
+);
+
+export type UserApiKeySecretRecord = typeof userApiKeySecrets.$inferSelect;
+export type NewUserApiKeySecretRecord = typeof userApiKeySecrets.$inferInsert;
+
+export const userApiKeySecretsRelations = relations(userApiKeySecrets, ({ one }) => ({
+	user: one(user, {
+		fields: [userApiKeySecrets.userId],
+		references: [user.id]
 	})
 }));

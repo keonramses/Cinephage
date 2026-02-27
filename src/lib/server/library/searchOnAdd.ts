@@ -35,6 +35,12 @@ interface SearchForMovieParams {
 	title: string;
 	year?: number;
 	scoringProfileId?: string;
+	/** Optional progress callback for real-time updates */
+	onProgress?: (
+		phase: string,
+		message: string,
+		progress?: { current: number; total: number }
+	) => void;
 }
 
 interface SearchForSeriesParams {
@@ -124,12 +130,17 @@ class SearchOnAddService {
 	 * - OR release is an upgrade over existing file
 	 */
 	async searchForMovie(params: SearchForMovieParams): Promise<GrabResult> {
-		const { movieId, tmdbId, imdbId, title, year, scoringProfileId } = params;
+		const { movieId, tmdbId, imdbId, title, year, scoringProfileId, onProgress } = params;
 
 		logger.info('[SearchOnAdd] Starting movie search', { movieId, tmdbId, title, year });
 
+		// Report initial progress
+		onProgress?.('initializing', `Starting search for "${title}"...`, { current: 0, total: 100 });
+
 		try {
 			// Check if movie already has a file
+			onProgress?.('checking', 'Checking existing files...', { current: 5, total: 100 });
+
 			const existingFile = await db.query.movieFiles.findFirst({
 				where: eq(movieFiles.movieId, movieId)
 			});
@@ -149,6 +160,8 @@ class SearchOnAddService {
 			};
 
 			// Perform enriched search to get scored releases (automatic - on add)
+			onProgress?.('searching', 'Querying indexers for releases...', { current: 10, total: 100 });
+
 			const searchResult = await indexerManager.searchEnhanced(criteria, {
 				searchSource: 'automatic',
 				enrichment: {
@@ -179,17 +192,25 @@ class SearchOnAddService {
 
 			if (searchResult.releases.length === 0) {
 				logger.info('[SearchOnAdd] No suitable releases found for movie', { movieId, title });
+				onProgress?.('complete', 'No suitable releases found', { current: 100, total: 100 });
 				return { success: false, error: 'No suitable releases found' };
 			}
+
+			onProgress?.('evaluating', `Found ${searchResult.releases.length} releases, evaluating...`, {
+				current: 50,
+				total: 100
+			});
 
 			const grabService = getReleaseGrabService();
 
 			// If movie has existing file, filter to only upgrades
 			if (hasExistingFile) {
 				logger.info('[SearchOnAdd] Movie has existing file, checking for upgrades', { movieId });
+				onProgress?.('evaluating', 'Checking for upgrade releases...', { current: 60, total: 100 });
 
 				// Find the first release that qualifies as an upgrade
-				for (const release of searchResult.releases) {
+				for (let i = 0; i < searchResult.releases.length; i++) {
+					const release = searchResult.releases[i];
 					const releaseInfo = {
 						title: release.title,
 						size: release.size,
@@ -205,6 +226,11 @@ class SearchOnAddService {
 						magnetUrl: release.magnetUrl
 					};
 
+					onProgress?.('evaluating', `Evaluating: ${release.title.substring(0, 50)}...`, {
+						current: 60 + (i / searchResult.releases.length) * 20,
+						total: 100
+					});
+
 					const decision = await releaseDecisionService.evaluateForMovie(movieId, releaseInfo);
 
 					if (decision.accepted && decision.isUpgrade) {
@@ -214,12 +240,29 @@ class SearchOnAddService {
 							scoreImprovement: decision.scoreImprovement
 						});
 
+						onProgress?.('grabbing', `Grabbing upgrade: ${release.title.substring(0, 50)}...`, {
+							current: 85,
+							total: 100
+						});
+
 						const grabResult = await grabService.grabRelease(release, {
 							mediaType: 'movie',
 							movieId,
 							isAutomatic: true,
 							isUpgrade: true
 						});
+
+						if (grabResult.success) {
+							onProgress?.('complete', `✓ Grabbed: ${grabResult.releaseName}`, {
+								current: 100,
+								total: 100
+							});
+						} else {
+							onProgress?.('error', `Failed to grab: ${grabResult.error || 'Unknown error'}`, {
+								current: 100,
+								total: 100
+							});
+						}
 
 						return {
 							success: grabResult.success,
@@ -231,17 +274,38 @@ class SearchOnAddService {
 				}
 
 				logger.info('[SearchOnAdd] No upgrades found for movie with existing file', { movieId });
+				onProgress?.('complete', 'No upgrades found - existing file quality is sufficient', {
+					current: 100,
+					total: 100
+				});
 				return { success: false, error: 'No upgrades found - existing file quality is sufficient' };
 			}
 
 			// No existing file - grab the top-ranked release
 			const bestRelease = searchResult.releases[0];
+			onProgress?.('grabbing', `Grabbing best release: ${bestRelease.title.substring(0, 50)}...`, {
+				current: 85,
+				total: 100
+			});
+
 			const grabResult = await grabService.grabRelease(bestRelease, {
 				mediaType: 'movie',
 				movieId,
 				isAutomatic: true,
 				isUpgrade: false
 			});
+
+			if (grabResult.success) {
+				onProgress?.('complete', `✓ Grabbed: ${grabResult.releaseName}`, {
+					current: 100,
+					total: 100
+				});
+			} else {
+				onProgress?.('error', `Failed to grab: ${grabResult.error || 'Unknown error'}`, {
+					current: 100,
+					total: 100
+				});
+			}
 
 			return {
 				success: grabResult.success,
@@ -252,6 +316,7 @@ class SearchOnAddService {
 		} catch (error) {
 			const message = error instanceof Error ? error.message : 'Unknown error';
 			logger.error('[SearchOnAdd] Movie search failed', { movieId, error: message });
+			onProgress?.('error', `Search failed: ${message}`, { current: 100, total: 100 });
 			return { success: false, error: message };
 		}
 	}
@@ -711,10 +776,15 @@ class SearchOnAddService {
 
 	/**
 	 * Search for all missing (monitored, aired, no file) episodes in a series.
-	 * Uses CascadingSearchStrategy for smart pack-first searching.
+	 * Uses MultiSeasonSearchStrategy for intelligent pack-first searching with multi-season support.
 	 */
-	async searchForMissingEpisodes(seriesId: string): Promise<MultiSearchResult> {
-		logger.info('[SearchOnAdd] Starting missing episodes search with cascading strategy', {
+	async searchForMissingEpisodes(
+		seriesId: string,
+		onProgress?: (
+			update: import('$lib/server/downloads/MultiSeasonSearchStrategy.js').SearchProgressUpdate
+		) => void
+	): Promise<MultiSearchResult> {
+		logger.info('[SearchOnAdd] Starting missing episodes search with multi-season strategy', {
 			seriesId
 		});
 
@@ -770,9 +840,12 @@ class SearchOnAddService {
 				monitored: ep.monitored
 			}));
 
-			// Use cascading search strategy
-			const cascadingStrategy = getCascadingSearchStrategy();
-			const cascadeResult = await cascadingStrategy.searchEpisodes({
+			// Use multi-season search strategy
+			const { getMultiSeasonSearchStrategy } =
+				await import('$lib/server/downloads/MultiSeasonSearchStrategy.js');
+			const multiSeasonStrategy = getMultiSeasonSearchStrategy();
+
+			const searchResult = await multiSeasonStrategy.searchWithMultiSeasonPriority({
 				seriesData: {
 					id: seriesData.id,
 					title: seriesData.title,
@@ -783,11 +856,12 @@ class SearchOnAddService {
 				},
 				episodes: episodesToSearch,
 				scoringProfileId: seriesData.scoringProfileId ?? undefined,
-				searchSource: 'interactive'
+				searchSource: 'interactive',
+				onProgress
 			});
 
-			// Convert cascade results to AutoSearchItemResult format
-			const results: AutoSearchItemResult[] = cascadeResult.results.map((r) => ({
+			// Convert results to AutoSearchItemResult format
+			const results: AutoSearchItemResult[] = searchResult.results.map((r) => ({
 				itemId: r.episodeId,
 				itemLabel: r.episodeLabel,
 				found: r.found,
@@ -797,25 +871,44 @@ class SearchOnAddService {
 				wasPackGrab: r.wasPackGrab
 			}));
 
+			// Combine season packs and multi-season packs
+			const allSeasonPacks = [
+				...searchResult.seasonPacks.map((pack) => ({
+					seasonNumber: pack.seasonNumber,
+					releaseName: pack.releaseName,
+					episodesCovered: pack.episodesCovered
+				})),
+				...searchResult.multiSeasonPacks.map((pack) => ({
+					seasonNumber: pack.coveredSeasons[0], // Use first season as representative
+					releaseName: pack.releaseName,
+					episodesCovered: pack.episodesCovered
+				}))
+			];
+
 			logger.info('[SearchOnAdd] Missing episodes search completed', {
 				seriesId,
-				searched: cascadeResult.summary.searched,
-				found: cascadeResult.summary.found,
-				grabbed: cascadeResult.summary.grabbed,
-				seasonPacksGrabbed: cascadeResult.summary.seasonPacksGrabbed,
-				individualEpisodesGrabbed: cascadeResult.summary.individualEpisodesGrabbed
+				searched: searchResult.summary.searched,
+				found: searchResult.summary.found,
+				grabbed: searchResult.summary.grabbed,
+				completeSeriesPacks: searchResult.summary.completeSeriesPacksGrabbed,
+				multiSeasonPacks: searchResult.summary.multiSeasonPacksGrabbed,
+				singleSeasonPacks: searchResult.summary.singleSeasonPacksGrabbed,
+				individualEpisodes: searchResult.summary.individualEpisodesGrabbed
 			});
 
 			return {
 				results,
 				summary: {
-					searched: cascadeResult.summary.searched,
-					found: cascadeResult.summary.found,
-					grabbed: cascadeResult.summary.grabbed,
-					seasonPacksGrabbed: cascadeResult.summary.seasonPacksGrabbed,
-					individualEpisodesGrabbed: cascadeResult.summary.individualEpisodesGrabbed
+					searched: searchResult.summary.searched,
+					found: searchResult.summary.found,
+					grabbed: searchResult.summary.grabbed,
+					seasonPacksGrabbed:
+						searchResult.summary.singleSeasonPacksGrabbed +
+						searchResult.summary.multiSeasonPacksGrabbed +
+						searchResult.summary.completeSeriesPacksGrabbed,
+					individualEpisodesGrabbed: searchResult.summary.individualEpisodesGrabbed
 				},
-				seasonPacks: cascadeResult.seasonPacks
+				seasonPacks: allSeasonPacks
 			};
 		} catch (error) {
 			const message = error instanceof Error ? error.message : 'Unknown error';
@@ -829,10 +922,15 @@ class SearchOnAddService {
 
 	/**
 	 * Search for a specific list of episodes (bulk selection).
-	 * Uses CascadingSearchStrategy for smart pack-first searching.
+	 * Uses MultiSeasonSearchStrategy for intelligent pack-first searching with multi-season support.
 	 */
-	async searchBulkEpisodes(episodeIds: string[]): Promise<MultiSearchResult> {
-		logger.info('[SearchOnAdd] Starting bulk episode search with cascading strategy', {
+	async searchBulkEpisodes(
+		episodeIds: string[],
+		onProgress?: (
+			update: import('$lib/server/downloads/MultiSeasonSearchStrategy.js').SearchProgressUpdate
+		) => void
+	): Promise<MultiSearchResult> {
+		logger.info('[SearchOnAdd] Starting bulk episode search with multi-season strategy', {
 			count: episodeIds.length
 		});
 
@@ -873,10 +971,14 @@ class SearchOnAddService {
 			let totalSearched = 0;
 			let totalFound = 0;
 			let totalGrabbed = 0;
-			let totalPacksGrabbed = 0;
+			let totalCompleteSeriesPacks = 0;
+			let totalMultiSeasonPacks = 0;
+			let totalSingleSeasonPacks = 0;
 			let totalIndividualGrabbed = 0;
 
-			const cascadingStrategy = getCascadingSearchStrategy();
+			const { getMultiSeasonSearchStrategy } =
+				await import('$lib/server/downloads/MultiSeasonSearchStrategy.js');
+			const multiSeasonStrategy = getMultiSeasonSearchStrategy();
 
 			// Process each series separately
 			for (const [seriesId, seriesEpisodes] of episodesBySeries) {
@@ -909,8 +1011,8 @@ class SearchOnAddService {
 					monitored: ep.monitored
 				}));
 
-				// Use cascading search for this series
-				const cascadeResult = await cascadingStrategy.searchEpisodes({
+				// Use multi-season search for this series
+				const searchResult = await multiSeasonStrategy.searchWithMultiSeasonPriority({
 					seriesData: {
 						id: seriesData.id,
 						title: seriesData.title,
@@ -921,11 +1023,12 @@ class SearchOnAddService {
 					},
 					episodes: episodesToSearch,
 					scoringProfileId: seriesData.scoringProfileId ?? undefined,
-					searchSource: 'interactive'
+					searchSource: 'interactive',
+					onProgress
 				});
 
 				// Convert and aggregate results
-				for (const r of cascadeResult.results) {
+				for (const r of searchResult.results) {
 					allResults.push({
 						itemId: r.episodeId,
 						itemLabel: r.episodeLabel,
@@ -937,19 +1040,36 @@ class SearchOnAddService {
 					});
 				}
 
-				allSeasonPacks.push(...cascadeResult.seasonPacks);
-				totalSearched += cascadeResult.summary.searched;
-				totalFound += cascadeResult.summary.found;
-				totalGrabbed += cascadeResult.summary.grabbed;
-				totalPacksGrabbed += cascadeResult.summary.seasonPacksGrabbed;
-				totalIndividualGrabbed += cascadeResult.summary.individualEpisodesGrabbed;
+				// Add season packs
+				allSeasonPacks.push(
+					...searchResult.seasonPacks.map((pack) => ({
+						seasonNumber: pack.seasonNumber,
+						releaseName: pack.releaseName,
+						episodesCovered: pack.episodesCovered
+					})),
+					...searchResult.multiSeasonPacks.map((pack) => ({
+						seasonNumber: pack.coveredSeasons[0],
+						releaseName: pack.releaseName,
+						episodesCovered: pack.episodesCovered
+					}))
+				);
+
+				totalSearched += searchResult.summary.searched;
+				totalFound += searchResult.summary.found;
+				totalGrabbed += searchResult.summary.grabbed;
+				totalCompleteSeriesPacks += searchResult.summary.completeSeriesPacksGrabbed;
+				totalMultiSeasonPacks += searchResult.summary.multiSeasonPacksGrabbed;
+				totalSingleSeasonPacks += searchResult.summary.singleSeasonPacksGrabbed;
+				totalIndividualGrabbed += searchResult.summary.individualEpisodesGrabbed;
 			}
 
 			logger.info('[SearchOnAdd] Bulk episode search completed', {
 				searched: totalSearched,
 				found: totalFound,
 				grabbed: totalGrabbed,
-				seasonPacksGrabbed: totalPacksGrabbed,
+				completeSeriesPacks: totalCompleteSeriesPacks,
+				multiSeasonPacks: totalMultiSeasonPacks,
+				singleSeasonPacks: totalSingleSeasonPacks,
 				individualEpisodesGrabbed: totalIndividualGrabbed
 			});
 
@@ -959,7 +1079,8 @@ class SearchOnAddService {
 					searched: totalSearched,
 					found: totalFound,
 					grabbed: totalGrabbed,
-					seasonPacksGrabbed: totalPacksGrabbed,
+					seasonPacksGrabbed:
+						totalCompleteSeriesPacks + totalMultiSeasonPacks + totalSingleSeasonPacks,
 					individualEpisodesGrabbed: totalIndividualGrabbed
 				},
 				seasonPacks: allSeasonPacks.length > 0 ? allSeasonPacks : undefined

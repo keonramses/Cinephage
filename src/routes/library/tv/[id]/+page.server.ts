@@ -14,6 +14,7 @@ import { eq, asc, inArray, and } from 'drizzle-orm';
 import { error } from '@sveltejs/kit';
 import type { PageServerLoad } from './$types';
 import { DEFAULT_PROFILES } from '$lib/server/scoring/profiles.js';
+import { isSeriesSearching } from '$lib/server/library/ActiveSearchTracker.js';
 
 const ACTIVE_DOWNLOAD_STATUSES = [
 	'queued',
@@ -150,6 +151,7 @@ export interface LibrarySeriesPageData {
 		freeSpaceBytes: number | null;
 	}>;
 	queueItems: QueueItemInfo[];
+	isSearching: boolean;
 }
 
 export const load: PageServerLoad = async ({ params }): Promise<LibrarySeriesPageData> => {
@@ -389,6 +391,9 @@ export const load: PageServerLoad = async ({ params }): Promise<LibrarySeriesPag
 		seasonNumber: q.seasonNumber
 	}));
 
+	// Check if a search is currently running for this series
+	const isSearching = isSeriesSearching(id);
+
 	return {
 		series: {
 			...seriesData,
@@ -398,6 +403,7 @@ export const load: PageServerLoad = async ({ params }): Promise<LibrarySeriesPag
 		seasons: seasonsWithEpisodes,
 		qualityProfiles: allQualityProfiles,
 		rootFolders: folders,
-		queueItems
+		queueItems,
+		isSearching
 	};
 };

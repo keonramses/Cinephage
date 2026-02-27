@@ -10,6 +10,7 @@ import { existsSync, mkdirSync, writeFileSync, unlinkSync, readFileSync } from '
 import { join, dirname, resolve, relative } from 'path';
 import { createChildLogger } from '$lib/logging';
 import { db } from '$lib/server/db';
+import { auth } from '$lib/server/auth/index.js';
 import {
 	movies,
 	series,
@@ -90,6 +91,8 @@ export interface StrmCreateOptions {
 	episode?: number;
 	/** Base URL for the application (e.g., http://localhost:5173) */
 	baseUrl: string;
+	/** Optional API key for authentication (if not provided, will be fetched from DB) */
+	apiKey?: string;
 }
 
 export interface StrmCreateResult {
@@ -120,6 +123,8 @@ export interface StrmDirectOptions {
 	seriesData: SeriesData;
 	seasonNumber: number;
 	episode: EpisodeData;
+	/** Optional API key for authentication (if not provided, will be fetched from DB) */
+	apiKey?: string;
 }
 
 /**
@@ -138,12 +143,72 @@ export class StrmService {
 	}
 
 	/**
+	 * Fetch the Media Streaming API Key from the database
+	 * This key is used for authenticating streaming requests from media servers
+	 * Queries directly from database to work in background contexts without user session
+	 */
+	private async getMediaStreamingApiKey(): Promise<string | null> {
+		try {
+			// Query the apiKey table directly using raw SQL
+			// This works in background contexts where auth.api.listApiKeys() fails
+			const result = db.$client
+				.prepare(
+					`SELECT id FROM apiKey WHERE metadata LIKE '%"type":"streaming"%' AND enabled = 1 LIMIT 1`
+				)
+				.get() as { id: string } | undefined;
+
+			if (!result) {
+				logger.debug('[StrmService] No Media Streaming API Key found in database');
+				return null;
+			}
+
+			// Fetch the full key from our encrypted storage
+			const { userApiKeySecrets } = await import('$lib/server/db/schema.js');
+			const { eq } = await import('drizzle-orm');
+			const keyRecord = await db.query.userApiKeySecrets.findFirst({
+				where: eq(userApiKeySecrets.id, result.id)
+			});
+
+			if (keyRecord) {
+				const { decryptApiKey } = await import('$lib/server/crypto/apiKeyCrypto.js');
+				return decryptApiKey(keyRecord.encryptedKey);
+			}
+
+			return null;
+		} catch (error) {
+			logger.error('[StrmService] Failed to fetch Media Streaming API Key', {
+				error: error instanceof Error ? error.message : 'Unknown error'
+			});
+			return null;
+		}
+	}
+
+	/**
 	 * Generate the content of a .strm file
 	 * Points to our resolve endpoint which handles stream extraction on-demand
+	 * Automatically includes Media Streaming API Key for authentication
 	 */
-	generateStrmContent(options: StrmCreateOptions): string {
-		const { mediaType, tmdbId, season, episode, baseUrl } = options;
+	async generateStrmContent(options: StrmCreateOptions): Promise<string> {
+		const { mediaType, tmdbId, season, episode, baseUrl, apiKey: providedApiKey } = options;
 
+		// For HTTP URLs, we need to include the API key
+		if (baseUrl.startsWith('http')) {
+			// Use provided API key, or fetch from database if not provided
+			const apiKey = providedApiKey ?? (await this.getMediaStreamingApiKey());
+			if (!apiKey) {
+				throw new Error(
+					'Media Streaming API Key not found. Generate API keys in Settings > System.'
+				);
+			}
+
+			if (mediaType === 'movie') {
+				return `${baseUrl}/api/streaming/resolve/movie/${tmdbId}?api_key=${apiKey}`;
+			} else {
+				return `${baseUrl}/api/streaming/resolve/tv/${tmdbId}/${season}/${episode}?api_key=${apiKey}`;
+			}
+		}
+
+		// For stream:// protocol (internal use), don't add API key
 		if (mediaType === 'movie') {
 			return `${baseUrl}/api/streaming/resolve/movie/${tmdbId}`;
 		} else {
@@ -262,7 +327,7 @@ export class StrmService {
 			}
 
 			// Generate and write .strm content
-			const content = this.generateStrmContent(options);
+			const content = await this.generateStrmContent(options);
 			writeFileSync(destinationPath, content, 'utf8');
 
 			logger.info('[StrmService] Created .strm file', {
@@ -282,10 +347,27 @@ export class StrmService {
 	 * Create a .strm file using pre-fetched data (no DB queries)
 	 * This is the optimized version for batch operations
 	 */
-	createStrmFileDirect(options: StrmDirectOptions): StrmCreateResult {
-		const { tmdbId, baseUrl, rootFolderPath, seriesData, seasonNumber, episode } = options;
+	async createStrmFileDirect(options: StrmDirectOptions): Promise<StrmCreateResult> {
+		const {
+			tmdbId,
+			baseUrl,
+			rootFolderPath,
+			seriesData,
+			seasonNumber,
+			episode,
+			apiKey: providedApiKey
+		} = options;
 
 		try {
+			// Use provided API key or fetch from database
+			const apiKey = providedApiKey ?? (await this.getMediaStreamingApiKey());
+			if (!apiKey) {
+				return {
+					success: false,
+					error: 'Media Streaming API Key not found. Generate API keys in Settings > System.'
+				};
+			}
+
 			const safeName = this.sanitizeFilename(seriesData.title);
 			const year = seriesData.year ?? 'Unknown';
 			const rawShowPath = seriesData.path || `${safeName} (${year})`;
@@ -310,8 +392,8 @@ export class StrmService {
 				mkdirSync(dir, { recursive: true });
 			}
 
-			// Generate and write .strm content
-			const content = `${baseUrl}/api/streaming/resolve/tv/${tmdbId}/${seasonNumber}/${episode.episodeNumber}`;
+			// Generate and write .strm content with API key
+			const content = `${baseUrl}/api/streaming/resolve/tv/${tmdbId}/${seasonNumber}/${episode.episodeNumber}?api_key=${encodeURIComponent(apiKey)}`;
 			writeFileSync(destinationPath, content, 'utf8');
 
 			return { success: true, filePath: destinationPath };
@@ -414,9 +496,13 @@ export class StrmService {
 	 * This is useful when the server's IP/port/domain changes.
 	 *
 	 * @param newBaseUrl - The new base URL to use in .strm files
+	 * @param options - Optional configuration including API key for authentication
 	 * @returns Summary of the update operation
 	 */
-	async bulkUpdateStrmUrls(newBaseUrl: string): Promise<{
+	async bulkUpdateStrmUrls(
+		newBaseUrl: string,
+		options?: { apiKey?: string }
+	): Promise<{
 		success: boolean;
 		totalFiles: number;
 		updatedFiles: number;
@@ -429,7 +515,10 @@ export class StrmService {
 		// Remove trailing slash from base URL
 		const baseUrl = newBaseUrl.replace(/\/$/, '');
 
-		logger.info('[StrmService] Starting bulk .strm URL update', { newBaseUrl: baseUrl });
+		logger.info('[StrmService] Starting bulk .strm URL update', {
+			newBaseUrl: baseUrl,
+			hasApiKey: !!options?.apiKey
+		});
 
 		try {
 			const movieStrmLike = sql`lower(${movieFiles.relativePath}) like '%.strm'`;
@@ -505,12 +594,13 @@ export class StrmService {
 					}
 
 					// Generate new content with the new base URL
-					const newContent = this.generateStrmContent({
+					const newContent = await this.generateStrmContent({
 						mediaType: parsed.mediaType,
 						tmdbId: parsed.tmdbId,
 						season: parsed.season,
 						episode: parsed.episode,
-						baseUrl
+						baseUrl,
+						apiKey: options?.apiKey
 					});
 
 					// Only write if content actually changed
@@ -711,7 +801,7 @@ export class StrmService {
 
 			// Process episodes in parallel batches using the direct method (no DB queries)
 			const results = await processInBatches(seasonEpisodes, async (ep) => {
-				const result = this.createStrmFileDirect({
+				const result = await this.createStrmFileDirect({
 					tmdbId,
 					baseUrl,
 					rootFolderPath: rootFolderPath!,
@@ -897,8 +987,24 @@ export class StrmService {
 		seasonNumber?: number;
 		episodeId?: string;
 		baseUrl: string;
+		apiKey?: string;
 	}): Promise<StrmCreateResult> {
-		const { mountId, fileIndex, movieId, seriesId, seasonNumber, episodeId, baseUrl } = options;
+		const {
+			mountId,
+			fileIndex,
+			movieId,
+			seriesId,
+			seasonNumber,
+			episodeId,
+			baseUrl,
+			apiKey: providedApiKey
+		} = options;
+
+		// Use provided API key or fetch from database
+		const apiKey = providedApiKey ?? (await this.getMediaStreamingApiKey());
+		if (!apiKey) {
+			throw new Error('Media Streaming API Key not found. Generate API keys in Settings > System.');
+		}
 
 		try {
 			let destinationPath: string;
@@ -981,8 +1087,8 @@ export class StrmService {
 				logger.debug('[StrmService] Created directory', { dir });
 			}
 
-			// Generate NZB streaming URL
-			const content = `${baseUrl}/api/streaming/usenet/${mountId}/${fileIndex}`;
+			// Generate NZB streaming URL with API key
+			const content = `${baseUrl}/api/streaming/usenet/${mountId}/${fileIndex}?api_key=${encodeURIComponent(apiKey)}`;
 			writeFileSync(destinationPath, content, 'utf8');
 
 			logger.info('[StrmService] Created NZB .strm file', {

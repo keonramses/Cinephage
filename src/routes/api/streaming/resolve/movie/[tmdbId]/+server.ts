@@ -34,6 +34,9 @@ export const GET: RequestHandler = async ({ params, request }) => {
 
 	const tmdbIdNum = parseInt(tmdbId, 10);
 
+	// Extract API key from query parameter or header
+	const apiKey = url.searchParams.get('api_key') || request.headers.get('x-api-key') || undefined;
+
 	// Prefetch requests should not consume worker slots
 	let worker: StreamWorker | undefined;
 	if (!isPrefetch) {
@@ -68,7 +71,8 @@ export const GET: RequestHandler = async ({ params, request }) => {
 		const response = await resolveStream({
 			tmdbId: tmdbIdNum,
 			type: 'movie',
-			baseUrl
+			baseUrl,
+			apiKey
 		});
 
 		// Track success/failure in worker

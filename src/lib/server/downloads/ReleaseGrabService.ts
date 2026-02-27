@@ -20,7 +20,8 @@ import { checkNzbAvailability } from './nzb/NzbAvailabilityChecker.js';
 import { strmService, StrmService, getStreamingBaseUrl } from '$lib/server/streaming/index.js';
 import { getNzbMountManager } from '$lib/server/streaming/nzb/index.js';
 import { isMediaFile } from '$lib/server/streaming/usenet/types';
-import { fileExists } from '$lib/server/downloadClients/import/index.js';
+import { fileExists, importService } from '$lib/server/downloadClients/import/index.js';
+import { eventBuffer } from '$lib/server/sse/EventBuffer.js';
 import { mediaInfoService } from '$lib/server/library/media-info.js';
 import { monitoringScheduler } from '$lib/server/monitoring/MonitoringScheduler.js';
 import { searchSubtitlesForNewMedia } from '$lib/server/subtitles/services/SubtitleImportService.js';
@@ -1080,6 +1081,26 @@ class ReleaseGrabService {
 		});
 		libraryMediaEvents.emitMovieUpdated(movieId);
 
+		// Emit event for SSE clients to update UI in real-time
+		const movieEvent = {
+			mediaType: 'movie' as const,
+			movieId,
+			file: {
+				id: fileId,
+				relativePath,
+				size: fileSize,
+				dateAdded: new Date().toISOString(),
+				sceneName: release.title,
+				releaseGroup: parsedRelease.releaseGroup ?? 'Streaming',
+				quality,
+				mediaInfo
+			},
+			wasUpgrade: isUpgrade ?? false,
+			timestamp: Date.now()
+		};
+		importService.emit('file:imported', movieEvent);
+		eventBuffer.add(movieEvent);
+
 		void this.triggerSubtitleSearch('movie', movieId);
 
 		return {
@@ -1195,6 +1216,28 @@ class ReleaseGrabService {
 			relativePath
 		});
 		libraryMediaEvents.emitSeriesUpdated(seriesId);
+
+		// Emit event for SSE clients to update UI in real-time
+		const episodeEvent = {
+			mediaType: 'episode' as const,
+			seriesId,
+			episodeIds: [episodeRow.id],
+			seasonNumber: season,
+			file: {
+				id: fileId,
+				relativePath,
+				size: fileSize,
+				dateAdded: new Date().toISOString(),
+				sceneName: release.title,
+				releaseGroup: parsedRelease.releaseGroup ?? 'Streaming',
+				quality,
+				mediaInfo
+			},
+			wasUpgrade: isUpgrade ?? false,
+			timestamp: Date.now()
+		};
+		importService.emit('file:imported', episodeEvent);
+		eventBuffer.add(episodeEvent);
 
 		void this.triggerSubtitleSearch('episode', episodeRow.id);
 

@@ -1,6 +1,7 @@
 import { createSSEStream } from '$lib/server/sse';
 import { downloadMonitor } from '$lib/server/downloadClients/monitoring';
 import { importService } from '$lib/server/downloadClients/import';
+import { eventBuffer } from '$lib/server/sse/EventBuffer.js';
 import { db } from '$lib/server/db';
 import {
 	series,
@@ -14,6 +15,7 @@ import {
 import { eq, asc, inArray, and } from 'drizzle-orm';
 import type { RequestHandler } from '@sveltejs/kit';
 import { libraryMediaEvents } from '$lib/server/library/LibraryMediaEvents';
+import { logger } from '$lib/logging';
 
 const ACTIVE_DOWNLOAD_STATUSES = [
 	'queued',
@@ -326,6 +328,7 @@ async function getQueueItems(seriesId: string): Promise<QueueItem[]> {
  *
  * Events emitted:
  * - media:initial - Full series state on connect
+ * - queue:added - New download added for this series
  * - queue:updated - Queue item progress/status change
  * - file:added - New episode file imported
  * - file:removed - Episode file deleted
@@ -339,24 +342,125 @@ export const GET: RequestHandler = async ({ params }) => {
 	}
 
 	return createSSEStream((send) => {
-		// Send initial state
-		const sendInitialState = async () => {
+		// Concurrency control for sendInitialState to prevent race conditions
+		// where multiple calls complete out of order and overwrite with stale data
+		let isFetchingInitialState = false;
+		let pendingVersion = 0;
+		let lastSentVersion = 0;
+		let initialStateFetchTime = 0;
+
+		// Send initial state with version tracking
+		const sendInitialState = async (version: number = Date.now()) => {
+			// If already fetching, just mark that we need another refresh with this version
+			if (isFetchingInitialState) {
+				pendingVersion = Math.max(pendingVersion, version);
+				logger.debug('[SeriesStream] Queuing refresh request', {
+					seriesId,
+					version,
+					pendingVersion
+				});
+				return;
+			}
+
+			isFetchingInitialState = true;
 			try {
+				logger.info('[SeriesStream] Fetching initial state', { seriesId, version });
 				const [data, queueItems] = await Promise.all([
 					getSeriesData(seriesId),
 					getQueueItems(seriesId)
 				]);
 
-				if (data) {
+				// Only send if this is still the latest request (not superseded by another)
+				if (version >= lastSentVersion && data) {
+					logger.info('[SeriesStream] Sending media:initial', {
+						seriesId,
+						version,
+						episodeCount: data.seasons?.reduce((sum, s) => sum + (s.episodeFileCount || 0), 0)
+					});
 					send('media:initial', { ...data, queueItems });
+					lastSentVersion = version;
+				} else {
+					logger.debug('[SeriesStream] Skipping stale media:initial', {
+						seriesId,
+						version,
+						lastSentVersion
+					});
 				}
-			} catch {
-				// Error fetching initial state
+			} catch (error) {
+				logger.error('[SeriesStream] Failed to fetch initial state', {
+					seriesId,
+					version,
+					error: error instanceof Error ? error.message : String(error)
+				});
+			} finally {
+				isFetchingInitialState = false;
+
+				// If another request was queued during our execution, process it now
+				if (pendingVersion > version) {
+					logger.info('[SeriesStream] Processing queued refresh', { seriesId, pendingVersion });
+					const nextVersion = pendingVersion;
+					pendingVersion = 0;
+					void sendInitialState(nextVersion);
+				}
 			}
 		};
 
-		// Send initial state immediately
-		sendInitialState();
+		// Send initial state and replay buffered events after connection is established
+		void sendInitialState().then(() => {
+			initialStateFetchTime = Date.now();
+
+			// Replay recent buffered events (handles race condition where events fired before connection)
+			// Only replay events that happened BEFORE we fetched initial state
+			const recentEvents = eventBuffer.getRecentSeriesEvents(seriesId);
+			logger.info('[SeriesStream] Replaying buffered events', {
+				seriesId,
+				count: recentEvents.length,
+				bufferSize: recentEvents.length
+			});
+			for (const event of recentEvents) {
+				// Skip events that happened after we started (they'll come through the live listener)
+				if (event.timestamp > initialStateFetchTime) {
+					logger.debug('[SeriesStream] Skipping future event in replay', {
+						seriesId,
+						episodeIds: event.episodeIds,
+						timestamp: event.timestamp,
+						fetchTime: initialStateFetchTime
+					});
+					continue;
+				}
+				logger.info('[SeriesStream] Replaying buffered event', {
+					seriesId,
+					seasonNumber: event.seasonNumber,
+					episodeIds: event.episodeIds
+				});
+				send('file:added', {
+					file: event.file,
+					episodeIds: event.episodeIds,
+					seasonNumber: event.seasonNumber,
+					wasUpgrade: event.wasUpgrade,
+					replacedFileIds: event.replacedFileIds
+				});
+			}
+		});
+
+		// Handle new queue items added for this series
+		const onQueueAdded = (item: unknown) => {
+			const typedItem = item as QueueItem & { seriesId?: string };
+			if (typedItem.seriesId === seriesId) {
+				logger.debug('[SeriesStream] Queue item added for series', {
+					seriesId,
+					queueItemId: typedItem.id
+				});
+				send('queue:added', {
+					id: typedItem.id,
+					title: typedItem.title,
+					status: typedItem.status,
+					progress: typedItem.progress ? parseFloat(typedItem.progress) : null,
+					episodeIds: typedItem.episodeIds,
+					seasonNumber: typedItem.seasonNumber
+				});
+			}
+		};
 
 		// Handle queue updates for this series
 		const onQueueUpdated = (item: unknown) => {
@@ -377,6 +481,13 @@ export const GET: RequestHandler = async ({ params }) => {
 		const onFileImported = (data: unknown) => {
 			const typedData = data as FileImportedEvent;
 			if (typedData.mediaType === 'episode' && typedData.seriesId === seriesId) {
+				logger.info('[SeriesStream] File imported event received, sending to client', {
+					seriesId,
+					fileId: typedData.file.id,
+					seasonNumber: typedData.seasonNumber,
+					episodeIds: typedData.episodeIds,
+					episodeCount: typedData.episodeIds?.length
+				});
 				send('file:added', {
 					file: typedData.file,
 					episodeIds: typedData.episodeIds,
@@ -388,6 +499,10 @@ export const GET: RequestHandler = async ({ params }) => {
 				// If files were replaced, send deletion events
 				if (typedData.replacedFileIds) {
 					for (const replacedId of typedData.replacedFileIds) {
+						logger.info('[SeriesStream] Sending replaced file removal event', {
+							seriesId,
+							replacedFileId: replacedId
+						});
 						send('file:removed', { fileId: replacedId });
 					}
 				}
@@ -408,22 +523,43 @@ export const GET: RequestHandler = async ({ params }) => {
 		// Handle metadata/subtitle/settings updates for this series
 		const onSeriesUpdated = (event: { seriesId: string }) => {
 			if (event.seriesId === seriesId) {
-				sendInitialState();
+				logger.info('[SeriesStream] Series update triggered, refreshing state', { seriesId });
+				// Pass a new version to ensure this refresh takes precedence over any in-flight initial load
+				void sendInitialState(Date.now());
+			}
+		};
+
+		// Handle search status updates
+		const onSeriesSearchStarted = (event: { seriesId: string }) => {
+			if (event.seriesId === seriesId) {
+				send('search:started', { seriesId });
+			}
+		};
+
+		const onSeriesSearchCompleted = (event: { seriesId: string }) => {
+			if (event.seriesId === seriesId) {
+				send('search:completed', { seriesId });
 			}
 		};
 
 		// Register handlers
+		downloadMonitor.on('queue:added', onQueueAdded);
 		downloadMonitor.on('queue:updated', onQueueUpdated);
 		importService.on('file:imported', onFileImported);
 		importService.on('file:deleted', onFileDeleted);
 		libraryMediaEvents.onSeriesUpdated(onSeriesUpdated);
+		libraryMediaEvents.onSeriesSearchStarted(onSeriesSearchStarted);
+		libraryMediaEvents.onSeriesSearchCompleted(onSeriesSearchCompleted);
 
 		// Return cleanup function
 		return () => {
+			downloadMonitor.off('queue:added', onQueueAdded);
 			downloadMonitor.off('queue:updated', onQueueUpdated);
 			importService.off('file:imported', onFileImported);
 			importService.off('file:deleted', onFileDeleted);
 			libraryMediaEvents.offSeriesUpdated(onSeriesUpdated);
+			libraryMediaEvents.offSeriesSearchStarted(onSeriesSearchStarted);
+			libraryMediaEvents.offSeriesSearchCompleted(onSeriesSearchCompleted);
 		};
 	});
 };

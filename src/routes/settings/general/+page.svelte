@@ -14,6 +14,7 @@
 		RootFolderFormData,
 		PathValidationResult
 	} from '$lib/types/downloadClient';
+	import { createSSE } from '$lib/sse';
 
 	import { RootFolderModal, RootFolderList } from '$lib/components/rootFolders';
 
@@ -37,15 +38,34 @@
 	let scanProgress = $state<ScanProgress | null>(null);
 	let scanError = $state<string | null>(null);
 	let scanSuccess = $state<{ message: string; unmatchedCount: number } | null>(null);
-	let eventSource = $state<EventSource | null>(null);
 
-	// Cleanup SSE on unmount
-	$effect(() => {
-		return () => {
-			if (eventSource) {
-				eventSource.close();
-			}
-		};
+	// SSE Connection for library scan progress
+	const sse = createSSE<{
+		progress: ScanProgress;
+		scanComplete: { results?: Array<{ unmatchedFiles?: number }> };
+		scanError: { error?: { message?: string } };
+	}>('/api/library/scan/status', {
+		progress: (data) => {
+			scanProgress = data;
+		},
+		scanComplete: (data) => {
+			const totalUnmatched =
+				data.results?.reduce(
+					(sum: number, r: { unmatchedFiles?: number }) => sum + (r.unmatchedFiles ?? 0),
+					0
+				) ?? 0;
+			scanSuccess = {
+				message: `Scan complete: ${data.results?.length ?? 0} folders scanned`,
+				unmatchedCount: totalUnmatched
+			};
+			scanning = false;
+			scanProgress = null;
+		},
+		scanError: (data) => {
+			scanError = data.error?.message ?? 'Scan failed';
+			scanning = false;
+			scanProgress = null;
+		}
 	});
 
 	async function triggerLibraryScan(rootFolderId?: string) {
@@ -53,49 +73,6 @@
 		scanError = null;
 		scanSuccess = null;
 		scanProgress = null;
-
-		// Connect to SSE for progress updates
-		eventSource = new EventSource('/api/library/scan/status');
-
-		eventSource.addEventListener('progress', (e) => {
-			scanProgress = JSON.parse(e.data);
-		});
-
-		eventSource.addEventListener('scanComplete', (e) => {
-			const result = JSON.parse(e.data);
-			const totalUnmatched =
-				result.results?.reduce(
-					(sum: number, r: { unmatchedFiles?: number }) => sum + (r.unmatchedFiles ?? 0),
-					0
-				) ?? 0;
-			scanSuccess = {
-				message: `Scan complete: ${result.results?.length ?? 0} folders scanned`,
-				unmatchedCount: totalUnmatched
-			};
-			scanning = false;
-			scanProgress = null;
-			eventSource?.close();
-			eventSource = null;
-		});
-
-		eventSource.addEventListener('scanError', (e) => {
-			const result = JSON.parse(e.data);
-			scanError = result.error?.message ?? 'Scan failed';
-			scanning = false;
-			scanProgress = null;
-			eventSource?.close();
-			eventSource = null;
-		});
-
-		eventSource.onerror = () => {
-			// SSE connection error - scan may have completed or server restarted
-			if (scanning) {
-				scanning = false;
-				scanProgress = null;
-			}
-			eventSource?.close();
-			eventSource = null;
-		};
 
 		// Trigger the scan
 		try {
@@ -114,8 +91,6 @@
 			scanError = error instanceof Error ? error.message : 'Failed to start scan';
 			scanning = false;
 			scanProgress = null;
-			eventSource?.close();
-			eventSource = null;
 		}
 	}
 

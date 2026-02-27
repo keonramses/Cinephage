@@ -1177,11 +1177,11 @@ export class TemplateEngine {
 				if (Array.isArray(args)) {
 					const start = parseInt(String(args[0]), 10) || 0;
 					const length = args.length > 1 ? parseInt(String(args[1]), 10) : undefined;
-					return length !== undefined ? value.substr(start, length) : value.substring(start);
+					return length !== undefined ? value.slice(start, start + length) : value.slice(start);
 				}
 				if (typeof args === 'string') {
 					const start = parseInt(args, 10) || 0;
-					return value.substring(start);
+					return value.slice(start);
 				}
 				return value;
 			}

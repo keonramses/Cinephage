@@ -12,6 +12,10 @@
 		Wifi,
 		WifiOff
 	} from 'lucide-svelte';
+	import type { PageData } from './$types';
+
+	// Receive data from server load function (includes streaming API key)
+	let { data }: { data: PageData } = $props();
 	import {
 		ChannelLineupTable,
 		ChannelEditModal,
@@ -31,15 +35,13 @@
 	} from '$lib/types/livetv';
 	import { onMount } from 'svelte';
 	import { createSSE } from '$lib/sse';
-	import { mobileSSEStatus } from '$lib/sse/mobileStatus.svelte';
 	import { resolvePath } from '$lib/utils/routing';
 	import { copyToClipboard as copyTextToClipboard } from '$lib/utils/clipboard';
 	import { toasts } from '$lib/stores/toast.svelte';
-
-	interface NowNextEntry {
-		now: EpgProgramWithProgress | null;
-		next: EpgProgram | null;
-	}
+	import type {
+		ChannelStreamEvents,
+		NowNextEntry
+	} from '$lib/types/sse/events/livetv-channel-events.js';
 
 	// Data state
 	let lineup = $state<ChannelLineupItemWithDetails[]>([]);
@@ -104,8 +106,7 @@
 	let channelSearch = $state('');
 
 	// SSE Connection - internally handles browser/SSR
-	// eslint-disable-next-line @typescript-eslint/no-explicit-any
-	const sse = createSSE<Record<string, any>>(resolvePath('/api/livetv/channels/stream'), {
+	const sse = createSSE<ChannelStreamEvents>(resolvePath('/api/livetv/channels/stream'), {
 		'livetv:initial': (payload) => {
 			lineup = payload.lineup || [];
 			categories = payload.categories || [];
@@ -138,15 +139,6 @@
 		'channels:syncFailed': (payload) => {
 			console.error('Channel sync failed:', payload.accountId, payload.error);
 		}
-	});
-
-	const MOBILE_SSE_SOURCE = 'livetv-channels';
-
-	$effect(() => {
-		mobileSSEStatus.publish(MOBILE_SSE_SOURCE, sse.status);
-		return () => {
-			mobileSSEStatus.clear(MOBILE_SSE_SOURCE);
-		};
 	});
 
 	const normalizedSearch = $derived(channelSearch.trim().toLowerCase());
@@ -213,10 +205,6 @@
 	onMount(() => {
 		loadData();
 		fetchEpgData();
-
-		return () => {
-			sse.close();
-		};
 	});
 
 	function updateEpgData(epgNowNext: Record<string, NowNextEntry>) {
@@ -669,11 +657,21 @@
 	}
 
 	function getM3uUrl(): string {
-		return `${getBaseUrl()}/api/livetv/playlist.m3u`;
+		const baseUrl = `${getBaseUrl()}/api/livetv/playlist.m3u`;
+		// Include streaming API key if available for authentication
+		if (data.streamingApiKey) {
+			return `${baseUrl}?api_key=${encodeURIComponent(data.streamingApiKey)}`;
+		}
+		return baseUrl;
 	}
 
 	function getEpgUrl(): string {
-		return `${getBaseUrl()}/api/livetv/epg.xml`;
+		const baseUrl = `${getBaseUrl()}/api/livetv/epg.xml`;
+		// Include streaming API key if available for authentication
+		if (data.streamingApiKey) {
+			return `${baseUrl}?api_key=${encodeURIComponent(data.streamingApiKey)}`;
+		}
+		return baseUrl;
 	}
 
 	async function copyToClipboard(type: 'm3u' | 'epg') {

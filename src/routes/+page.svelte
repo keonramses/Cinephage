@@ -26,7 +26,7 @@
 	import { resolvePath } from '$lib/utils/routing';
 	import type { UnifiedActivity } from '$lib/types/activity';
 	import { createSSE } from '$lib/sse';
-	import { mobileSSEStatus } from '$lib/sse/mobileStatus.svelte';
+	import { browser } from '$app/environment';
 
 	let { data } = $props();
 
@@ -49,7 +49,7 @@
 		missingEpisodesState = data.missingEpisodes;
 	});
 
-	// SSE Connection - internally handles browser/SSR
+	// SSE Connection - automatically managed
 	// eslint-disable-next-line @typescript-eslint/no-explicit-any
 	const sse = createSSE<Record<string, any>>(resolvePath('/api/dashboard/stream'), {
 		'dashboard:initial': (payload) => {
@@ -101,15 +101,6 @@
 					: a
 			);
 		}
-	});
-
-	const MOBILE_SSE_SOURCE = 'dashboard';
-
-	$effect(() => {
-		mobileSSEStatus.publish(MOBILE_SSE_SOURCE, sse.status);
-		return () => {
-			mobileSSEStatus.clear(MOBILE_SSE_SOURCE);
-		};
 	});
 
 	// Format relative time
@@ -185,14 +176,14 @@
 		</div>
 		<div class="flex items-center gap-2">
 			<div class="hidden items-center gap-2 lg:flex">
-				{#if sse.isConnected}
+				{#if sse?.isConnected}
 					<span class="badge gap-1 badge-success">
 						<Wifi class="h-3 w-3" />
 						Live
 					</span>
-				{:else if sse.status === 'connecting' || sse.status === 'error'}
-					<span class="badge gap-1 {sse.status === 'error' ? 'badge-error' : 'badge-warning'}">
-						{sse.status === 'error' ? 'Reconnecting...' : 'Connecting...'}
+				{:else if sse?.status === 'connecting' || sse?.status === 'error'}
+					<span class="badge gap-1 {sse?.status === 'error' ? 'badge-error' : 'badge-warning'}">
+						{sse?.status === 'error' ? 'Reconnecting...' : 'Connecting...'}
 					</span>
 				{/if}
 			</div>

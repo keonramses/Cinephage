@@ -4,7 +4,6 @@
 	import { goto, invalidateAll } from '$app/navigation';
 	import { resolvePath } from '$lib/utils/routing';
 	import { createSSE } from '$lib/sse';
-	import { mobileSSEStatus } from '$lib/sse/mobileStatus.svelte';
 	import ActivityTable from '$lib/components/activity/ActivityTable.svelte';
 	import ActivityDetailModal from '$lib/components/activity/ActivityDetailModal.svelte';
 	import ActivityFilters from '$lib/components/activity/ActivityFilters.svelte';
@@ -15,6 +14,7 @@
 		ActivityFilters as FiltersType,
 		ActivityStatus
 	} from '$lib/types/activity';
+	import type { ActivityStreamEvents } from '$lib/types/sse/events/activity-events.js';
 	import { Activity, Loader2, Wifi, WifiOff } from 'lucide-svelte';
 
 	let { data } = $props();
@@ -220,15 +220,14 @@
 	});
 
 	// SSE Connection - internally handles browser/SSR
-	// eslint-disable-next-line @typescript-eslint/no-explicit-any
-	const sse = createSSE<Record<string, any>>(resolvePath('/api/activity/stream'), {
-		'activity:new': (newActivity: Partial<UnifiedActivity>) => {
+	const sse = createSSE<ActivityStreamEvents>(resolvePath('/api/activity/stream'), {
+		'activity:new': (newActivity) => {
 			upsertActivity(newActivity);
 		},
-		'activity:updated': (updated: Partial<UnifiedActivity>) => {
+		'activity:updated': (updated) => {
 			upsertActivity(updated);
 		},
-		'activity:progress': (data: { id: string; progress: number; status?: string }) => {
+		'activity:progress': (data) => {
 			let removed = false;
 			activities = activities.flatMap((a) => {
 				if (a.id !== data.id) return [a];
@@ -249,8 +248,6 @@
 			}
 		}
 	});
-
-	const MOBILE_SSE_SOURCE = 'activity';
 
 	async function refreshActivityData(): Promise<void> {
 		if (refreshInFlight) return;
@@ -288,13 +285,6 @@
 			window.removeEventListener('focus', handleFocus);
 			document.removeEventListener('visibilitychange', handleVisibilityChange);
 			window.removeEventListener('pageshow', handlePageShow);
-		};
-	});
-
-	$effect(() => {
-		mobileSSEStatus.publish(MOBILE_SSE_SOURCE, sse.status);
-		return () => {
-			mobileSSEStatus.clear(MOBILE_SSE_SOURCE);
 		};
 	});
 

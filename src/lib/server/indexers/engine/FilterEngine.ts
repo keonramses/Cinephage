@@ -844,7 +844,7 @@ const FILTERS: Record<string, FilterFunction> = {
 		if (!Array.isArray(args) || args.length < 1) return data;
 		const start = parseInt(String(args[0]), 10);
 		const length = args[1] !== undefined ? parseInt(String(args[1]), 10) : undefined;
-		return length !== undefined ? data.substr(start, length) : data.substring(start);
+		return length !== undefined ? data.slice(start, start + length) : data.slice(start);
 	},
 
 	// Contains check - returns data if contains substring, empty otherwise

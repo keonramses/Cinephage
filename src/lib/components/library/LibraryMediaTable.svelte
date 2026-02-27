@@ -42,6 +42,7 @@
 		onAutoGrab?: (id: string) => void;
 		onManualGrab?: (id: string) => void;
 		downloadingIds?: Set<string>;
+		autoSearchingIds?: Set<string>;
 	}
 
 	let {
@@ -58,7 +59,8 @@
 		onDelete,
 		onAutoGrab,
 		onManualGrab,
-		downloadingIds = new Set()
+		downloadingIds = new Set(),
+		autoSearchingIds = new Set()
 	}: Props = $props();
 
 	// Track loading states for actions
@@ -265,7 +267,7 @@
 			{@const isItemMovie = isMovie(item)}
 			{@const size = getItemSize(item)}
 			{@const qualityBadges = getQualityBadges(item)}
-			{@const isLoading = actionLoadingRows.has(item.id)}
+			{@const isLoading = actionLoadingRows.has(item.id) || autoSearchingIds.has(item.id)}
 			<!-- svelte-ignore a11y_click_events_have_key_events -->
 			<!-- svelte-ignore a11y_no_static_element_interactions -->
 			<div
@@ -531,7 +533,7 @@
 					{@const isItemMovie = isMovie(item)}
 					{@const size = getItemSize(item)}
 					{@const qualityBadges = getQualityBadges(item)}
-					{@const isLoading = actionLoadingRows.has(item.id)}
+					{@const isLoading = actionLoadingRows.has(item.id) || autoSearchingIds.has(item.id)}
 					{@const isNearBottom = idx >= items.length - 3}
 					{@const missing = isItemMissing(item)}
 					{@const relDate = formatRelativeDate(item.added)}

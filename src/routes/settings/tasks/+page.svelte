@@ -1,22 +1,17 @@
 <script lang="ts">
-	import { browser } from '$app/environment';
-	import { onMount, onDestroy } from 'svelte';
 	import type { PageData } from './$types';
-	import { mobileSSEStatus } from '$lib/sse/mobileStatus.svelte';
 	import type { UnifiedTask } from '$lib/server/tasks/UnifiedTaskRegistry';
 	import type { TaskHistoryEntry } from '$lib/types/task';
 	import TasksTable from '$lib/components/tasks/TasksTable.svelte';
 	import CreateTaskPlaceholder from '$lib/components/tasks/CreateTaskPlaceholder.svelte';
 	import { Wifi } from 'lucide-svelte';
+	import { createSSE } from '$lib/sse';
 
 	let { data }: { data: PageData } = $props();
 
 	let errorMessage = $state<string | null>(null);
 	let successMessage = $state<string | null>(null);
 	let showCreateModal = $state(false);
-	let sseConnected = $state(false);
-	let sseStatus = $state<'connecting' | 'connected' | 'disconnected' | 'error'>('connecting');
-	const MOBILE_SSE_SOURCE = 'settings-tasks';
 
 	// --- Reactive local task state (seeded from server, updated by SSE) ---
 
@@ -46,69 +41,48 @@
 	// Derived sorted tasks list (preserving definition order from data.tasks)
 	const tasks = $derived(data.tasks.map((def) => taskState[def.id] ?? def));
 
-	// --- SSE Connection (using onMount/onDestroy, not $effect) ---
-	// NOTE: eventSource must be a regular variable, NOT $state
-	// EventSource events don't fire properly when wrapped in Svelte 5's reactive proxy
-	let eventSource: EventSource | null = null;
-	let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
-	let reconnectAttempts = $state(0);
-	const MAX_RECONNECT_DELAY = 30000;
-
-	$effect(() => {
-		mobileSSEStatus.publish(MOBILE_SSE_SOURCE, sseStatus);
-	});
-
-	onMount(() => {
-		if (!browser) return;
-		connectSSE();
-	});
-
-	onDestroy(() => {
-		disconnectSSE();
-		mobileSSEStatus.clear(MOBILE_SSE_SOURCE);
-	});
-
-	function connectSSE() {
-		sseStatus = 'connecting';
-		eventSource = new EventSource('/api/tasks/stream');
-
-		eventSource.addEventListener('connected', () => {
-			sseConnected = true;
-			sseStatus = 'connected';
-			reconnectAttempts = 0;
-		});
-
-		// Receive initial task state from SSE (bypasses server-side caching issues)
-		eventSource.addEventListener('tasks:initial', (e: MessageEvent) => {
-			const event = JSON.parse(e.data) as { tasks: UnifiedTask[] };
+	// --- SSE Connection using createSSE ---
+	const sse = createSSE<{
+		connected: void;
+		'tasks:initial': { tasks: UnifiedTask[] };
+		'task:started': { taskId: string; startedAt: string };
+		'task:completed': {
+			taskId: string;
+			completedAt: string;
+			lastRunTime: string;
+			nextRunTime: string | null;
+			result?: { itemsProcessed: number; itemsGrabbed: number; errors: number };
+			historyEntry?: TaskHistoryEntry;
+		};
+		'task:failed': {
+			taskId: string;
+			completedAt: string;
+			error: string;
+			historyEntry?: TaskHistoryEntry;
+		};
+		'task:cancelled': { taskId: string; cancelledAt: string };
+		'task:updated': {
+			taskId: string;
+			enabled?: boolean;
+			intervalHours?: number;
+			nextRunTime?: string | null;
+		};
+	}>('/api/tasks/stream', {
+		connected: () => {
+			// Connection established
+		},
+		'tasks:initial': (event) => {
 			const newState: Record<string, UnifiedTask> = {};
-
 			for (const task of event.tasks) {
 				newState[task.id] = { ...task };
 			}
-
 			taskState = newState;
 			hasInitialized = true;
-		});
-
-		eventSource.addEventListener('heartbeat', () => {
-			// Keep-alive, no action needed
-		});
-
-		eventSource.addEventListener('task:started', (e: MessageEvent) => {
-			const event = JSON.parse(e.data) as { taskId: string; startedAt: string };
+		},
+		'task:started': (event) => {
 			updateTask(event.taskId, { isRunning: true });
-		});
-
-		eventSource.addEventListener('task:completed', (e: MessageEvent) => {
-			const event = JSON.parse(e.data) as {
-				taskId: string;
-				completedAt: string;
-				lastRunTime: string;
-				nextRunTime: string | null;
-				result?: { itemsProcessed: number; itemsGrabbed: number; errors: number };
-				historyEntry?: TaskHistoryEntry;
-			};
+		},
+		'task:completed': (event) => {
 			updateTask(event.taskId, {
 				isRunning: false,
 				lastRunTime: event.lastRunTime,
@@ -127,15 +101,8 @@
 				successMessage = `${task.name} completed: ${itemsProcessed} processed, ${itemsGrabbed} grabbed`;
 				autoDismissSuccess();
 			}
-		});
-
-		eventSource.addEventListener('task:failed', (e: MessageEvent) => {
-			const event = JSON.parse(e.data) as {
-				taskId: string;
-				completedAt: string;
-				error: string;
-				historyEntry?: TaskHistoryEntry;
-			};
+		},
+		'task:failed': (event) => {
 			updateTask(event.taskId, { isRunning: false });
 
 			// Update history if entry provided
@@ -147,10 +114,8 @@
 			if (task) {
 				errorMessage = `${task.name} failed: ${event.error}`;
 			}
-		});
-
-		eventSource.addEventListener('task:cancelled', (e: MessageEvent) => {
-			const event = JSON.parse(e.data) as { taskId: string; cancelledAt: string };
+		},
+		'task:cancelled': (event) => {
 			updateTask(event.taskId, { isRunning: false });
 
 			const task = taskState[event.taskId];
@@ -158,49 +123,15 @@
 				successMessage = `${task.name} cancelled`;
 				autoDismissSuccess();
 			}
-		});
-
-		eventSource.addEventListener('task:updated', (e: MessageEvent) => {
-			const event = JSON.parse(e.data) as {
-				taskId: string;
-				enabled?: boolean;
-				intervalHours?: number;
-				nextRunTime?: string | null;
-			};
+		},
+		'task:updated': (event) => {
 			const updates: Partial<UnifiedTask> = {};
 			if (event.enabled !== undefined) updates.enabled = event.enabled;
 			if (event.intervalHours !== undefined) updates.intervalHours = event.intervalHours;
 			if (event.nextRunTime !== undefined) updates.nextRunTime = event.nextRunTime;
 			updateTask(event.taskId, updates);
-		});
-
-		eventSource.onerror = () => {
-			sseConnected = false;
-			sseStatus = 'error';
-			if (eventSource) {
-				eventSource.close();
-				eventSource = null;
-			}
-
-			// Reconnect with exponential backoff
-			const delay = Math.min(1000 * Math.pow(2, reconnectAttempts), MAX_RECONNECT_DELAY);
-			reconnectAttempts++;
-			reconnectTimer = setTimeout(connectSSE, delay);
-		};
-	}
-
-	function disconnectSSE() {
-		sseConnected = false;
-		sseStatus = 'disconnected';
-		if (reconnectTimer) {
-			clearTimeout(reconnectTimer);
-			reconnectTimer = null;
 		}
-		if (eventSource) {
-			eventSource.close();
-			eventSource = null;
-		}
-	}
+	});
 
 	/**
 	 * Update a single task using fine-grained reactivity
@@ -263,7 +194,7 @@
 		const endpoint =
 			task.category === 'maintenance' ? `/api/tasks/${taskId}/run` : task.runEndpoint;
 
-		if (sseConnected) {
+		if (sse.isConnected) {
 			// Fire-and-forget: SSE will push state updates.
 			// We only need to handle errors from the initial request (e.g. 409 already running).
 			fetch(endpoint, { method: 'POST' })
@@ -320,7 +251,7 @@
 			}
 
 			// SSE will handle the state update (task:cancelled)
-			if (!sseConnected) {
+			if (!sse.isConnected) {
 				updateTask(taskId, { isRunning: false });
 				successMessage = 'Task cancelled successfully';
 				autoDismissSuccess();
@@ -373,14 +304,14 @@
 		</div>
 		<div class="flex items-center gap-2 sm:gap-3">
 			<div class="hidden items-center gap-2 lg:flex">
-				{#if sseConnected}
+				{#if sse.isConnected}
 					<span class="badge gap-1 badge-success">
 						<Wifi class="h-3 w-3" />
 						Live
 					</span>
-				{:else if sseStatus === 'connecting' || sseStatus === 'error'}
-					<span class="badge gap-1 {sseStatus === 'error' ? 'badge-error' : 'badge-warning'}">
-						{sseStatus === 'error' ? 'Reconnecting...' : 'Connecting...'}
+				{:else if sse.status === 'connecting' || sse.status === 'error'}
+					<span class="badge gap-1 {sse.status === 'error' ? 'badge-error' : 'badge-warning'}">
+						{sse.status === 'error' ? 'Reconnecting...' : 'Connecting...'}
 					</span>
 				{/if}
 			</div>

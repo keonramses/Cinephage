@@ -15,6 +15,7 @@ import type { LibraryMovie, MovieFile } from '$lib/types/library';
 import { DEFAULT_PROFILES } from '$lib/server/scoring/profiles.js';
 import { tmdb } from '$lib/server/tmdb.js';
 import { logger } from '$lib/logging';
+import { isMovieSearching } from '$lib/server/library/ActiveSearchTracker.js';
 
 const ACTIVE_DOWNLOAD_STATUSES = [
 	'queued',
@@ -54,6 +55,7 @@ export interface LibraryMoviePageData {
 		freeSpaceBytes: number | null;
 	}>;
 	queueItem: QueueItemInfo | null;
+	isSearching: boolean;
 }
 
 export const load: PageServerLoad = async ({ params }): Promise<LibraryMoviePageData> => {
@@ -223,10 +225,14 @@ export const load: PageServerLoad = async ({ params }): Promise<LibraryMoviePage
 				}
 			: null;
 
+	// Check if a search is currently running for this movie
+	const isSearching = isMovieSearching(id);
+
 	return {
 		movie: movieWithFiles,
 		qualityProfiles: allQualityProfiles,
 		rootFolders: folders,
-		queueItem
+		queueItem,
+		isSearching
 	};
 };

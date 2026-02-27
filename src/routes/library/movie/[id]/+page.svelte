@@ -19,7 +19,6 @@
 	import { page } from '$app/stores';
 	import { goto } from '$app/navigation';
 	import { createDynamicSSE } from '$lib/sse';
-	import { mobileSSEStatus } from '$lib/sse/mobileStatus.svelte';
 
 	let { data }: { data: PageData } = $props();
 
@@ -51,20 +50,35 @@
 		}
 	});
 
+	// Shared type for queue SSE payloads
+	type QueueEventPayload = { id: string; title: string; status: string; progress: number | null };
+
 	// SSE Connection - internally handles browser/SSR
 	const sse = createDynamicSSE<{
 		'media:initial': { movie: LibraryMovie; queueItem: PageData['queueItem'] };
-		'queue:updated': { id: string; title: string; status: string; progress: number | null };
+		'queue:added': QueueEventPayload;
+		'queue:updated': QueueEventPayload;
 		'file:added': {
 			file: MovieFile;
 			wasUpgrade: boolean;
 			replacedFileIds?: string[];
 		};
 		'file:removed': { fileId: string };
+		'search:started': { movieId: string };
+		'search:completed': { movieId: string };
 	}>(() => `/api/library/movies/${movie.id}/stream`, {
 		'media:initial': (payload) => {
 			movieState = payload.movie;
 			queueItemState = payload.queueItem;
+		},
+		'queue:added': (payload) => {
+			// Show the new download immediately
+			queueItemState = {
+				id: payload.id,
+				title: payload.title,
+				status: payload.status,
+				progress: payload.progress
+			};
 		},
 		'queue:updated': (payload) => {
 			if (!ACTIVE_QUEUE_STATUSES.has(payload.status)) {
@@ -96,34 +110,13 @@
 		'file:removed': (payload) => {
 			movie.files = movie.files.filter((f) => f.id !== payload.fileId);
 			movie.hasFile = movie.files.length > 0;
+		},
+		'search:started': () => {
+			autoSearching = true;
+		},
+		'search:completed': () => {
+			autoSearching = false;
 		}
-	});
-
-	const MOBILE_SSE_SOURCE = 'library-movie';
-
-	$effect(() => {
-		mobileSSEStatus.publish(MOBILE_SSE_SOURCE, sse.status);
-		return () => {
-			mobileSSEStatus.clear(MOBILE_SSE_SOURCE);
-		};
-	});
-
-	const prefetchProfileId = $derived.by(
-		() => movie.scoringProfileId ?? data.qualityProfiles.find((p) => p.isDefault)?.id ?? null
-	);
-	let prefetchedStreamKey = $state<string | null>(null);
-
-	// Prefetch stream when page loads (warms cache for faster playback)
-	$effect(() => {
-		if (!(prefetchProfileId === 'streamer' && movie?.tmdbId)) return;
-		const key = `movie:${movie.tmdbId}`;
-		if (prefetchedStreamKey === key) return;
-		prefetchedStreamKey = key;
-
-		fetch(`/api/streaming/resolve/movie/${movie.tmdbId}?prefetch=1`, {
-			signal: AbortSignal.timeout(5000),
-			headers: { 'X-Prefetch': 'true' }
-		}).catch(() => {});
 	});
 
 	// State
@@ -140,7 +133,7 @@
 	let isDeleting = $state(false);
 	let isDeletingFile = $state(false);
 	let subtitleAutoSearching = $state(false);
-	let autoSearching = $state(false);
+	let autoSearching = $state(data.isSearching);
 	let autoSearchResult = $state<{
 		found: boolean;
 		grabbed: boolean;
@@ -242,26 +235,34 @@
 		isSearchModalOpen = true;
 	}
 
+	import { createSearchProgress } from '$lib/stores/searchProgress.svelte';
+
+	const searchProgress = createSearchProgress();
+
 	async function handleAutoSearch() {
 		autoSearching = true;
 		autoSearchResult = null;
+
 		try {
-			const response = await fetch(`/api/library/movies/${movie.id}/auto-search`, {
-				method: 'POST'
-			});
+			await searchProgress.startSearch(`/api/library/movies/${movie.id}/auto-search`);
 
-			const result = await response.json();
-			autoSearchResult = {
-				found: result.found ?? false,
-				grabbed: result.grabbed ?? false,
-				releaseName: result.releaseName,
-				error: result.error
-			};
+			// Use the results from the search
+			if (searchProgress.results) {
+				autoSearchResult = {
+					found: searchProgress.results.found ?? false,
+					grabbed: searchProgress.results.grabbed ?? false,
+					releaseName: searchProgress.results.releaseName,
+					error: searchProgress.results.error
+				};
 
-			// If grabbed successfully, update local state
-			if (result.grabbed) {
-				// The file won't be immediately available, but we can indicate download started
-				// A more complete implementation would refresh data or use SSE
+				// Show toast notification
+				if (searchProgress.results.grabbed) {
+					toasts.success(`Found and grabbed: ${searchProgress.results.releaseName}`);
+				} else if (searchProgress.results.error) {
+					toasts.error(searchProgress.results.error);
+				} else {
+					toasts.info('No suitable releases found');
+				}
 			}
 		} catch (error) {
 			autoSearchResult = {
@@ -269,8 +270,10 @@
 				grabbed: false,
 				error: error instanceof Error ? error.message : 'Failed to auto-search'
 			};
+			toasts.error(error instanceof Error ? error.message : 'Failed to auto-search');
 		} finally {
 			autoSearching = false;
+			searchProgress.reset();
 		}
 	}
 

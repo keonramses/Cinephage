@@ -19,8 +19,49 @@ import { getUnifiedTaskById } from '$lib/server/tasks/UnifiedTaskRegistry';
 import { taskHistoryService } from '$lib/server/tasks/TaskHistoryService';
 import { monitoringScheduler } from '$lib/server/monitoring/MonitoringScheduler';
 import { createChildLogger } from '$lib/logging';
+import { db } from '$lib/server/db';
+import { userApiKeySecrets } from '$lib/server/db/schema.js';
+import { eq, and } from 'drizzle-orm';
+import { decryptApiKey } from '$lib/server/crypto/apiKeyCrypto.js';
 
 const logger = createChildLogger({ module: 'TaskRunAPI' });
+
+/**
+ * Fetch the Media Streaming API Key for a user
+ * Queries the Better Auth apiKey table directly (bypassing auth API)
+ */
+async function getUserStreamingApiKey(userId: string): Promise<string | null> {
+	try {
+		// Query the apiKey table directly using raw SQL
+		// Better Auth stores API keys in the 'apiKey' table
+		const result = db.$client
+			.prepare(
+				`SELECT id FROM apiKey WHERE userId = ? AND metadata LIKE '%"type":"streaming"%' LIMIT 1`
+			)
+			.get(userId) as { id: string } | undefined;
+
+		if (!result) {
+			logger.warn('[TaskRunAPI] No Media Streaming API Key found for user', { userId });
+			return null;
+		}
+
+		// Fetch the full key from our encrypted storage
+		const keyRecord = await db.query.userApiKeySecrets.findFirst({
+			where: eq(userApiKeySecrets.id, result.id)
+		});
+
+		if (keyRecord) {
+			return decryptApiKey(keyRecord.encryptedKey);
+		}
+
+		return null;
+	} catch (error) {
+		logger.error('[TaskRunAPI] Failed to fetch Media Streaming API Key', {
+			error: error instanceof Error ? error.message : 'Unknown error'
+		});
+		return null;
+	}
+}
 
 function getSummarySource(result: Record<string, unknown>): Record<string, unknown> {
 	if (typeof result.result === 'object' && result.result !== null) {
@@ -74,7 +115,7 @@ function buildResultSummary(result: Record<string, unknown>): Record<string, unk
 	return summary;
 }
 
-export const POST: RequestHandler = async ({ params, fetch, request }) => {
+export const POST: RequestHandler = async ({ params, fetch, request, locals }) => {
 	const { taskId } = params;
 
 	// Validate task exists in registry
@@ -86,6 +127,24 @@ export const POST: RequestHandler = async ({ params, fetch, request }) => {
 	// Check if task is already running
 	if (taskHistoryService.isTaskRunning(taskId)) {
 		return json({ success: false, error: `Task '${taskId}' is already running` }, { status: 409 });
+	}
+
+	// For streaming-related tasks, fetch the Media Streaming API Key
+	let streamingApiKey: string | null = null;
+	if (taskDef.id === 'update-strm-urls' && locals.user) {
+		streamingApiKey = await getUserStreamingApiKey(locals.user.id);
+		if (!streamingApiKey) {
+			return json(
+				{
+					success: false,
+					error: 'Media Streaming API Key not found. Generate API keys in Settings > System.'
+				},
+				{ status: 400 }
+			);
+		}
+		logger.info('[TaskRunAPI] Retrieved Media Streaming API Key for user', {
+			userId: locals.user.id
+		});
 	}
 
 	logger.info('[TaskRunAPI] Starting task', { taskId, endpoint: taskDef.runEndpoint });
@@ -103,6 +162,12 @@ export const POST: RequestHandler = async ({ params, fetch, request }) => {
 	monitoringScheduler.emit('manualTaskStarted', taskId);
 
 	try {
+		// Build request body with API key if available
+		const requestBody: Record<string, unknown> = {};
+		if (streamingApiKey) {
+			requestBody.apiKey = streamingApiKey;
+		}
+
 		// Execute the task's endpoint
 		const response = await fetch(taskDef.runEndpoint, {
 			method: 'POST',
@@ -110,7 +175,8 @@ export const POST: RequestHandler = async ({ params, fetch, request }) => {
 				'Content-Type': 'application/json',
 				// Forward relevant headers from original request
 				...(request.headers.get('cookie') ? { cookie: request.headers.get('cookie')! } : {})
-			}
+			},
+			body: Object.keys(requestBody).length > 0 ? JSON.stringify(requestBody) : undefined
 		});
 
 		const result = await response.json();
