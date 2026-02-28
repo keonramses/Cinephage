@@ -188,7 +188,9 @@ function generateDisplayUsername(username: string): string {
 }
 
 // Initialize Better Auth's native SQLite database connection
-const authDb = new Database('/root/Cinephage/data/cinephage.db');
+// Use environment variable or fallback to relative path for portability
+const DB_PATH = process.env.AUTH_DATABASE_URL || process.env.DATABASE_URL || './data/cinephage.db';
+const authDb = new Database(DB_PATH);
 
 /**
  * Better Auth configuration for Cinephage

@@ -8,7 +8,9 @@ import Database from 'better-sqlite3';
 export async function isSetupComplete(): Promise<boolean> {
 	// Check if any users exist in the database
 	// Use Better Auth's database directly since it manages the user table
-	const authDb = new Database('/root/Cinephage/data/cinephage.db');
+	const DB_PATH =
+		process.env.AUTH_DATABASE_URL || process.env.DATABASE_URL || './data/cinephage.db';
+	const authDb = new Database(DB_PATH);
 	try {
 		const result = authDb.prepare('SELECT 1 FROM "user" LIMIT 1').get();
 		return !!result;
