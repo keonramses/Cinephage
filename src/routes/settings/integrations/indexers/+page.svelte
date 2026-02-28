@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { invalidateAll } from '$app/navigation';
 	import { Plus } from 'lucide-svelte';
-	import type { PageData, ActionData } from './$types';
+	import type { PageData } from './$types';
 	import type {
 		Indexer,
 		IndexerWithStatus,
@@ -15,10 +15,11 @@
 	import IndexerBulkActions from '$lib/components/indexers/IndexerBulkActions.svelte';
 	import IndexerModal from '$lib/components/indexers/IndexerModal.svelte';
 	import { toasts } from '$lib/stores/toast.svelte';
+	import { getResponseErrorMessage, readResponsePayload } from '$lib/utils/http';
 	import { SvelteSet } from 'svelte/reactivity';
 	import { ConfirmationModal } from '$lib/components/ui/modal';
 
-	let { data, form }: { data: PageData; form: ActionData } = $props();
+	let { data }: { data: PageData } = $props();
 
 	// Indexer Modal state
 	let modalOpen = $state(false);
@@ -161,6 +162,48 @@
 		confirmDeleteOpen = true;
 	}
 
+	function buildIndexerPayload(formData: IndexerFormData) {
+		return {
+			name: formData.name,
+			definitionId: formData.definitionId,
+			baseUrl: formData.baseUrl,
+			alternateUrls: formData.alternateUrls,
+			enabled: formData.enabled,
+			priority: formData.priority,
+			protocol: formData.protocol,
+			settings: formData.settings,
+			enableAutomaticSearch: formData.enableAutomaticSearch,
+			enableInteractiveSearch: formData.enableInteractiveSearch,
+			minimumSeeders: formData.minimumSeeders,
+			seedRatio: formData.seedRatio,
+			seedTime: formData.seedTime,
+			packSeedTime: formData.packSeedTime,
+			rejectDeadTorrents: formData.rejectDeadTorrents
+		};
+	}
+
+	async function updateIndexerById(
+		id: string,
+		payload: Record<string, unknown>,
+		fallback: string
+	): Promise<boolean> {
+		const response = await fetch(`/api/indexers/${id}`, {
+			method: 'PUT',
+			headers: {
+				'Content-Type': 'application/json',
+				Accept: 'application/json'
+			},
+			body: JSON.stringify(payload)
+		});
+
+		if (!response.ok) {
+			const result = await readResponsePayload<Record<string, unknown>>(response);
+			throw new Error(getResponseErrorMessage(result, fallback));
+		}
+
+		return true;
+	}
+
 	async function handleTest(
 		indexer: IndexerWithStatus,
 		refresh: boolean = true,
@@ -179,10 +222,10 @@
 					settings: indexer.settings
 				})
 			});
-			const result = await response.json();
-			if (!result.success) {
+			const result = await readResponsePayload<{ success?: boolean; error?: string }>(response);
+			if (!response.ok || !result || typeof result === 'string' || !result.success) {
 				if (notify) {
-					toasts.error(result.error || 'Connection test failed');
+					toasts.error(getResponseErrorMessage(result, 'Connection test failed'));
 				}
 				return false;
 			} else {
@@ -220,8 +263,14 @@
 					settings: formData.settings
 				})
 			});
-			const result = await response.json();
-			return result;
+			const result = await readResponsePayload<{ success?: boolean; error?: string }>(response);
+			if (!response.ok || !result || typeof result === 'string') {
+				return {
+					success: false,
+					error: getResponseErrorMessage(result, 'Connection test failed')
+				};
+			}
+			return { success: Boolean(result.success), error: result.error };
 		} catch (e) {
 			return { success: false, error: e instanceof Error ? e.message : 'Unknown error' };
 		}
@@ -230,53 +279,29 @@
 	async function handleSave(formData: IndexerFormData) {
 		saving = true;
 		try {
-			const form = new FormData();
-			form.append(
-				'data',
-				JSON.stringify({
-					name: formData.name,
-					definitionId: formData.definitionId,
-					baseUrl: formData.baseUrl,
-					alternateUrls: formData.alternateUrls,
-					enabled: formData.enabled,
-					priority: formData.priority,
-					protocol: formData.protocol,
-					settings: formData.settings,
+			const payload = buildIndexerPayload(formData);
+			const response =
+				modalMode === 'edit' && editingIndexer
+					? await fetch(`/api/indexers/${editingIndexer.id}`, {
+							method: 'PUT',
+							headers: {
+								'Content-Type': 'application/json',
+								Accept: 'application/json'
+							},
+							body: JSON.stringify(payload)
+						})
+					: await fetch('/api/indexers', {
+							method: 'POST',
+							headers: {
+								'Content-Type': 'application/json',
+								Accept: 'application/json'
+							},
+							body: JSON.stringify(payload)
+						});
 
-					// Search capability toggles
-					enableAutomaticSearch: formData.enableAutomaticSearch,
-					enableInteractiveSearch: formData.enableInteractiveSearch,
-
-					// Torrent seeding settings
-					minimumSeeders: formData.minimumSeeders,
-					seedRatio: formData.seedRatio,
-					seedTime: formData.seedTime,
-					packSeedTime: formData.packSeedTime,
-					rejectDeadTorrents: formData.rejectDeadTorrents
-				})
-			);
-
-			let response: Response;
-			const headers = { Accept: 'application/json' };
-			if (modalMode === 'edit' && editingIndexer) {
-				form.append('id', editingIndexer.id);
-				response = await fetch(`?/updateIndexer`, {
-					method: 'POST',
-					body: form,
-					headers
-				});
-			} else {
-				response = await fetch(`?/createIndexer`, {
-					method: 'POST',
-					body: form,
-					headers
-				});
-			}
-
-			// Check for errors in the response
 			if (!response.ok) {
-				const result = await response.json();
-				toasts.error(result.data?.indexerError ?? 'Failed to save indexer');
+				const result = await readResponsePayload<Record<string, unknown>>(response);
+				toasts.error(getResponseErrorMessage(result, 'Failed to save indexer'));
 				return;
 			}
 
@@ -292,37 +317,57 @@
 
 	async function handleDelete() {
 		if (!editingIndexer) return;
-		const form = new FormData();
-		form.append('id', editingIndexer.id);
-		await fetch(`?/deleteIndexer`, {
-			method: 'POST',
-			body: form
-		});
-		await invalidateAll();
-		closeModal();
+
+		try {
+			const response = await fetch(`/api/indexers/${editingIndexer.id}`, {
+				method: 'DELETE',
+				headers: { Accept: 'application/json' }
+			});
+
+			if (!response.ok) {
+				const result = await readResponsePayload<Record<string, unknown>>(response);
+				throw new Error(getResponseErrorMessage(result, 'Failed to delete indexer'));
+			}
+
+			await invalidateAll();
+			closeModal();
+		} catch (e) {
+			toasts.error(e instanceof Error ? e.message : 'Failed to delete indexer');
+		}
 	}
 
 	async function handleConfirmDelete() {
 		if (!deleteTarget) return;
-		const form = new FormData();
-		form.append('id', deleteTarget.id);
-		await fetch(`?/deleteIndexer`, {
-			method: 'POST',
-			body: form
-		});
-		await invalidateAll();
-		confirmDeleteOpen = false;
-		deleteTarget = null;
+
+		try {
+			const response = await fetch(`/api/indexers/${deleteTarget.id}`, {
+				method: 'DELETE',
+				headers: { Accept: 'application/json' }
+			});
+
+			if (!response.ok) {
+				const result = await readResponsePayload<Record<string, unknown>>(response);
+				throw new Error(getResponseErrorMessage(result, 'Failed to delete indexer'));
+			}
+
+			await invalidateAll();
+			confirmDeleteOpen = false;
+			deleteTarget = null;
+		} catch (e) {
+			toasts.error(e instanceof Error ? e.message : 'Failed to delete indexer');
+		}
 	}
 
 	async function handleBulkEnable() {
 		bulkLoading = true;
 		try {
-			const form = new FormData();
-			form.append('ids', JSON.stringify([...selectedIds]));
-			await fetch(`?/bulkEnable`, { method: 'POST', body: form });
+			for (const id of selectedIds) {
+				await updateIndexerById(id, { enabled: true }, 'Failed to enable indexer');
+			}
 			await invalidateAll();
 			selectedIds.clear();
+		} catch (e) {
+			toasts.error(e instanceof Error ? e.message : 'Failed to enable selected indexers');
 		} finally {
 			bulkLoading = false;
 		}
@@ -331,11 +376,13 @@
 	async function handleBulkDisable() {
 		bulkLoading = true;
 		try {
-			const form = new FormData();
-			form.append('ids', JSON.stringify([...selectedIds]));
-			await fetch(`?/bulkDisable`, { method: 'POST', body: form });
+			for (const id of selectedIds) {
+				await updateIndexerById(id, { enabled: false }, 'Failed to disable indexer');
+			}
 			await invalidateAll();
 			selectedIds.clear();
+		} catch (e) {
+			toasts.error(e instanceof Error ? e.message : 'Failed to disable selected indexers');
 		} finally {
 			bulkLoading = false;
 		}
@@ -354,9 +401,17 @@
 
 		bulkLoading = true;
 		try {
-			const form = new FormData();
-			form.append('ids', JSON.stringify([...selectedIds]));
-			await fetch(`?/bulkDelete`, { method: 'POST', body: form });
+			for (const id of selectedIds) {
+				const response = await fetch(`/api/indexers/${id}`, {
+					method: 'DELETE',
+					headers: { Accept: 'application/json' }
+				});
+
+				if (!response.ok) {
+					const result = await readResponsePayload<Record<string, unknown>>(response);
+					throw new Error(getResponseErrorMessage(result, 'Failed to delete selected indexers'));
+				}
+			}
 			await invalidateAll();
 			selectedIds.clear();
 			confirmBulkDeleteOpen = false;
@@ -399,21 +454,11 @@
 
 		togglingIds.add(indexer.id);
 		try {
-			const form = new FormData();
-			form.append('id', indexer.id);
-			form.append('enabled', (!indexer.enabled).toString());
-
-			const response = await fetch(`?/toggleIndexer`, {
-				method: 'POST',
-				body: form
-			});
-
-			if (!response.ok) {
-				const result = await response.json();
-				toasts.error(result?.data?.indexerError ?? 'Failed to update indexer state');
-				return;
-			}
-
+			await updateIndexerById(
+				indexer.id,
+				{ enabled: !indexer.enabled },
+				'Failed to update indexer state'
+			);
 			await invalidateAll();
 		} catch (e) {
 			toasts.error(e instanceof Error ? e.message : 'Failed to update indexer state');
@@ -424,18 +469,8 @@
 
 	async function handleReorder(indexerIds: string[]) {
 		try {
-			const form = new FormData();
-			form.append('ids', JSON.stringify(indexerIds));
-
-			const response = await fetch(`?/reorderPriorities`, {
-				method: 'POST',
-				body: form
-			});
-
-			if (!response.ok) {
-				const result = await response.json();
-				toasts.error(result?.data?.indexerError ?? 'Failed to reorder priorities');
-				return;
+			for (const [index, id] of indexerIds.entries()) {
+				await updateIndexerById(id, { priority: index + 1 }, 'Failed to reorder priorities');
 			}
 
 			await invalidateAll();
@@ -473,18 +508,6 @@
 					{/if}
 				</ul>
 			</div>
-		</div>
-	{/if}
-
-	{#if form?.indexerError}
-		<div class="mb-4 alert alert-error">
-			<span>{form.indexerError}</span>
-		</div>
-	{/if}
-
-	{#if form?.indexerSuccess}
-		<div class="mb-4 alert alert-success">
-			<span>Operation completed successfully!</span>
 		</div>
 	{/if}
 

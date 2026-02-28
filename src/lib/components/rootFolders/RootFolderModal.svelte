@@ -17,7 +17,11 @@
 		onClose: () => void;
 		onSave: (data: RootFolderFormData) => void;
 		onDelete?: () => void;
-		onValidatePath: (path: string, readOnly?: boolean) => Promise<PathValidationResult>;
+		onValidatePath: (
+			path: string,
+			readOnly?: boolean,
+			folderId?: string
+		) => Promise<PathValidationResult>;
 	}
 
 	let {
@@ -82,7 +86,7 @@
 		validating = true;
 		validationResult = null;
 		try {
-			validationResult = await onValidatePath(path, readOnly);
+			validationResult = await onValidatePath(path, readOnly, folder?.id ?? undefined);
 		} finally {
 			validating = false;
 		}

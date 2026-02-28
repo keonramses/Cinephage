@@ -2,7 +2,8 @@
 	import { invalidateAll } from '$app/navigation';
 	import { Plus, Search } from 'lucide-svelte';
 	import { SvelteSet } from 'svelte/reactivity';
-	import type { PageData, ActionData } from './$types';
+	import { getResponseErrorMessage, readResponsePayload } from '$lib/utils/http';
+	import type { PageData } from './$types';
 	import type { SubtitleProviderConfig } from '$lib/server/subtitles/types';
 	import type { ProviderDefinition } from '$lib/server/subtitles/providers/interfaces';
 
@@ -31,7 +32,7 @@
 		definition?: ProviderDefinition;
 	}
 
-	let { data, form }: { data: PageData; form: ActionData } = $props();
+	let { data }: { data: PageData } = $props();
 
 	// Modal state
 	let modalOpen = $state(false);
@@ -141,6 +142,10 @@
 		editingProvider = null;
 	}
 
+	function getProviderErrorMessage(payload: unknown, fallback: string): string {
+		return getResponseErrorMessage(payload, fallback);
+	}
+
 	function handleSort(column: SortColumn) {
 		if (sort.column === column) {
 			sort = { column, direction: sort.direction === 'asc' ? 'desc' : 'asc' };
@@ -183,7 +188,19 @@
 				password: provider.password
 			})
 		});
-		return response.json();
+		const payload = await readResponsePayload<{
+			success?: boolean;
+			error?: string;
+			message?: string;
+			responseTime?: number;
+		}>(response);
+		if (!response.ok || !payload || typeof payload === 'string') {
+			return {
+				success: false,
+				error: getProviderErrorMessage(payload, 'Connection test failed')
+			};
+		}
+		return payload;
 	}
 
 	async function handleTest(provider: SubtitleProviderWithDefinition) {
@@ -204,13 +221,18 @@
 
 	async function handleToggle(provider: SubtitleProviderWithDefinition) {
 		try {
-			const form = new FormData();
-			form.append('id', provider.id);
-			form.append('enabled', (!provider.enabled).toString());
-			await fetch(`?/toggleProvider`, {
-				method: 'POST',
-				body: form
+			const response = await fetch(`/api/subtitles/providers/${provider.id}`, {
+				method: 'PUT',
+				headers: {
+					'Content-Type': 'application/json',
+					Accept: 'application/json'
+				},
+				body: JSON.stringify({ enabled: !provider.enabled })
 			});
+			const result = await readResponsePayload<Record<string, unknown>>(response);
+			if (!response.ok) {
+				throw new Error(getProviderErrorMessage(result, 'Failed to update provider state'));
+			}
 			await invalidateAll();
 		} catch (e) {
 			toasts.error(e instanceof Error ? e.message : 'Failed to update provider state');
@@ -221,13 +243,19 @@
 		if (selectedIds.size === 0) return;
 		bulkLoading = true;
 		try {
-			const form = new FormData();
-			form.append('ids', JSON.stringify([...selectedIds]));
-			const response = await fetch(`?/bulkEnable`, { method: 'POST', body: form });
-			if (!response.ok) {
-				const result = await response.json();
-				toasts.error(result?.data?.providerError ?? 'Failed to enable selected providers');
-				return;
+			for (const id of selectedIds) {
+				const response = await fetch(`/api/subtitles/providers/${id}`, {
+					method: 'PUT',
+					headers: {
+						'Content-Type': 'application/json',
+						Accept: 'application/json'
+					},
+					body: JSON.stringify({ enabled: true })
+				});
+				const result = await readResponsePayload<Record<string, unknown>>(response);
+				if (!response.ok) {
+					throw new Error(getProviderErrorMessage(result, 'Failed to enable selected providers'));
+				}
 			}
 
 			await invalidateAll();
@@ -243,13 +271,19 @@
 		if (selectedIds.size === 0) return;
 		bulkLoading = true;
 		try {
-			const form = new FormData();
-			form.append('ids', JSON.stringify([...selectedIds]));
-			const response = await fetch(`?/bulkDisable`, { method: 'POST', body: form });
-			if (!response.ok) {
-				const result = await response.json();
-				toasts.error(result?.data?.providerError ?? 'Failed to disable selected providers');
-				return;
+			for (const id of selectedIds) {
+				const response = await fetch(`/api/subtitles/providers/${id}`, {
+					method: 'PUT',
+					headers: {
+						'Content-Type': 'application/json',
+						Accept: 'application/json'
+					},
+					body: JSON.stringify({ enabled: false })
+				});
+				const result = await readResponsePayload<Record<string, unknown>>(response);
+				if (!response.ok) {
+					throw new Error(getProviderErrorMessage(result, 'Failed to disable selected providers'));
+				}
 			}
 
 			await invalidateAll();
@@ -274,13 +308,15 @@
 
 		bulkLoading = true;
 		try {
-			const form = new FormData();
-			form.append('ids', JSON.stringify([...selectedIds]));
-			const response = await fetch(`?/bulkDelete`, { method: 'POST', body: form });
-			if (!response.ok) {
-				const result = await response.json();
-				toasts.error(result?.data?.providerError ?? 'Failed to delete selected providers');
-				return;
+			for (const id of selectedIds) {
+				const response = await fetch(`/api/subtitles/providers/${id}`, {
+					method: 'DELETE',
+					headers: { Accept: 'application/json' }
+				});
+				const result = await readResponsePayload<Record<string, unknown>>(response);
+				if (!response.ok) {
+					throw new Error(getProviderErrorMessage(result, 'Failed to delete selected providers'));
+				}
 			}
 
 			await invalidateAll();
@@ -336,7 +372,14 @@
 					password: formData.password
 				})
 			});
-			return await response.json();
+			const result = await readResponsePayload<{ success?: boolean; error?: string }>(response);
+			if (!response.ok || !result || typeof result === 'string') {
+				return {
+					success: false,
+					error: getProviderErrorMessage(result, 'Connection test failed')
+				};
+			}
+			return { success: Boolean(result.success), error: result.error };
 		} catch (e) {
 			return { success: false, error: e instanceof Error ? e.message : 'Unknown error' };
 		}
@@ -345,20 +388,29 @@
 	async function handleSave(formData: SubtitleProviderFormData) {
 		saving = true;
 		try {
-			const form = new FormData();
-			form.append('data', JSON.stringify(formData));
+			const response =
+				modalMode === 'edit' && editingProvider
+					? await fetch(`/api/subtitles/providers/${editingProvider.id}`, {
+							method: 'PUT',
+							headers: {
+								'Content-Type': 'application/json',
+								Accept: 'application/json'
+							},
+							body: JSON.stringify(formData)
+						})
+					: await fetch('/api/subtitles/providers', {
+							method: 'POST',
+							headers: {
+								'Content-Type': 'application/json',
+								Accept: 'application/json'
+							},
+							body: JSON.stringify(formData)
+						});
 
-			if (modalMode === 'edit' && editingProvider) {
-				form.append('id', editingProvider.id);
-				await fetch(`?/updateProvider`, {
-					method: 'POST',
-					body: form
-				});
-			} else {
-				await fetch(`?/createProvider`, {
-					method: 'POST',
-					body: form
-				});
+			const result = await readResponsePayload<Record<string, unknown>>(response);
+			if (!response.ok) {
+				toasts.error(getProviderErrorMessage(result, 'Failed to save provider'));
+				return;
 			}
 
 			await invalidateAll();
@@ -370,27 +422,39 @@
 
 	async function handleDelete() {
 		if (!editingProvider) return;
-		const form = new FormData();
-		form.append('id', editingProvider.id);
-		await fetch(`?/deleteProvider`, {
-			method: 'POST',
-			body: form
-		});
-		await invalidateAll();
-		closeModal();
+		try {
+			const response = await fetch(`/api/subtitles/providers/${editingProvider.id}`, {
+				method: 'DELETE',
+				headers: { Accept: 'application/json' }
+			});
+			const result = await readResponsePayload<Record<string, unknown>>(response);
+			if (!response.ok) {
+				throw new Error(getProviderErrorMessage(result, 'Failed to delete provider'));
+			}
+			await invalidateAll();
+			closeModal();
+		} catch (e) {
+			toasts.error(e instanceof Error ? e.message : 'Failed to delete provider');
+		}
 	}
 
 	async function handleConfirmDelete() {
 		if (!deleteTarget) return;
-		const form = new FormData();
-		form.append('id', deleteTarget.id);
-		await fetch(`?/deleteProvider`, {
-			method: 'POST',
-			body: form
-		});
-		await invalidateAll();
-		confirmDeleteOpen = false;
-		deleteTarget = null;
+		try {
+			const response = await fetch(`/api/subtitles/providers/${deleteTarget.id}`, {
+				method: 'DELETE',
+				headers: { Accept: 'application/json' }
+			});
+			const result = await readResponsePayload<Record<string, unknown>>(response);
+			if (!response.ok) {
+				throw new Error(getProviderErrorMessage(result, 'Failed to delete provider'));
+			}
+			await invalidateAll();
+			confirmDeleteOpen = false;
+			deleteTarget = null;
+		} catch (e) {
+			toasts.error(e instanceof Error ? e.message : 'Failed to delete provider');
+		}
 	}
 
 	async function handleReorder(providerIds: string[]) {
@@ -467,18 +531,6 @@
 			</button>
 		</div>
 	</div>
-
-	{#if form?.providerError}
-		<div class="mb-4 alert alert-error">
-			<span>{form.providerError}</span>
-		</div>
-	{/if}
-
-	{#if form?.providerSuccess}
-		<div class="mb-4 alert alert-success">
-			<span>Operation completed successfully!</span>
-		</div>
-	{/if}
 
 	{#if selectedIds.size > 0}
 		<SubtitleProviderBulkActions

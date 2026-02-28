@@ -159,6 +159,7 @@ async function getSeriesData(seriesId: string) {
 			scoringProfileId: series.scoringProfileId,
 			monitored: series.monitored,
 			seasonFolder: series.seasonFolder,
+			seriesType: series.seriesType,
 			wantsSubtitles: series.wantsSubtitles,
 			added: series.added,
 			episodeCount: series.episodeCount,

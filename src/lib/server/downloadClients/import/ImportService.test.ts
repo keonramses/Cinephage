@@ -210,3 +210,112 @@ describe('ImportService metadata extraction', () => {
 		expect(metadata.quality.codec).toBe('h265');
 	});
 });
+
+describe('ImportService episode naming', () => {
+	beforeEach(() => {
+		ImportService.resetInstance();
+	});
+
+	it('applies anime numbering when series type is anime', () => {
+		const service = ImportService.getInstance() as unknown as {
+			buildEpisodeFileName: (
+				seriesData: {
+					title: string;
+					year?: number | null;
+					tvdbId?: number | null;
+					seriesType?: string | null;
+				},
+				seasonNum: number,
+				episodeNums: number[],
+				sourcePath: string,
+				queueItem: { title: string },
+				episodeTitle?: string,
+				absoluteNumber?: number,
+				airDate?: string
+			) => string;
+		};
+
+		const fileName = service.buildEpisodeFileName(
+			{
+				title: 'One Piece',
+				year: 1999,
+				tvdbId: 81797,
+				seriesType: 'anime'
+			},
+			2,
+			[62],
+			'/tmp/[SubsPlease] One Piece - 062.mkv',
+			{ title: '[SubsPlease] One Piece - 062 [1080p]' },
+			'The Strongest of Luffy`s Rivals? Introduce the Buggy Pirate Crew',
+			62
+		);
+
+		expect(fileName).toContain('S02E62');
+		expect(fileName).toContain('062');
+	});
+
+	it('applies daily numbering when series type is daily', () => {
+		const service = ImportService.getInstance() as unknown as {
+			buildEpisodeFileName: (
+				seriesData: {
+					title: string;
+					year?: number | null;
+					tvdbId?: number | null;
+					seriesType?: string | null;
+				},
+				seasonNum: number,
+				episodeNums: number[],
+				sourcePath: string,
+				queueItem: { title: string },
+				episodeTitle?: string,
+				absoluteNumber?: number,
+				airDate?: string
+			) => string;
+		};
+
+		const fileName = service.buildEpisodeFileName(
+			{
+				title: 'The Daily Show',
+				year: 1996,
+				tvdbId: 71256,
+				seriesType: 'daily'
+			},
+			29,
+			[15],
+			'/tmp/the.daily.show.2024.01.15.mkv',
+			{ title: 'The.Daily.Show.2024.01.15.1080p.WEB.h264' },
+			'January 15, 2024',
+			undefined,
+			'2024-01-15'
+		);
+
+		expect(fileName).toContain('2024-01-15');
+		expect(fileName).not.toContain('S29E15');
+	});
+
+	it('builds fallback absolute numbering for anime when DB absolute numbers are missing', () => {
+		const service = ImportService.getInstance() as unknown as {
+			getFallbackAbsoluteEpisodeNumber: (
+				allEpisodes: Array<{
+					id: string;
+					seasonNumber: number;
+					episodeNumber: number;
+					absoluteEpisodeNumber: number | null;
+				}>,
+				episodeId?: string
+			) => number | undefined;
+		};
+
+		const absoluteNumber = service.getFallbackAbsoluteEpisodeNumber(
+			[
+				{ id: 'special', seasonNumber: 0, episodeNumber: 1, absoluteEpisodeNumber: null },
+				{ id: 'ep1', seasonNumber: 1, episodeNumber: 1, absoluteEpisodeNumber: null },
+				{ id: 'ep2', seasonNumber: 1, episodeNumber: 2, absoluteEpisodeNumber: null },
+				{ id: 'ep3', seasonNumber: 2, episodeNumber: 1, absoluteEpisodeNumber: null }
+			],
+			'ep3'
+		);
+
+		expect(absoluteNumber).toBe(3);
+	});
+});

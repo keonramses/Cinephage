@@ -1,5 +1,6 @@
 <script lang="ts">
 	import './layout.css';
+	import { goto } from '$app/navigation';
 	import { ThemeSelector } from '$lib/components/ui';
 	import Toasts from '$lib/components/ui/Toasts.svelte';
 	import { layoutState } from '$lib/layout.svelte';
@@ -8,7 +9,6 @@
 	import { resolvePath } from '$lib/utils/routing';
 	import { env } from '$env/dynamic/public';
 	import { authClient } from '$lib/auth/client.js';
-	import { goto } from '$app/navigation';
 	import {
 		Menu,
 		Home,
@@ -28,9 +28,13 @@
 		Radio,
 		Calendar,
 		Activity,
+		Loader2,
+		Wifi,
+		WifiOff,
 		FileQuestion,
 		LogOut,
-		Server
+		Server,
+		Download
 	} from 'lucide-svelte';
 
 	let { children } = $props();
@@ -39,6 +43,21 @@
 
 	function closeMobileDrawer(): void {
 		isMobileDrawerOpen = false;
+	}
+
+	function buildNavHref(href: string): string {
+		if (href === '/library/import' && $page.url.pathname === '/library/import') {
+			return resolvePath(`/library/import?newSession=${Date.now()}`);
+		}
+		return resolvePath(href);
+	}
+
+	function handleNavClick(event: MouseEvent, href: string): void {
+		closeMobileDrawer();
+		if (href === '/library/import' && $page.url.pathname === '/library/import') {
+			event.preventDefault();
+			void goto(buildNavHref(href));
+		}
 	}
 
 	async function handleLogout(): Promise<void> {
@@ -63,6 +82,7 @@
 			children: [
 				{ href: '/library/movies', label: 'Movies', icon: Clapperboard },
 				{ href: '/library/tv', label: 'TV Shows', icon: Tv },
+				{ href: '/library/import', label: 'Import', icon: Download },
 				{ href: '/library/unmatched', label: 'Unmatched Files', icon: FileQuestion }
 			]
 		},
@@ -199,10 +219,10 @@
 										{#each item.children as child (child.href)}
 											<li>
 												<a
-													href={resolvePath(child.href)}
+													href={buildNavHref(child.href)}
 													class="flex items-center gap-4 px-4 py-2"
 													class:active={$page.url.pathname === child.href}
-													onclick={closeMobileDrawer}
+													onclick={(event) => handleNavClick(event, child.href)}
 												>
 													{#if child.icon}<child.icon class="h-4 w-4 shrink-0" />{/if}
 													<span class="truncate">{child.label}</span>
@@ -222,11 +242,11 @@
 							{/if}
 						{:else}
 							<a
-								href={resolvePath(item.href)}
+								href={buildNavHref(item.href)}
 								class="flex items-center gap-4 px-4 py-3"
 								class:active={$page.url.pathname === item.href}
 								title={!layoutState.isSidebarExpanded ? item.label : ''}
-								onclick={closeMobileDrawer}
+								onclick={(event) => handleNavClick(event, item.href)}
 							>
 								<item.icon class="h-5 w-5 shrink-0" />
 								{#if layoutState.isSidebarExpanded}

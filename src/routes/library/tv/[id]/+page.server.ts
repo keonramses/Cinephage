@@ -135,6 +135,7 @@ export interface LibrarySeriesPageData {
 		scoringProfileId: string | null;
 		monitored: boolean | null;
 		seasonFolder: boolean | null;
+		seriesType: string | null;
 		wantsSubtitles: boolean | null;
 		added: string;
 		episodeCount: number | null;
@@ -179,6 +180,7 @@ export const load: PageServerLoad = async ({ params }): Promise<LibrarySeriesPag
 			scoringProfileId: series.scoringProfileId,
 			monitored: series.monitored,
 			seasonFolder: series.seasonFolder,
+			seriesType: series.seriesType,
 			wantsSubtitles: series.wantsSubtitles,
 			added: series.added,
 			episodeCount: series.episodeCount,

@@ -185,6 +185,12 @@ describe('ReleaseParser', () => {
 			expect(result.resolution).toBe('1080p');
 			expect(result.codec).toBe('h265');
 		});
+
+		it('should parse anime absolute numbering at end of filename', () => {
+			const result = parseRelease('[Horse] Aggressive Retsuko - 018');
+
+			expect(result.episode?.absoluteEpisode).toBe(18);
+		});
 	});
 
 	describe('Language Detection', () => {

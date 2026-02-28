@@ -2,9 +2,10 @@
 	import { invalidateAll } from '$app/navigation';
 	import { Plus, Search } from 'lucide-svelte';
 	import { toasts } from '$lib/stores/toast.svelte';
+	import { getResponseErrorMessage, readResponsePayload } from '$lib/utils/http';
 	import { SvelteSet } from 'svelte/reactivity';
 	import { toFriendlyDownloadClientError } from '$lib/downloadClients/errorMessages';
-	import type { PageData, ActionData } from './$types';
+	import type { PageData } from './$types';
 	import type {
 		DownloadClientFormData,
 		ConnectionTestResult,
@@ -17,7 +18,7 @@
 	} from '$lib/components/downloadClients';
 	import { ConfirmationModal } from '$lib/components/ui/modal';
 
-	let { data, form }: { data: PageData; form: ActionData } = $props();
+	let { data }: { data: PageData } = $props();
 
 	let modalOpen = $state(false);
 	let modalMode = $state<'add' | 'edit'>('add');
@@ -216,6 +217,10 @@
 		saveError = null;
 	}
 
+	function toDownloadClientErrorMessage(payload: unknown, fallback: string): string {
+		return toFriendlyDownloadClientError(getResponseErrorMessage(payload, fallback));
+	}
+
 	async function handleTest(
 		formData: DownloadClientFormData | NntpServerFormData,
 		isNntp: boolean
@@ -249,7 +254,14 @@
 					password: dcFormData.password || null
 				})
 			});
-			return await response.json();
+			const payload = await readResponsePayload<ConnectionTestResult>(response);
+			if (!response.ok || !payload || typeof payload === 'string') {
+				return {
+					success: false,
+					error: toDownloadClientErrorMessage(payload, 'Connection test failed')
+				};
+			}
+			return payload;
 		} catch (e) {
 			return { success: false, error: e instanceof Error ? e.message : 'Unknown error' };
 		}
@@ -267,28 +279,29 @@
 		saving = true;
 		saveError = null;
 		try {
-			const body = new FormData();
-			body.append('data', JSON.stringify(formData as DownloadClientFormData));
+			const payload = formData as DownloadClientFormData;
+			const response =
+				modalMode === 'edit' && editingClient
+					? await fetch(`/api/download-clients/${editingClient.id}`, {
+							method: 'PUT',
+							headers: {
+								'Content-Type': 'application/json',
+								Accept: 'application/json'
+							},
+							body: JSON.stringify(payload)
+						})
+					: await fetch('/api/download-clients', {
+							method: 'POST',
+							headers: {
+								'Content-Type': 'application/json',
+								Accept: 'application/json'
+							},
+							body: JSON.stringify(payload)
+						});
 
-			let response: Response;
-			if (modalMode === 'edit' && editingClient) {
-				body.append('id', editingClient.id);
-				response = await fetch(`?/updateDownloadClient`, {
-					method: 'POST',
-					body
-				});
-			} else {
-				response = await fetch(`?/createDownloadClient`, {
-					method: 'POST',
-					body
-				});
-			}
-
-			const result = await response.json();
-			if (result.type === 'failure' || result.data?.downloadClientError) {
-				saveError = toFriendlyDownloadClientError(
-					result.data?.downloadClientError || 'Failed to save download client'
-				);
+			const result = await readResponsePayload<Record<string, unknown>>(response);
+			if (!response.ok) {
+				saveError = toDownloadClientErrorMessage(result, 'Failed to save download client');
 				return;
 			}
 
@@ -305,15 +318,26 @@
 
 	async function handleDelete() {
 		if (!editingClient) return;
+		try {
+			const response = await fetch(`/api/download-clients/${editingClient.id}`, {
+				method: 'DELETE',
+				headers: { Accept: 'application/json' }
+			});
+			const result = await readResponsePayload<Record<string, unknown>>(response);
+			if (!response.ok) {
+				throw new Error(toDownloadClientErrorMessage(result, 'Failed to delete download client'));
+			}
 
-		const body = new FormData();
-		body.append('id', editingClient.id);
-		await fetch(`?/deleteDownloadClient`, {
-			method: 'POST',
-			body
-		});
-		await invalidateAll();
-		closeModal();
+			await invalidateAll();
+			closeModal();
+		} catch (error) {
+			toasts.error(
+				toDownloadClientErrorMessage(
+					error instanceof Error ? error.message : null,
+					'Failed to delete download client'
+				)
+			);
+		}
 	}
 
 	function confirmDelete(client: UnifiedClientItem) {
@@ -323,27 +347,53 @@
 
 	async function handleConfirmDelete() {
 		if (!deleteTarget) return;
+		try {
+			const response = await fetch(`/api/download-clients/${deleteTarget.id}`, {
+				method: 'DELETE',
+				headers: { Accept: 'application/json' }
+			});
+			const result = await readResponsePayload<Record<string, unknown>>(response);
+			if (!response.ok) {
+				throw new Error(toDownloadClientErrorMessage(result, 'Failed to delete download client'));
+			}
 
-		const body = new FormData();
-		body.append('id', deleteTarget.id);
-		await fetch(`?/deleteDownloadClient`, {
-			method: 'POST',
-			body
-		});
-		await invalidateAll();
-		confirmDeleteOpen = false;
-		deleteTarget = null;
+			await invalidateAll();
+			confirmDeleteOpen = false;
+			deleteTarget = null;
+		} catch (error) {
+			toasts.error(
+				toDownloadClientErrorMessage(
+					error instanceof Error ? error.message : null,
+					'Failed to delete download client'
+				)
+			);
+		}
 	}
 
 	async function handleToggle(client: UnifiedClientItem) {
-		const body = new FormData();
-		body.append('id', client.id);
-		body.append('enabled', (!client.enabled).toString());
-		await fetch(`?/toggleDownloadClient`, {
-			method: 'POST',
-			body
-		});
-		await invalidateAll();
+		try {
+			const response = await fetch(`/api/download-clients/${client.id}`, {
+				method: 'PUT',
+				headers: {
+					'Content-Type': 'application/json',
+					Accept: 'application/json'
+				},
+				body: JSON.stringify({ enabled: !client.enabled })
+			});
+			const result = await readResponsePayload<Record<string, unknown>>(response);
+			if (!response.ok) {
+				throw new Error(toDownloadClientErrorMessage(result, 'Failed to update client state'));
+			}
+
+			await invalidateAll();
+		} catch (error) {
+			toasts.error(
+				toDownloadClientErrorMessage(
+					error instanceof Error ? error.message : null,
+					'Failed to update client state'
+				)
+			);
+		}
 	}
 
 	async function handleRowTest(client: UnifiedClientItem) {
@@ -352,9 +402,9 @@
 			const response = await fetch(`/api/download-clients/${client.id}/test`, {
 				method: 'POST'
 			});
-			const result = await response.json();
-			if (!response.ok || !result.success) {
-				toasts.error(toFriendlyDownloadClientError(result.error || 'Connection test failed'));
+			const result = await readResponsePayload<ConnectionTestResult>(response);
+			if (!response.ok || !result || typeof result === 'string' || !result.success) {
+				toasts.error(toDownloadClientErrorMessage(result, 'Connection test failed'));
 				return;
 			}
 
@@ -375,13 +425,21 @@
 		if (selectedIds.size === 0) return;
 		bulkLoading = true;
 		try {
-			const form = new FormData();
-			form.append('ids', JSON.stringify([...selectedIds]));
-			const response = await fetch(`?/bulkEnable`, { method: 'POST', body: form });
-			if (!response.ok) {
-				const result = await response.json();
-				toasts.error(result?.data?.downloadClientError ?? 'Failed to enable selected clients');
-				return;
+			for (const id of selectedIds) {
+				const response = await fetch(`/api/download-clients/${id}`, {
+					method: 'PUT',
+					headers: {
+						'Content-Type': 'application/json',
+						Accept: 'application/json'
+					},
+					body: JSON.stringify({ enabled: true })
+				});
+				const result = await readResponsePayload<Record<string, unknown>>(response);
+				if (!response.ok) {
+					throw new Error(
+						toDownloadClientErrorMessage(result, 'Failed to enable selected clients')
+					);
+				}
 			}
 
 			await invalidateAll();
@@ -397,13 +455,21 @@
 		if (selectedIds.size === 0) return;
 		bulkLoading = true;
 		try {
-			const form = new FormData();
-			form.append('ids', JSON.stringify([...selectedIds]));
-			const response = await fetch(`?/bulkDisable`, { method: 'POST', body: form });
-			if (!response.ok) {
-				const result = await response.json();
-				toasts.error(result?.data?.downloadClientError ?? 'Failed to disable selected clients');
-				return;
+			for (const id of selectedIds) {
+				const response = await fetch(`/api/download-clients/${id}`, {
+					method: 'PUT',
+					headers: {
+						'Content-Type': 'application/json',
+						Accept: 'application/json'
+					},
+					body: JSON.stringify({ enabled: false })
+				});
+				const result = await readResponsePayload<Record<string, unknown>>(response);
+				if (!response.ok) {
+					throw new Error(
+						toDownloadClientErrorMessage(result, 'Failed to disable selected clients')
+					);
+				}
 			}
 
 			await invalidateAll();
@@ -428,13 +494,17 @@
 
 		bulkLoading = true;
 		try {
-			const form = new FormData();
-			form.append('ids', JSON.stringify([...selectedIds]));
-			const response = await fetch(`?/bulkDelete`, { method: 'POST', body: form });
-			if (!response.ok) {
-				const result = await response.json();
-				toasts.error(result?.data?.downloadClientError ?? 'Failed to delete selected clients');
-				return;
+			for (const id of selectedIds) {
+				const response = await fetch(`/api/download-clients/${id}`, {
+					method: 'DELETE',
+					headers: { Accept: 'application/json' }
+				});
+				const result = await readResponsePayload<Record<string, unknown>>(response);
+				if (!response.ok) {
+					throw new Error(
+						toDownloadClientErrorMessage(result, 'Failed to delete selected clients')
+					);
+				}
 			}
 
 			await invalidateAll();
@@ -459,8 +529,8 @@
 				const response = await fetch(`/api/download-clients/${id}/test`, {
 					method: 'POST'
 				});
-				const result = await response.json();
-				if (response.ok && result.success) {
+				const result = await readResponsePayload<ConnectionTestResult>(response);
+				if (response.ok && result && typeof result !== 'string' && result.success) {
 					successCount += 1;
 				} else {
 					failCount += 1;
@@ -484,18 +554,6 @@
 			Configure download clients used for downloading and post-processing.
 		</p>
 	</div>
-
-	{#if form?.downloadClientError}
-		<div class="mb-4 alert alert-error">
-			<span>{form.downloadClientError}</span>
-		</div>
-	{/if}
-
-	{#if form?.downloadClientSuccess}
-		<div class="mb-4 alert alert-success">
-			<span>Operation completed successfully!</span>
-		</div>
-	{/if}
 
 	<div class="mb-4 flex items-center justify-end">
 		<button

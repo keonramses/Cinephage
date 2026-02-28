@@ -18,6 +18,7 @@
 	import { FileEdit, Wifi, WifiOff, Loader2 } from 'lucide-svelte';
 	import { page } from '$app/stores';
 	import { goto } from '$app/navigation';
+	import { resolvePath } from '$lib/utils/routing';
 	import { createDynamicSSE } from '$lib/sse';
 
 	let { data }: { data: PageData } = $props();
@@ -50,35 +51,20 @@
 		}
 	});
 
-	// Shared type for queue SSE payloads
-	type QueueEventPayload = { id: string; title: string; status: string; progress: number | null };
-
 	// SSE Connection - internally handles browser/SSR
 	const sse = createDynamicSSE<{
 		'media:initial': { movie: LibraryMovie; queueItem: PageData['queueItem'] };
-		'queue:added': QueueEventPayload;
-		'queue:updated': QueueEventPayload;
+		'queue:updated': { id: string; title: string; status: string; progress: number | null };
 		'file:added': {
 			file: MovieFile;
 			wasUpgrade: boolean;
 			replacedFileIds?: string[];
 		};
 		'file:removed': { fileId: string };
-		'search:started': { movieId: string };
-		'search:completed': { movieId: string };
 	}>(() => `/api/library/movies/${movie.id}/stream`, {
 		'media:initial': (payload) => {
 			movieState = payload.movie;
 			queueItemState = payload.queueItem;
-		},
-		'queue:added': (payload) => {
-			// Show the new download immediately
-			queueItemState = {
-				id: payload.id,
-				title: payload.title,
-				status: payload.status,
-				progress: payload.progress
-			};
 		},
 		'queue:updated': (payload) => {
 			if (!ACTIVE_QUEUE_STATUSES.has(payload.status)) {
@@ -110,13 +96,25 @@
 		'file:removed': (payload) => {
 			movie.files = movie.files.filter((f) => f.id !== payload.fileId);
 			movie.hasFile = movie.files.length > 0;
-		},
-		'search:started': () => {
-			autoSearching = true;
-		},
-		'search:completed': () => {
-			autoSearching = false;
 		}
+	});
+
+	const prefetchProfileId = $derived.by(
+		() => movie.scoringProfileId ?? data.qualityProfiles.find((p) => p.isDefault)?.id ?? null
+	);
+	let prefetchedStreamKey = $state<string | null>(null);
+
+	// Prefetch stream when page loads (warms cache for faster playback)
+	$effect(() => {
+		if (!(prefetchProfileId === 'streamer' && movie?.tmdbId)) return;
+		const key = `movie:${movie.tmdbId}`;
+		if (prefetchedStreamKey === key) return;
+		prefetchedStreamKey = key;
+
+		fetch(`/api/streaming/resolve/movie/${movie.tmdbId}?prefetch=1`, {
+			signal: AbortSignal.timeout(5000),
+			headers: { 'X-Prefetch': 'true' }
+		}).catch(() => {});
 	});
 
 	// State
@@ -133,7 +131,7 @@
 	let isDeleting = $state(false);
 	let isDeletingFile = $state(false);
 	let subtitleAutoSearching = $state(false);
-	let autoSearching = $state(data.isSearching);
+	let autoSearching = $state(false);
 	let autoSearchResult = $state<{
 		found: boolean;
 		grabbed: boolean;
@@ -238,6 +236,17 @@
 	import { createSearchProgress } from '$lib/stores/searchProgress.svelte';
 
 	const searchProgress = createSearchProgress();
+
+	function handleImport() {
+		const query = [
+			`mediaType=movie`,
+			`tmdbId=${encodeURIComponent(String(movie.tmdbId))}`,
+			`libraryId=${encodeURIComponent(movie.id)}`,
+			`title=${encodeURIComponent(movie.title)}`,
+			...(movie.year ? [`year=${encodeURIComponent(String(movie.year))}`] : [])
+		].join('&');
+		void goto(resolvePath(`/library/import?${query}`));
+	}
 
 	async function handleAutoSearch() {
 		autoSearching = true;
@@ -597,6 +606,7 @@
 		onMonitorToggle={handleMonitorToggle}
 		onAutoSearch={handleAutoSearch}
 		onSearch={handleSearch}
+		onImport={handleImport}
 		onEdit={handleEdit}
 		onDelete={handleDelete}
 		onScoreClick={handleScoreClick}

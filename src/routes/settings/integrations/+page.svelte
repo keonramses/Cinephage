@@ -1,6 +1,8 @@
 <script lang="ts">
-	import { enhance } from '$app/forms';
+	import { invalidateAll } from '$app/navigation';
 	import { resolvePath } from '$lib/utils/routing';
+	import { toasts } from '$lib/stores/toast.svelte';
+	import { getResponseErrorMessage, readResponsePayload } from '$lib/utils/http';
 	import {
 		Database,
 		Download,
@@ -22,14 +24,47 @@
 	let tmdbModalOpen = $state(false);
 	let tmdbApiKey = $state('');
 	let saving = $state(false);
+	let tmdbError = $state<string | null>(null);
 
 	function openTmdbModal() {
 		tmdbApiKey = '';
+		tmdbError = null;
 		tmdbModalOpen = true;
 	}
 
 	function closeTmdbModal() {
+		tmdbError = null;
 		tmdbModalOpen = false;
+	}
+
+	async function handleTmdbSave() {
+		saving = true;
+		tmdbError = null;
+
+		try {
+			const response = await fetch('/api/settings/tmdb', {
+				method: 'PUT',
+				headers: {
+					'Content-Type': 'application/json',
+					Accept: 'application/json'
+				},
+				body: JSON.stringify({ apiKey: tmdbApiKey })
+			});
+
+			const payload = await readResponsePayload<Record<string, unknown>>(response);
+			if (!response.ok) {
+				tmdbError = getResponseErrorMessage(payload, 'Failed to save TMDB API key');
+				return;
+			}
+
+			await invalidateAll();
+			toasts.success('TMDB API key saved');
+			closeTmdbModal();
+		} catch (error) {
+			tmdbError = error instanceof Error ? error.message : 'Failed to save TMDB API key';
+		} finally {
+			saving = false;
+		}
 	}
 
 	interface IntegrationCard {
@@ -44,7 +79,7 @@
 	const integrations = $derived.by<IntegrationCard[]>(() => [
 		{
 			title: 'Indexers',
-			description: 'Configure torrent indexers for content search',
+			description: 'Configure indexers for content search',
 			href: '/settings/integrations/indexers',
 			icon: Database,
 			stats: [
@@ -276,15 +311,9 @@
 				>.
 			</p>
 			<form
-				method="POST"
-				action="?/saveTmdbApiKey"
-				use:enhance={() => {
-					saving = true;
-					return async ({ update }) => {
-						await update();
-						saving = false;
-						closeTmdbModal();
-					};
+				onsubmit={async (event) => {
+					event.preventDefault();
+					await handleTmdbSave();
 				}}
 			>
 				<div class="form-control w-full">
@@ -302,6 +331,11 @@
 						class="input-bordered input w-full"
 					/>
 				</div>
+				{#if tmdbError}
+					<div class="mt-4 alert alert-error">
+						<span>{tmdbError}</span>
+					</div>
+				{/if}
 				<div class="modal-action flex-col-reverse sm:flex-row">
 					<button type="button" onclick={closeTmdbModal} class="btn w-full btn-ghost sm:w-auto">
 						Cancel

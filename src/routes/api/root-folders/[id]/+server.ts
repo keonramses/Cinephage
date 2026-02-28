@@ -3,7 +3,7 @@ import type { RequestHandler } from './$types';
 import { getRootFolderService } from '$lib/server/downloadClients/RootFolderService';
 import { rootFolderUpdateSchema } from '$lib/validation/schemas';
 import { assertFound, parseBody } from '$lib/server/api/validate';
-import { NotFoundError } from '$lib/errors';
+import { NotFoundError, isAppError } from '$lib/errors';
 
 /**
  * GET /api/root-folders/[id]
@@ -28,6 +28,9 @@ export const PUT: RequestHandler = async ({ params, request }) => {
 		const updated = await service.updateFolder(params.id, data);
 		return json({ success: true, folder: updated });
 	} catch (error) {
+		if (isAppError(error)) {
+			return json(error.toJSON(), { status: error.statusCode });
+		}
 		if (error instanceof Error && error.message.includes('not found')) {
 			throw new NotFoundError('Root folder', params.id);
 		}

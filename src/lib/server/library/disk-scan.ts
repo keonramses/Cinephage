@@ -6,7 +6,7 @@
  */
 
 import { readdir, stat } from 'fs/promises';
-import { join, basename, dirname, relative, extname } from 'path';
+import { join, dirname, relative } from 'path';
 import { db } from '$lib/server/db/index.js';
 import {
 	rootFolders,
@@ -25,7 +25,16 @@ import { ReleaseParser } from '$lib/server/indexers/parser/ReleaseParser.js';
 import { EventEmitter } from 'events';
 import { logger } from '$lib/logging';
 import { DOWNLOAD } from '$lib/config/constants';
+import {
+	findOverlappingRootFolder,
+	getRootFolderOverlapMessage
+} from '$lib/server/filesystem/root-folder-overlap.js';
 import { libraryMediaEvents } from './LibraryMediaEvents.js';
+import {
+	getMediaParseStem,
+	matchEpisodesByIdentifier,
+	resolveTvEpisodeIdentifier
+} from './tv-episode-resolver.js';
 
 /**
  * Patterns to filter out sample/extra files
@@ -109,6 +118,7 @@ export interface ScanResult {
 	success: boolean;
 	scanId: string;
 	rootFolderId: string;
+	rootFolderPath: string;
 	filesScanned: number;
 	filesAdded: number;
 	filesUpdated: number;
@@ -340,6 +350,7 @@ export class DiskScanService extends EventEmitter {
 
 		try {
 			this.emit('progress', progress);
+			await this.assertNoRootFolderOverlap(rootFolderId, rootFolder.path);
 
 			// Discover files
 			const discoveredFiles = await this.discoverFiles(rootFolder.path);
@@ -425,6 +436,7 @@ export class DiskScanService extends EventEmitter {
 				success: true,
 				scanId: scanRecord.id,
 				rootFolderId,
+				rootFolderPath: rootFolder.path,
 				filesScanned: progress.filesFound,
 				filesAdded: progress.filesAdded,
 				filesUpdated: progress.filesUpdated,
@@ -453,6 +465,7 @@ export class DiskScanService extends EventEmitter {
 				success: false,
 				scanId: scanRecord.id,
 				rootFolderId,
+				rootFolderPath: rootFolder.path,
 				filesScanned: progress.filesFound,
 				filesAdded: progress.filesAdded,
 				filesUpdated: progress.filesUpdated,
@@ -477,6 +490,23 @@ export class DiskScanService extends EventEmitter {
 			chunks.push(values.slice(i, i + chunkSize));
 		}
 		return chunks;
+	}
+
+	private async assertNoRootFolderOverlap(
+		rootFolderId: string,
+		rootFolderPath: string
+	): Promise<void> {
+		const existingFolders = await db
+			.select({
+				id: rootFolders.id,
+				path: rootFolders.path,
+				name: rootFolders.name
+			})
+			.from(rootFolders);
+		const overlap = await findOverlappingRootFolder(rootFolderPath, existingFolders, rootFolderId);
+		if (overlap) {
+			throw new Error(getRootFolderOverlapMessage(rootFolderPath, overlap));
+		}
 	}
 
 	/**
@@ -790,7 +820,12 @@ export class DiskScanService extends EventEmitter {
 	): Promise<boolean> {
 		// Get all series in this root folder
 		const seriesInFolder = await db
-			.select({ id: series.id, path: series.path, seasonFolder: series.seasonFolder })
+			.select({
+				id: series.id,
+				path: series.path,
+				seasonFolder: series.seasonFolder,
+				seriesType: series.seriesType
+			})
 			.from(series)
 			.where(eq(series.rootFolderId, rootFolderId));
 
@@ -801,17 +836,21 @@ export class DiskScanService extends EventEmitter {
 			if (file.path.startsWith(seriesFullPath + '/')) {
 				// File is inside this series folder!
 				const relativePath = relative(seriesFullPath, file.path);
-				const fileName = basename(file.path, extname(file.path));
+				const fileName = getMediaParseStem(file.path);
 				const parsed = this.parser.parse(fileName);
+				const identifier = resolveTvEpisodeIdentifier({
+					filePath: file.path,
+					parsed,
+					seriesType:
+						s.seriesType === 'anime' || s.seriesType === 'daily' ? s.seriesType : 'standard'
+				});
 
-				// Need season/episode info to proceed
-				if (!parsed.episode?.season || !parsed.episode?.episodes?.length) {
-					logger.debug('[DiskScan] Could not parse S/E from filename', { fileName });
+				if (!identifier) {
+					logger.debug('[DiskScan] Could not resolve episode mapping from filename', {
+						fileName
+					});
 					return false; // Fall back to unmatched
 				}
-
-				const seasonNum = parsed.episode.season;
-				const episodeNums = parsed.episode.episodes;
 
 				// Check if episode_file already exists
 				const existingFile = await db
@@ -826,23 +865,18 @@ export class DiskScanService extends EventEmitter {
 					return true;
 				}
 
-				// Find matching episodes
-				const matchingEpisodes = await db
-					.select()
-					.from(episodes)
-					.where(and(eq(episodes.seriesId, s.id), eq(episodes.seasonNumber, seasonNum)));
-
-				const episodeIds = matchingEpisodes
-					.filter((ep) => episodeNums.includes(ep.episodeNumber))
-					.map((ep) => ep.id);
+				const seriesEpisodes = await db.select().from(episodes).where(eq(episodes.seriesId, s.id));
+				const matchingEpisodes = matchEpisodesByIdentifier(seriesEpisodes, identifier);
+				const episodeIds = matchingEpisodes.map((ep) => ep.id);
+				const seasonNum = matchingEpisodes[0]?.seasonNumber;
+				const episodeNums = matchingEpisodes.map((ep) => ep.episodeNumber);
 
 				// If no episodes found in DB, we can't link this file - let it become unmatched
 				// This prevents creating orphaned episode_files with empty episodeIds
-				if (episodeIds.length === 0) {
+				if (episodeIds.length === 0 || seasonNum === undefined) {
 					logger.debug('[DiskScan] No matching episodes in DB for file', {
 						fileName,
-						seasonNum,
-						episodeNums,
+						identifier,
 						seriesId: s.id
 					});
 					return false; // Fall back to unmatched
@@ -945,8 +979,12 @@ export class DiskScanService extends EventEmitter {
 		mediaType: string
 	): Promise<void> {
 		// Parse the filename to extract info
-		const fileName = basename(file.path, extname(file.path));
+		const fileName = getMediaParseStem(file.path);
 		const parsed = this.parser.parse(fileName);
+		const identifier = resolveTvEpisodeIdentifier({
+			filePath: file.path,
+			parsed
+		});
 
 		await db.insert(unmatchedFiles).values({
 			path: file.path,
@@ -955,8 +993,8 @@ export class DiskScanService extends EventEmitter {
 			size: file.size,
 			parsedTitle: parsed.cleanTitle || null,
 			parsedYear: parsed.year || null,
-			parsedSeason: parsed.episode?.season || null,
-			parsedEpisode: parsed.episode?.episodes?.[0] || null,
+			parsedSeason: identifier?.numbering === 'standard' ? identifier.seasonNumber : null,
+			parsedEpisode: identifier?.numbering === 'standard' ? identifier.episodeNumbers[0] : null,
 			reason: 'no_match' // Will be updated by MediaMatcherService
 		});
 	}

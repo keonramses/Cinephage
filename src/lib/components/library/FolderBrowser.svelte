@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { Folder, ChevronUp, Loader2, Home, Check } from 'lucide-svelte';
+	import { getResponseErrorMessage, readResponsePayload } from '$lib/utils/http';
 
 	interface DirectoryEntry {
 		name: string;
@@ -28,15 +29,30 @@
 
 		try {
 			const response = await fetch(`/api/filesystem/browse?path=${encodeURIComponent(path)}`);
-			const data = await response.json();
+			const payload = await readResponsePayload<{
+				currentPath?: string;
+				parentPath?: string | null;
+				entries?: DirectoryEntry[];
+				error?: string;
+			}>(response);
 
-			if (data.error) {
-				error = data.error;
+			if (!response.ok) {
+				error = getResponseErrorMessage(payload, 'Failed to browse directory');
+				return;
 			}
 
-			currentPath = data.currentPath;
-			parentPath = data.parentPath;
-			entries = data.entries || [];
+			if (!payload || typeof payload !== 'object') {
+				error = 'Invalid response from filesystem browser';
+				return;
+			}
+
+			if (payload.error) {
+				error = payload.error;
+			}
+
+			currentPath = payload.currentPath ?? path;
+			parentPath = payload.parentPath ?? null;
+			entries = payload.entries ?? [];
 		} catch (e) {
 			error = e instanceof Error ? e.message : 'Failed to browse directory';
 		} finally {

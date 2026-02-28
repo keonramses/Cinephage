@@ -201,6 +201,14 @@ export class MediaMatcherService {
 			.replace(/^a/, ''); // Remove leading "a"
 	}
 
+	private isUniqueTmdbConstraintError(error: unknown, tableName: 'movies' | 'series'): boolean {
+		if (!(error instanceof Error)) {
+			return false;
+		}
+
+		return error.message.includes(`UNIQUE constraint failed: ${tableName}.tmdb_id`);
+	}
+
 	/**
 	 * Search TMDB and find best matches for a file
 	 *
@@ -541,8 +549,24 @@ export class MediaMatcherService {
 		const results: MatchResult[] = [];
 
 		for (const file of files) {
-			const result = await this.processUnmatchedFile(file.id);
-			results.push(result);
+			try {
+				const result = await this.processUnmatchedFile(file.id);
+				results.push(result);
+			} catch (error) {
+				const reason = error instanceof Error ? error.message : 'Unknown matching error';
+				logger.error('[MediaMatcher] Failed to process unmatched file', undefined, {
+					fileId: file.id,
+					filePath: file.path,
+					reason
+				});
+				results.push({
+					fileId: file.id,
+					filePath: file.path,
+					matched: false,
+					confidence: 0,
+					reason
+				});
+			}
 
 			// Small delay to avoid rate limiting
 			await new Promise((resolve) => setTimeout(resolve, 250));
@@ -647,35 +671,55 @@ export class MediaMatcherService {
 			const subtitleSettings = getSubtitleSettingsService();
 			const defaultProfileId = await subtitleSettings.get('defaultLanguageProfileId');
 
-			// Create new movie entry
-			const [newMovie] = await db
-				.insert(movies)
-				.values({
-					tmdbId,
-					imdbId: externalIds.imdb_id,
-					title: tmdbMovie.title,
-					originalTitle: tmdbMovie.original_title,
-					year: tmdbMovie.release_date ? parseInt(tmdbMovie.release_date.split('-')[0]) : undefined,
-					overview: tmdbMovie.overview,
-					posterPath: tmdbMovie.poster_path,
-					backdropPath: tmdbMovie.backdrop_path,
-					runtime: tmdbMovie.runtime,
-					genres: tmdbMovie.genres?.map((g) => g.name),
-					path: movieFolder || fileName,
-					rootFolderId: rootFolder.id,
-					hasFile: true,
-					monitored: rootFolder.defaultMonitored ?? true,
-					languageProfileId: defaultProfileId,
-					wantsSubtitles: defaultProfileId ? true : undefined
-				})
-				.returning();
+			try {
+				const [newMovie] = await db
+					.insert(movies)
+					.values({
+						tmdbId,
+						imdbId: externalIds.imdb_id,
+						title: tmdbMovie.title,
+						originalTitle: tmdbMovie.original_title,
+						year: tmdbMovie.release_date
+							? parseInt(tmdbMovie.release_date.split('-')[0])
+							: undefined,
+						overview: tmdbMovie.overview,
+						posterPath: tmdbMovie.poster_path,
+						backdropPath: tmdbMovie.backdrop_path,
+						runtime: tmdbMovie.runtime,
+						genres: tmdbMovie.genres?.map((g) => g.name),
+						path: movieFolder || fileName,
+						rootFolderId: rootFolder.id,
+						hasFile: true,
+						monitored: rootFolder.defaultMonitored ?? true,
+						languageProfileId: defaultProfileId,
+						wantsSubtitles: defaultProfileId ? true : undefined
+					})
+					.returning();
 
-			movieId = newMovie.id;
-			logger.debug('[MediaMatcher] Assigned default language profile to new movie', {
-				movieId,
-				title: tmdbMovie.title,
-				languageProfileId: defaultProfileId
-			});
+				movieId = newMovie.id;
+				logger.debug('[MediaMatcher] Assigned default language profile to new movie', {
+					movieId,
+					title: tmdbMovie.title,
+					languageProfileId: defaultProfileId
+				});
+			} catch (error) {
+				if (!this.isUniqueTmdbConstraintError(error, 'movies')) {
+					throw error;
+				}
+
+				const [concurrentMovie] = await db
+					.select({ id: movies.id })
+					.from(movies)
+					.where(eq(movies.tmdbId, tmdbId))
+					.limit(1);
+
+				if (!concurrentMovie) {
+					throw error;
+				}
+
+				movieId = concurrentMovie.id;
+				await db.update(movies).set({ hasFile: true }).where(eq(movies.id, movieId));
+			}
 		}
 
 		// Check if movie file with same path already exists (prevent duplicates)
@@ -759,53 +803,78 @@ export class MediaMatcherService {
 			// Get default language profile for new media
 			const subtitleSettings = getSubtitleSettingsService();
 			const defaultProfileId = await subtitleSettings.get('defaultLanguageProfileId');
+			let createdSeries = false;
 
-			// Create new series entry
-			const [newSeries] = await db
-				.insert(series)
-				.values({
-					tmdbId,
-					imdbId: externalIds.imdb_id,
-					tvdbId: externalIds.tvdb_id,
+			try {
+				const [newSeries] = await db
+					.insert(series)
+					.values({
+						tmdbId,
+						imdbId: externalIds.imdb_id,
+						tvdbId: externalIds.tvdb_id,
+						title: tmdbSeries.name,
+						originalTitle: tmdbSeries.original_name,
+						year: tmdbSeries.first_air_date
+							? parseInt(tmdbSeries.first_air_date.split('-')[0])
+							: undefined,
+						overview: tmdbSeries.overview,
+						posterPath: tmdbSeries.poster_path,
+						backdropPath: tmdbSeries.backdrop_path,
+						status: tmdbSeries.status,
+						network: tmdbSeries.networks?.[0]?.name,
+						genres: tmdbSeries.genres?.map((g) => g.name),
+						path: seriesFolder,
+						rootFolderId: rootFolder.id,
+						monitored: rootFolder.defaultMonitored ?? true,
+						languageProfileId: defaultProfileId,
+						wantsSubtitles: defaultProfileId ? true : undefined
+					})
+					.returning();
+
+				seriesId = newSeries.id;
+				createdSeries = true;
+				logger.debug('[MediaMatcher] Assigned default language profile to new series', {
+					seriesId,
 					title: tmdbSeries.name,
-					originalTitle: tmdbSeries.original_name,
-					year: tmdbSeries.first_air_date
-						? parseInt(tmdbSeries.first_air_date.split('-')[0])
-						: undefined,
-					overview: tmdbSeries.overview,
-					posterPath: tmdbSeries.poster_path,
-					backdropPath: tmdbSeries.backdrop_path,
-					status: tmdbSeries.status,
-					network: tmdbSeries.networks?.[0]?.name,
-					genres: tmdbSeries.genres?.map((g) => g.name),
-					path: seriesFolder,
-					rootFolderId: rootFolder.id,
-					monitored: rootFolder.defaultMonitored ?? true,
-					languageProfileId: defaultProfileId,
-					wantsSubtitles: defaultProfileId ? true : undefined
-				})
-				.returning();
+					languageProfileId: defaultProfileId
+				});
+			} catch (error) {
+				if (!this.isUniqueTmdbConstraintError(error, 'series')) {
+					throw error;
+				}
 
-			seriesId = newSeries.id;
-			logger.debug('[MediaMatcher] Assigned default language profile to new series', {
-				seriesId,
-				title: tmdbSeries.name,
-				languageProfileId: defaultProfileId
-			});
+				const [concurrentSeries] = await db
+					.select({ id: series.id })
+					.from(series)
+					.where(eq(series.tmdbId, tmdbId))
+					.limit(1);
 
-			// Populate all seasons and episodes from TMDB
-			// This ensures consistent behavior with "Add to Library" flow
-			await this.populateSeriesEpisodes(
-				seriesId,
-				tmdbId,
-				tmdbSeries,
-				rootFolder.defaultMonitored ?? true
-			);
+				if (!concurrentSeries) {
+					throw error;
+				}
+
+				seriesId = concurrentSeries.id;
+			}
+
+			if (createdSeries) {
+				// Populate all seasons and episodes from TMDB
+				// This ensures consistent behavior with "Add to Library" flow
+				await this.populateSeriesEpisodes(
+					seriesId,
+					tmdbId,
+					tmdbSeries,
+					rootFolder.defaultMonitored ?? true
+				);
+			}
 		}
 
 		// Determine season and episode from parsed info
-		const seasonNumber = file.parsedSeason || 1;
-		const episodeNumber = file.parsedEpisode || 1;
+		if (file.parsedSeason === null || file.parsedEpisode === null) {
+			throw new Error('Could not determine season/episode from filename');
+		}
+
+		const seasonNumber = file.parsedSeason;
+		const episodeNumber = file.parsedEpisode;
 
 		// Fetch season details from TMDB (needed for both season and episode metadata)
 		let tmdbSeason: Awaited<ReturnType<typeof tmdb.getSeason>> | null = null;

@@ -49,6 +49,36 @@ export const PUT: RequestHandler = async ({ params, request }) => {
 	}
 
 	const manager = getMediaBrowserManager();
+	const existing = await manager.getServerRecord(params.id);
+
+	if (!existing) {
+		return json({ error: 'Server not found' }, { status: 404 });
+	}
+
+	const effectiveEnabled = result.data.enabled ?? existing.enabled ?? true;
+	if (effectiveEnabled) {
+		const host = result.data.host ?? existing.host;
+		const apiKey = result.data.apiKey ?? existing.apiKey;
+		const serverType = (result.data.serverType ?? existing.serverType) as 'jellyfin' | 'emby';
+
+		const testResult = await manager.testServerConfig({
+			host,
+			apiKey,
+			serverType
+		});
+
+		if (!testResult.success) {
+			return json(
+				{
+					error: testResult.error
+						? `Connection test failed: ${testResult.error}`
+						: 'Connection test failed'
+				},
+				{ status: 400 }
+			);
+		}
+	}
+
 	const updated = await manager.updateServer(params.id, result.data);
 
 	if (!updated) {

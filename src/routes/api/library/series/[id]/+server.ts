@@ -12,8 +12,7 @@ import {
 	subtitles
 } from '$lib/server/db/schema.js';
 import { eq, inArray, and } from 'drizzle-orm';
-import { unlink, rmdir, readdir } from 'node:fs/promises';
-import { join } from 'node:path';
+import { deleteDirectoryWithinRoot } from '$lib/server/filesystem/delete-helpers.js';
 import { logger } from '$lib/logging';
 import { getLanguageProfileService } from '$lib/server/subtitles/services/LanguageProfileService.js';
 import { searchSubtitlesForMediaBatch } from '$lib/server/subtitles/services/SubtitleImportService.js';
@@ -51,6 +50,7 @@ export const GET: RequestHandler = async ({ params }) => {
 				languageProfileId: series.languageProfileId,
 				monitored: series.monitored,
 				seasonFolder: series.seasonFolder,
+				seriesType: series.seriesType,
 				added: series.added,
 				episodeCount: series.episodeCount,
 				episodeFileCount: series.episodeFileCount,
@@ -84,6 +84,16 @@ export const GET: RequestHandler = async ({ params }) => {
 			.from(episodeFiles)
 			.where(eq(episodeFiles.seriesId, params.id));
 
+		// Match the page-load/SSE behavior: build a stable episode -> file map.
+		// Using allFiles.find(...) can over-assign stale pack rows during client-side refreshes.
+		const episodeIdToFile = new Map<string, (typeof allFiles)[number]>();
+		for (const file of allFiles) {
+			const episodeIds = file.episodeIds as string[] | null;
+			for (const episodeId of episodeIds ?? []) {
+				episodeIdToFile.set(episodeId, file);
+			}
+		}
+
 		// Get subtitles for all episodes in this series
 		const episodeIds = allEpisodes.map((ep) => ep.id);
 		const allSubtitles =
@@ -110,7 +120,7 @@ export const GET: RequestHandler = async ({ params }) => {
 					const epSubtitles = subtitlesByEpisode.get(ep.id) || [];
 					return {
 						...ep,
-						file: allFiles.find((f) => f.episodeIds?.includes(ep.id)),
+						file: episodeIdToFile.get(ep.id) ?? null,
 						subtitles: epSubtitles.map((s) => ({
 							id: s.id,
 							language: s.language,
@@ -167,6 +177,7 @@ export const PATCH: RequestHandler = async ({ params, request }) => {
 			monitored,
 			scoringProfileId,
 			seasonFolder,
+			seriesType,
 			rootFolderId,
 			wantsSubtitles,
 			languageProfileId
@@ -194,6 +205,9 @@ export const PATCH: RequestHandler = async ({ params, request }) => {
 		}
 		if (typeof seasonFolder === 'boolean') {
 			updateData.seasonFolder = seasonFolder;
+		}
+		if (seriesType === 'standard' || seriesType === 'anime' || seriesType === 'daily') {
+			updateData.seriesType = seriesType;
 		}
 		if (rootFolderId !== undefined) {
 			updateData.rootFolderId = rootFolderId;
@@ -334,36 +348,11 @@ export const DELETE: RequestHandler = async ({ params, url }) => {
 
 		// Delete files from disk if requested
 		if (deleteFiles && seriesItem.rootFolderPath && seriesItem.path) {
-			for (const file of files) {
-				const fullPath = join(seriesItem.rootFolderPath, seriesItem.path, file.relativePath);
-				try {
-					await unlink(fullPath);
-					logger.debug('[API] Deleted file', { fullPath });
-				} catch {
-					logger.warn('[API] Could not delete file', { fullPath });
-				}
-			}
-
-			// Try to remove empty season folders and the series folder
-			const seriesFolder = join(seriesItem.rootFolderPath, seriesItem.path);
-			try {
-				const entries = await readdir(seriesFolder, { withFileTypes: true });
-				for (const entry of entries) {
-					if (entry.isDirectory()) {
-						try {
-							await rmdir(join(seriesFolder, entry.name));
-							logger.debug('[API] Removed season folder', { name: entry.name });
-						} catch {
-							// Not empty - that's fine
-						}
-					}
-				}
-				// Try to remove the series folder itself
-				await rmdir(seriesFolder);
-				logger.debug('[API] Removed series folder', { seriesFolder });
-			} catch {
-				// Folder not empty or doesn't exist - that's fine
-			}
+			const seriesFolder = await deleteDirectoryWithinRoot(
+				seriesItem.rootFolderPath,
+				seriesItem.path
+			);
+			logger.debug('[API] Removed series folder and all contents', { seriesFolder });
 		}
 
 		// Delete all episode file records from database

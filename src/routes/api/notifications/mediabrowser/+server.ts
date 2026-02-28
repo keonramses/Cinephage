@@ -45,6 +45,26 @@ export const POST: RequestHandler = async ({ request }) => {
 	const manager = getMediaBrowserManager();
 
 	try {
+		const shouldValidateConnection = result.data.enabled ?? true;
+		if (shouldValidateConnection) {
+			const testResult = await manager.testServerConfig({
+				host: result.data.host,
+				apiKey: result.data.apiKey,
+				serverType: result.data.serverType
+			});
+
+			if (!testResult.success) {
+				return json(
+					{
+						error: testResult.error
+							? `Connection test failed: ${testResult.error}`
+							: 'Connection test failed'
+					},
+					{ status: 400 }
+				);
+			}
+		}
+
 		const created = await manager.createServer(result.data);
 		return json({ success: true, server: created });
 	} catch (error) {

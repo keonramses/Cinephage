@@ -3,12 +3,18 @@ import type { RequestHandler } from './$types';
 import { readdir, stat } from 'fs/promises';
 import { join, dirname, resolve } from 'path';
 import { homedir } from 'os';
-import { RootFolderService } from '$lib/server/downloadClients/RootFolderService';
+import {
+	isManagedRootPath,
+	isPathAllowed,
+	isPathInsideManagedRoot
+} from '$lib/server/filesystem/path-guard.js';
+import { isVideoFile } from '$lib/server/library/media-info.js';
 
 export interface DirectoryEntry {
 	name: string;
 	path: string;
 	isDirectory: boolean;
+	size?: number;
 }
 
 export interface BrowseResponse {
@@ -18,48 +24,12 @@ export interface BrowseResponse {
 	error?: string;
 }
 
-/**
- * Validates that a path is within allowed boundaries (home directory or configured root folders).
- * Prevents path traversal attacks.
- */
-async function isPathAllowed(requestedPath: string): Promise<boolean> {
-	const normalizedPath = resolve(requestedPath);
-	const homeDir = homedir();
-
-	// Always allow paths within home directory
-	if (normalizedPath.startsWith(homeDir)) {
-		return true;
-	}
-
-	// Also allow paths within configured root folders
-	const rootFolderService = new RootFolderService();
-	const rootFolders = await rootFolderService.getFolders();
-
-	for (const folder of rootFolders) {
-		const normalizedRootPath = resolve(folder.path);
-		if (
-			normalizedPath.startsWith(normalizedRootPath) ||
-			normalizedRootPath.startsWith(normalizedPath)
-		) {
-			return true;
-		}
-	}
-
-	// Allow common base paths that might contain root folders
-	// (e.g., Docker volume mounts like /movies, /tv under these directories)
-	const commonBasePaths = ['/mnt', '/media', '/srv', '/data', '/storage', '/home', '/opt', '/vol'];
-	for (const basePath of commonBasePaths) {
-		if (normalizedPath.startsWith(basePath)) {
-			return true;
-		}
-	}
-
-	return false;
-}
-
 export const GET: RequestHandler = async ({ url }) => {
 	const rawPath = url.searchParams.get('path') || homedir();
 	const requestedPath = resolve(rawPath); // Normalize to prevent ../ tricks
+	const includeFiles = url.searchParams.get('includeFiles') === 'true';
+	const fileFilter = url.searchParams.get('fileFilter') || 'all';
+	const excludeManagedRoots = url.searchParams.get('excludeManagedRoots') === 'true';
 
 	// Validate path is within allowed boundaries
 	if (!(await isPathAllowed(requestedPath))) {
@@ -69,6 +39,18 @@ export const GET: RequestHandler = async ({ url }) => {
 				parentPath: null,
 				entries: [],
 				error: 'Access denied: Path is outside allowed directories'
+			} satisfies BrowseResponse,
+			{ status: 403 }
+		);
+	}
+
+	if (excludeManagedRoots && (await isPathInsideManagedRoot(requestedPath))) {
+		return json(
+			{
+				currentPath: requestedPath,
+				parentPath: dirname(requestedPath),
+				entries: [],
+				error: 'Managed root folders are hidden in this browser.'
 			} satisfies BrowseResponse,
 			{ status: 403 }
 		);
@@ -87,15 +69,50 @@ export const GET: RequestHandler = async ({ url }) => {
 
 		const items = await readdir(requestedPath, { withFileTypes: true });
 
-		const entries: DirectoryEntry[] = items
-			.filter((item) => item.isDirectory())
-			.filter((item) => !item.name.startsWith('.')) // Hide hidden folders
-			.map((item) => ({
-				name: item.name,
-				path: join(requestedPath, item.name),
-				isDirectory: true
-			}))
+		const directoryCandidates = await Promise.all(
+			items
+				.filter((item) => item.isDirectory())
+				.filter((item) => !item.name.startsWith('.'))
+				.map(async (item): Promise<DirectoryEntry | null> => {
+					const entryPath = join(requestedPath, item.name);
+					if (excludeManagedRoots && (await isManagedRootPath(entryPath))) {
+						return null;
+					}
+					return {
+						name: item.name,
+						path: entryPath,
+						isDirectory: true
+					};
+				})
+		);
+		const directories: DirectoryEntry[] = directoryCandidates
+			.filter((entry): entry is NonNullable<(typeof directoryCandidates)[number]> => entry !== null)
 			.sort((a, b) => a.name.localeCompare(b.name));
+
+		let files: DirectoryEntry[] = [];
+		if (includeFiles) {
+			files = await Promise.all(
+				items
+					.filter((item) => item.isFile())
+					.filter((item) => !item.name.startsWith('.'))
+					.filter((item) =>
+						fileFilter === 'video' ? isVideoFile(join(requestedPath, item.name)) : true
+					)
+					.map(async (item) => {
+						const filePath = join(requestedPath, item.name);
+						const fileStats = await stat(filePath);
+						return {
+							name: item.name,
+							path: filePath,
+							isDirectory: false,
+							size: fileStats.size
+						} satisfies DirectoryEntry;
+					})
+			);
+			files.sort((a, b) => a.name.localeCompare(b.name));
+		}
+
+		const entries: DirectoryEntry[] = [...directories, ...files];
 
 		// Only show parent path if it's within allowed boundaries
 		const potentialParent = requestedPath !== '/' ? dirname(requestedPath) : null;

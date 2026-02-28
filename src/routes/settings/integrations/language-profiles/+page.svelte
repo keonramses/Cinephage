@@ -1,7 +1,8 @@
 <script lang="ts">
 	import { invalidateAll } from '$app/navigation';
 	import { Plus, Trash2, Pencil, Star, Globe, CheckCircle } from 'lucide-svelte';
-	import type { PageData, ActionData } from './$types';
+	import { getResponseErrorMessage, readResponsePayload } from '$lib/utils/http';
+	import type { PageData } from './$types';
 	import {
 		ALL_LANGUAGE_OPTIONS,
 		getLanguageName as getLanguageNameFromLib
@@ -29,7 +30,7 @@
 	// Use centralized language definitions
 	const LANGUAGES = ALL_LANGUAGE_OPTIONS;
 
-	let { data, form }: { data: PageData; form: ActionData } = $props();
+	let { data }: { data: PageData } = $props();
 
 	// Modal state
 	let modalOpen = $state(false);
@@ -128,30 +129,38 @@
 
 		saving = true;
 		try {
-			const formData = new FormData();
-			formData.append(
-				'data',
-				JSON.stringify({
-					name: formName,
-					languages: formLanguages,
-					upgradesAllowed: formUpgradesAllowed,
-					isDefault: formIsDefault,
-					cutoffIndex: formCutoffIndex,
-					minimumScore: formMinimumScore
-				})
-			);
+			const payload = {
+				name: formName,
+				languages: formLanguages,
+				upgradesAllowed: formUpgradesAllowed,
+				isDefault: formIsDefault,
+				cutoffIndex: formCutoffIndex,
+				minimumScore: formMinimumScore
+			};
 
-			if (modalMode === 'edit' && editingProfile) {
-				formData.append('id', editingProfile.id);
-				await fetch('?/updateProfile', {
-					method: 'POST',
-					body: formData
-				});
-			} else {
-				await fetch('?/createProfile', {
-					method: 'POST',
-					body: formData
-				});
+			const response =
+				modalMode === 'edit' && editingProfile
+					? await fetch(`/api/subtitles/language-profiles/${editingProfile.id}`, {
+							method: 'PUT',
+							headers: {
+								'Content-Type': 'application/json',
+								Accept: 'application/json'
+							},
+							body: JSON.stringify(payload)
+						})
+					: await fetch('/api/subtitles/language-profiles', {
+							method: 'POST',
+							headers: {
+								'Content-Type': 'application/json',
+								Accept: 'application/json'
+							},
+							body: JSON.stringify(payload)
+						});
+
+			const result = await readResponsePayload<Record<string, unknown>>(response);
+			if (!response.ok) {
+				toasts.error(getResponseErrorMessage(result, 'Failed to save language profile'));
+				return;
 			}
 
 			await invalidateAll();
@@ -168,26 +177,47 @@
 
 	async function handleConfirmDelete() {
 		if (!deleteTarget) return;
-		const formData = new FormData();
-		formData.append('id', deleteTarget.id);
-		await fetch('?/deleteProfile', {
-			method: 'POST',
-			body: formData
-		});
-		await invalidateAll();
-		confirmDeleteOpen = false;
-		deleteTarget = null;
+		try {
+			const response = await fetch(`/api/subtitles/language-profiles/${deleteTarget.id}`, {
+				method: 'DELETE',
+				headers: { Accept: 'application/json' }
+			});
+			const result = await readResponsePayload<Record<string, unknown>>(response);
+			if (!response.ok) {
+				throw new Error(getResponseErrorMessage(result, 'Failed to delete language profile'));
+			}
+
+			await invalidateAll();
+			confirmDeleteOpen = false;
+			deleteTarget = null;
+		} catch (error) {
+			toasts.error(error instanceof Error ? error.message : 'Failed to delete language profile');
+		}
 	}
 
 	async function handleSaveSettings() {
-		const formData = new FormData();
-		formData.append('defaultProfileId', selectedDefaultProfile);
-		formData.append('fallbackLanguage', selectedFallbackLanguage);
-		await fetch('?/updateSettings', {
-			method: 'POST',
-			body: formData
-		});
-		await invalidateAll();
+		try {
+			const response = await fetch('/api/subtitles/settings', {
+				method: 'PUT',
+				headers: {
+					'Content-Type': 'application/json',
+					Accept: 'application/json'
+				},
+				body: JSON.stringify({
+					defaultLanguageProfileId: selectedDefaultProfile || null,
+					defaultFallbackLanguage: selectedFallbackLanguage
+				})
+			});
+			const result = await readResponsePayload<Record<string, unknown>>(response);
+			if (!response.ok) {
+				throw new Error(getResponseErrorMessage(result, 'Failed to save subtitle settings'));
+			}
+
+			await invalidateAll();
+			toasts.success('Subtitle defaults saved');
+		} catch (error) {
+			toasts.error(error instanceof Error ? error.message : 'Failed to save subtitle settings');
+		}
 	}
 </script>
 
@@ -198,18 +228,6 @@
 			Define which subtitle languages to search for and their preferences.
 		</p>
 	</div>
-
-	{#if form?.error}
-		<div class="mb-4 alert alert-error">
-			<span>{form.error}</span>
-		</div>
-	{/if}
-
-	{#if form?.success}
-		<div class="mb-4 alert alert-success">
-			<span>Operation completed successfully!</span>
-		</div>
-	{/if}
 
 	<!-- Global Settings -->
 	<div class="card mb-6 bg-base-100 shadow-xl">

@@ -277,7 +277,10 @@ export class LibrarySchedulerService extends EventEmitter implements BackgroundS
 		try {
 			// Scan all root folders
 			const results = await diskScanService.scanAll();
-			this.lastScanTime = new Date();
+			const failedScans = results.filter((result) => !result.success);
+			if (failedScans.length > 0) {
+				throw new Error(this.formatFailedScanMessage(failedScans));
+			}
 
 			// Process unmatched files
 			logger.info('[LibraryScheduler] Processing unmatched files...');
@@ -285,6 +288,7 @@ export class LibrarySchedulerService extends EventEmitter implements BackgroundS
 
 			// Update series stats (cached episode counts)
 			await this.updateAllSeriesStats();
+			this.lastScanTime = new Date();
 
 			this.emit('scanComplete', { type: 'full', results });
 			return results;
@@ -306,13 +310,16 @@ export class LibrarySchedulerService extends EventEmitter implements BackgroundS
 
 		try {
 			const result = await diskScanService.scanRootFolder(rootFolderId);
-			this.lastScanTime = new Date();
+			if (!result.success) {
+				throw new Error(result.error || `Scan failed for ${result.rootFolderPath}`);
+			}
 
 			// Process unmatched files
 			await mediaMatcherService.processAllUnmatched();
 
 			// Update series stats (cached episode counts)
 			await this.updateAllSeriesStats();
+			this.lastScanTime = new Date();
 
 			this.emit('scanComplete', { type: 'folder', rootFolderId, result });
 			return result;
@@ -394,6 +401,16 @@ export class LibrarySchedulerService extends EventEmitter implements BackgroundS
 		}
 
 		logger.info('[LibraryScheduler] Series stats updated');
+	}
+
+	private formatFailedScanMessage(results: ScanResult[]): string {
+		const labels = results.slice(0, 3).map((result) => {
+			const detail = result.error || 'Unknown error';
+			return `${result.rootFolderPath}: ${detail}`;
+		});
+		const suffix =
+			results.length > labels.length ? ` (+${results.length - labels.length} more)` : '';
+		return `Library scan failed for ${results.length} root folder${results.length === 1 ? '' : 's'}: ${labels.join('; ')}${suffix}`;
 	}
 
 	/**

@@ -338,11 +338,19 @@ export class UnmatchedFileService {
 						fileSeason = episodeMapping[fileId].season;
 						fileEpisode = episodeMapping[fileId].episode;
 					} else {
-						fileSeason = fileSeason ?? file.parsedSeason ?? 1;
-						fileEpisode = file.parsedEpisode ?? 1;
+						fileSeason = fileSeason ?? file.parsedSeason ?? undefined;
+						fileEpisode = file.parsedEpisode ?? undefined;
 					}
 
-					const result = await this.matchEpisodeFile(file, tmdbId, fileSeason, fileEpisode ?? 1);
+					if (fileSeason === undefined || fileEpisode === undefined) {
+						errors.push(
+							`Failed to match ${fileId}: could not determine season/episode from filename`
+						);
+						failed++;
+						continue;
+					}
+
+					const result = await this.matchEpisodeFile(file, tmdbId, fileSeason, fileEpisode);
 					if (result.success) {
 						matched++;
 						mediaId = result.mediaId;

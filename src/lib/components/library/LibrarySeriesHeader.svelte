@@ -63,6 +63,7 @@
 		onMonitorToggle?: (newValue: boolean) => void;
 		onSearch?: () => void;
 		onSearchMissing?: () => void;
+		onImport?: () => void;
 		onEdit?: () => void;
 		onDelete?: () => void;
 		onRefresh?: () => void;
@@ -82,6 +83,7 @@
 		onMonitorToggle,
 		onSearch,
 		onSearchMissing,
+		onImport,
 		onEdit,
 		onDelete,
 		onRefresh
@@ -225,6 +227,16 @@
 						<Package size={16} />
 						<span class="hidden sm:inline">Season Packs</span>
 					</button>
+					{#if onImport}
+						<button
+							class="btn gap-2 btn-ghost btn-sm"
+							onclick={onImport}
+							title="Import local media"
+						>
+							<Download size={16} />
+							<span class="hidden sm:inline">Import</span>
+						</button>
+					{/if}
 					<button
 						class="btn gap-2 btn-ghost btn-sm"
 						onclick={onRefresh}

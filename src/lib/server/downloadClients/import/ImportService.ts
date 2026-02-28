@@ -57,6 +57,11 @@ import { ImportWorker, workerManager } from '$lib/server/workers';
 import { monitoringScheduler } from '$lib/server/monitoring/MonitoringScheduler.js';
 import { searchSubtitlesForNewMedia } from '$lib/server/subtitles/services/SubtitleImportService.js';
 import { libraryMediaEvents } from '$lib/server/library/LibraryMediaEvents';
+import {
+	getMediaParseStem,
+	matchEpisodesByIdentifier,
+	resolveTvEpisodeIdentifier
+} from '$lib/server/library/tv-episode-resolver.js';
 
 /**
  * Import result for a single file
@@ -1198,9 +1203,18 @@ export class ImportService extends EventEmitter {
 		canMoveFiles: boolean
 	): Promise<ImportResult> {
 		// Parse episode info from filename
-		const parsed = this.parser.parse(basename(videoFile.path));
+		const parsed = this.parser.parse(getMediaParseStem(videoFile.path));
+		const identifier = resolveTvEpisodeIdentifier({
+			filePath: videoFile.path,
+			parsed,
+			seasonHint: queueItem.seasonNumber ?? undefined,
+			seriesType:
+				seriesData.seriesType === 'anime' || seriesData.seriesType === 'daily'
+					? seriesData.seriesType
+					: 'standard'
+		});
 
-		if (!parsed.episode) {
+		if (!identifier) {
 			return {
 				success: false,
 				sourcePath: videoFile.path,
@@ -1208,8 +1222,25 @@ export class ImportService extends EventEmitter {
 			};
 		}
 
-		const seasonNum = parsed.episode.season ?? queueItem.seasonNumber ?? 1;
-		const episodeNums = parsed.episode.episodes ?? [1];
+		const seriesEpisodes = await db
+			.select()
+			.from(episodes)
+			.where(eq(episodes.seriesId, seriesData.id));
+		const matchingEpisodes = matchEpisodesByIdentifier(seriesEpisodes, identifier);
+		if (matchingEpisodes.length === 0) {
+			return {
+				success: false,
+				sourcePath: videoFile.path,
+				error: 'Could not match imported file to an episode in the library'
+			};
+		}
+
+		const seasonNum = matchingEpisodes[0].seasonNumber;
+		const episodeNums = matchingEpisodes.map((episode) => episode.episodeNumber);
+		const firstEpisode = matchingEpisodes[0];
+		const absoluteNumber =
+			firstEpisode?.absoluteEpisodeNumber ??
+			this.getFallbackAbsoluteEpisodeNumber(seriesEpisodes, firstEpisode?.id);
 
 		// Build destination path
 		const seriesFolder = join(rootFolder.path, seriesData.path);
@@ -1222,7 +1253,10 @@ export class ImportService extends EventEmitter {
 			seasonNum,
 			episodeNums,
 			videoFile.path,
-			queueItem
+			queueItem,
+			firstEpisode?.title ?? undefined,
+			absoluteNumber,
+			firstEpisode?.airDate ?? undefined
 		);
 		const destPath = join(seasonFolder, destFileName);
 
@@ -1250,15 +1284,7 @@ export class ImportService extends EventEmitter {
 		const mediaInfo = await mediaInfoService.extractMediaInfo(destPath, { allowStrmProbe });
 		const importedMetadata = this.buildImportedMetadata(queueItem, videoFile.path, mediaInfo);
 
-		// Find matching episodes in database
-		const matchingEpisodes = await db
-			.select()
-			.from(episodes)
-			.where(and(eq(episodes.seriesId, seriesData.id), eq(episodes.seasonNumber, seasonNum)));
-
-		const episodeIds = matchingEpisodes
-			.filter((ep) => episodeNums.includes(ep.episodeNumber))
-			.map((ep) => ep.id);
+		const episodeIds = matchingEpisodes.map((ep) => ep.id);
 
 		// Check for existing files covering these episodes (upgrade scenario)
 		const existingFiles = await db
@@ -1646,9 +1672,13 @@ export class ImportService extends EventEmitter {
 		episodeNums: number[],
 		sourcePath: string,
 		queueItem: typeof downloadQueue.$inferSelect,
-		episodeTitle?: string
+		episodeTitle?: string,
+		absoluteNumber?: number,
+		airDate?: string
 	): string {
 		const parsed = this.parser.parse(queueItem.title);
+		const isAnime = seriesData.seriesType === 'anime';
+		const isDaily = seriesData.seriesType === 'daily';
 
 		// Build naming info from series and parsed release
 		// IMPORTANT: Spread releaseToNamingInfo FIRST, then override with explicit values
@@ -1660,10 +1690,47 @@ export class ImportService extends EventEmitter {
 			tvdbId: seriesData.tvdbId ?? undefined,
 			seasonNumber: seasonNum,
 			episodeNumbers: episodeNums,
-			episodeTitle: episodeTitle
+			episodeTitle,
+			absoluteNumber,
+			airDate,
+			isAnime,
+			isDaily
 		};
 
 		return this.getNamingService().generateEpisodeFileName(namingInfo);
+	}
+
+	private getFallbackAbsoluteEpisodeNumber(
+		allEpisodes: Array<typeof episodes.$inferSelect>,
+		episodeId?: string
+	): number | undefined {
+		if (!episodeId) {
+			return undefined;
+		}
+
+		let lastAbsolute = 0;
+		const regularEpisodes = [...allEpisodes]
+			.filter((episode) => episode.seasonNumber > 0)
+			.sort((a, b) => {
+				if (a.seasonNumber !== b.seasonNumber) {
+					return a.seasonNumber - b.seasonNumber;
+				}
+				return a.episodeNumber - b.episodeNumber;
+			});
+
+		for (const episode of regularEpisodes) {
+			const absoluteNumber =
+				typeof episode.absoluteEpisodeNumber === 'number' && episode.absoluteEpisodeNumber > 0
+					? episode.absoluteEpisodeNumber
+					: lastAbsolute + 1;
+
+			lastAbsolute = absoluteNumber;
+			if (episode.id === episodeId) {
+				return absoluteNumber;
+			}
+		}
+
+		return undefined;
 	}
 
 	private normalizeUnknownValue(value?: string | null): string | undefined {
