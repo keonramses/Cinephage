@@ -31,13 +31,78 @@ const STREAMING_LIMIT: RateLimitConfig = {
 };
 
 /**
+ * Check if an IP address is in a private/local network range
+ * RFC1918 private ranges + loopback + link-local
+ */
+function isPrivateIp(ip: string): boolean {
+	// Handle IPv4-mapped IPv6 addresses
+	if (ip.startsWith('::ffff:')) {
+		ip = ip.slice(7);
+	}
+
+	// IPv4 ranges
+	if (ip.includes('.')) {
+		const parts = ip.split('.').map(Number);
+		if (parts.length === 4 && parts.every((p) => !isNaN(p) && p >= 0 && p <= 255)) {
+			// 10.0.0.0/8
+			if (parts[0] === 10) return true;
+			// 172.16.0.0/12
+			if (parts[0] === 172 && parts[1] >= 16 && parts[1] <= 31) return true;
+			// 192.168.0.0/16
+			if (parts[0] === 192 && parts[1] === 168) return true;
+			// 127.0.0.0/8 (loopback)
+			if (parts[0] === 127) return true;
+			// 169.254.0.0/16 (link-local/APIPA)
+			if (parts[0] === 169 && parts[1] === 254) return true;
+		}
+	}
+
+	// IPv6
+	if (ip.includes(':')) {
+		// ::1 (loopback)
+		if (ip === '::1' || ip === '0:0:0:0:0:0:0:1') return true;
+		// fc00::/7 (unique local)
+		if (/^fc[0-9a-f]/i.test(ip)) return true;
+		// fe80::/10 (link-local)
+		if (/^fe80:/i.test(ip)) return true;
+	}
+
+	return false;
+}
+
+/**
  * Get rate limit key from request
  * Uses IP address + user agent hash for identification
+ *
+ * Security: Prevents IP spoofing by only trusting X-Forwarded-For when
+ * the direct connection comes from a private IP (indicating a reverse proxy)
  */
 function getRateLimitKey(event: RequestEvent, prefix: string): string {
 	const forwardedFor = event.request.headers.get('x-forwarded-for');
-	const ip = forwardedFor?.split(',')[0]?.trim() || event.getClientAddress();
+	const clientAddress = event.getClientAddress();
 	const userAgent = event.request.headers.get('user-agent') || 'unknown';
+
+	let ip: string;
+
+	// Only trust X-Forwarded-For if the direct connection is from a private IP
+	// (indicating we're behind a reverse proxy)
+	if (forwardedFor && isPrivateIp(clientAddress)) {
+		// Get the rightmost untrusted IP from the chain
+		// This prevents clients from spoofing their IP by adding entries to the header
+		const ips = forwardedFor.split(',').map((ip) => ip.trim());
+		// Find the last IP that's NOT from a private range (the actual client)
+		let clientIp = clientAddress;
+		for (let i = ips.length - 1; i >= 0; i--) {
+			if (!isPrivateIp(ips[i])) {
+				clientIp = ips[i];
+				break;
+			}
+		}
+		ip = clientIp;
+	} else {
+		// Direct connection - use the actual client address
+		ip = clientAddress;
+	}
 
 	// Simple hash of IP + user agent prefix
 	const hash = `${prefix}:${ip}:${userAgent.slice(0, 50)}`;
