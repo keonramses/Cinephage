@@ -1,0 +1,58 @@
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+
+const mockGetFolders = vi.fn<() => Promise<Array<{ id: string; path: string }>>>(async () => []);
+const mockRealpath = vi.fn<(input: string) => Promise<string>>(async (input: string) => input);
+
+vi.mock('$lib/server/downloadClients/RootFolderService.js', () => ({
+	RootFolderService: class {
+		getFolders = mockGetFolders;
+	}
+}));
+
+vi.mock('node:fs/promises', () => ({
+	realpath: mockRealpath
+}));
+
+describe('path-guard', () => {
+	beforeEach(() => {
+		mockGetFolders.mockClear();
+		mockRealpath.mockReset();
+		mockGetFolders.mockResolvedValue([]);
+		mockRealpath.mockImplementation(async (input: string) => input);
+		vi.resetModules();
+	});
+
+	it('allows a symlinked import path when its real path resolves into an allowed base path', async () => {
+		mockRealpath.mockImplementation(async (input: string) => {
+			if (input === '/downloads') {
+				return '/media/Pool/Downloads';
+			}
+			return input;
+		});
+
+		const { isPathAllowed } = await import('./path-guard.js');
+		await expect(isPathAllowed('/downloads')).resolves.toBe(true);
+	});
+
+	it('treats a symlinked path inside a managed root as managed', async () => {
+		mockGetFolders.mockResolvedValue([
+			{
+				id: 'rf-1',
+				path: '/media/Series'
+			}
+		]);
+		mockRealpath.mockImplementation(async (input: string) => {
+			if (input === '/series-link') {
+				return '/media/Series';
+			}
+			if (input === '/series-link/Show/file.mkv') {
+				return '/media/Series/Show/file.mkv';
+			}
+			return input;
+		});
+
+		const { isManagedRootPath, isPathInsideManagedRoot } = await import('./path-guard.js');
+		await expect(isManagedRootPath('/series-link')).resolves.toBe(true);
+		await expect(isPathInsideManagedRoot('/series-link/Show/file.mkv')).resolves.toBe(true);
+	});
+});
