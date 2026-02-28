@@ -15,7 +15,20 @@ import { createChildLogger } from '$lib/logging';
 
 const logger = createChildLogger({ module: 'StrmUpdateAPI' });
 
-export const POST: RequestHandler = async ({ request }) => {
+export const POST: RequestHandler = async ({ request, locals }) => {
+	// Require authentication
+	if (!locals.user) {
+		return json(
+			{
+				success: false,
+				totalFiles: 0,
+				updatedFiles: 0,
+				errors: [{ path: 'global', error: 'Authentication required' }]
+			},
+			{ status: 401 }
+		);
+	}
+
 	try {
 		// Parse request body
 		let customBaseUrl: string | undefined;
