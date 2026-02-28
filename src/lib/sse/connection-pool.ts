@@ -114,11 +114,16 @@ export function updateConnectionStatus(url: string, status: SSEStatus): void {
 
 /**
  * Record connection error
+ * Opens circuit breaker when error threshold is reached
  */
-export function recordConnectionError(url: string): void {
+export function recordConnectionError(url: string, threshold: number, timeout: number): void {
 	const conn = connectionPool.get(url);
 	if (conn) {
 		conn.errorCount++;
+		// Open circuit when threshold is reached
+		if (conn.errorCount >= threshold) {
+			conn.circuitOpenUntil = Date.now() + timeout;
+		}
 	}
 }
 

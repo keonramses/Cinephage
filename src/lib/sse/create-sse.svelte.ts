@@ -279,7 +279,7 @@ export function createSSE<T = Record<string, unknown>>(
 				debug('Connection error:', type, message);
 
 				if (config.shared) {
-					recordConnectionError(url);
+					recordConnectionError(url, config.circuitBreakerThreshold, config.circuitBreakerTimeout);
 				}
 
 				handlers.error?.(error);

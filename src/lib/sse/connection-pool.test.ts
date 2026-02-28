@@ -162,11 +162,24 @@ describe('Connection Pool', () => {
 			const conn = createConnection('ws://test');
 			registerConnection('ws://test', conn);
 
-			recordConnectionError('ws://test');
+			recordConnectionError('ws://test', 5, 30000);
 			expect(conn.errorCount).toBe(1);
 
-			recordConnectionError('ws://test');
+			recordConnectionError('ws://test', 5, 30000);
 			expect(conn.errorCount).toBe(2);
+		});
+
+		it('should open circuit when threshold is reached', () => {
+			const conn = createConnection('ws://test');
+			registerConnection('ws://test', conn);
+
+			// Record 5 errors (at threshold)
+			for (let i = 0; i < 5; i++) {
+				recordConnectionError('ws://test', 5, 30000);
+			}
+
+			expect(conn.errorCount).toBe(5);
+			expect(conn.circuitOpenUntil).toBeGreaterThan(Date.now());
 		});
 	});
 
