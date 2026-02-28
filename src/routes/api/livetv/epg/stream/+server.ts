@@ -20,6 +20,9 @@ import { db } from '$lib/server/db';
 import { livetvAccounts } from '$lib/server/db/schema';
 import { eq } from 'drizzle-orm';
 import type { RequestHandler } from './$types';
+import { createChildLogger } from '$lib/logging';
+
+const logger = createChildLogger({ module: 'LiveTVEPGStream' });
 
 interface EpgStatusData {
 	success: boolean;
@@ -92,8 +95,11 @@ export const GET: RequestHandler = async () => {
 				const status = await getEpgStatus();
 				const lineup = await channelLineupService.getLineup();
 				send('epg:initial', { status, lineup });
-			} catch {
-				// Error fetching initial state
+			} catch (error) {
+				logger.error('Failed to fetch initial EPG state', {
+					error: error instanceof Error ? error.message : 'Unknown error'
+				});
+				send('epg:error', { message: 'Failed to fetch initial state' });
 			}
 		};
 
