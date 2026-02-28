@@ -10,11 +10,12 @@ import {
 	movies,
 	movieFiles,
 	series,
+	seasons,
 	episodes,
 	episodeFiles,
 	rootFolders
 } from '$lib/server/db/schema';
-import { eq } from 'drizzle-orm';
+import { and, eq } from 'drizzle-orm';
 import { extname, join, dirname, basename } from 'path';
 import { logger } from '$lib/logging';
 import { NamingService, type MediaNamingInfo } from './NamingService';
@@ -295,9 +296,16 @@ export class RenamePreviewService {
 		// Load all episodes for this series for title lookup
 		const allEpisodes = db.select().from(episodes).where(eq(episodes.seriesId, seriesId)).all();
 		const episodeMap = new Map(allEpisodes.map((ep) => [ep.id, ep]));
+		const absoluteEpisodeMap = this.buildAbsoluteEpisodeFallbackMap(allEpisodes);
 
 		for (const file of files) {
-			const item = this.buildEpisodePreviewItem(show, file, episodeMap, rootFolderPath);
+			const item = this.buildEpisodePreviewItem(
+				show,
+				file,
+				episodeMap,
+				rootFolderPath,
+				absoluteEpisodeMap
+			);
 			result.totalFiles++;
 
 			if (item.status === 'error') {
@@ -387,10 +395,18 @@ export class RenamePreviewService {
 			}
 		}
 
-		for (const [mediaId, items] of groups) {
-			// Check if we need to rename the parent folder
-			const firstItem = items[0];
+		const touchedMovieIds = new Set<string>();
+		const touchedSeriesIds = new Set<string>();
 
+		for (const [mediaId, items] of groups) {
+			const firstItem = items[0];
+			if (firstItem?.mediaType === 'movie') {
+				touchedMovieIds.add(mediaId);
+			} else if (firstItem?.mediaType === 'episode') {
+				touchedSeriesIds.add(mediaId);
+			}
+
+			// Check if we need to rename the parent folder
 			if (
 				firstItem &&
 				firstItem.currentParentPath !== firstItem.newParentPath &&
@@ -527,6 +543,8 @@ export class RenamePreviewService {
 			}
 		}
 
+		await this.reconcileTouchedMedia(touchedMovieIds, touchedSeriesIds);
+
 		return result;
 	}
 
@@ -558,6 +576,7 @@ export class RenamePreviewService {
 			// Verify source file exists
 			const sourceExists = await fileExists(item.currentFullPath);
 			if (!sourceExists) {
+				await this.reconcileMissingSourceRecord(item);
 				logger.warn('[RenamePreviewService] Source file not found', {
 					fileId: item.fileId,
 					mediaType: item.mediaType,
@@ -654,6 +673,204 @@ export class RenamePreviewService {
 				newPath: item.newFullPath,
 				error: error instanceof Error ? error.message : 'Unknown error'
 			};
+		}
+	}
+
+	private async reconcileMissingSourceRecord(item: RenamePreviewItem): Promise<void> {
+		if (item.mediaType === 'movie') {
+			await this.reconcileMissingMovieFile(item.fileId, item.mediaId);
+			return;
+		}
+
+		await this.reconcileMissingEpisodeFile(item.fileId, item.mediaId);
+	}
+
+	private async reconcileMissingMovieFile(fileId: string, movieId: string): Promise<void> {
+		const fileRecord = db.select().from(movieFiles).where(eq(movieFiles.id, fileId)).get();
+		if (!fileRecord) {
+			return;
+		}
+
+		db.delete(movieFiles).where(eq(movieFiles.id, fileId)).run();
+
+		const remainingFiles = db
+			.select({ id: movieFiles.id })
+			.from(movieFiles)
+			.where(eq(movieFiles.movieId, movieId))
+			.all();
+
+		db.update(movies)
+			.set({ hasFile: remainingFiles.length > 0 })
+			.where(eq(movies.id, movieId))
+			.run();
+	}
+
+	private async reconcileTouchedMedia(
+		movieIds: Set<string>,
+		seriesIds: Set<string>
+	): Promise<void> {
+		for (const movieId of movieIds) {
+			await this.reconcileMovieFileRecords(movieId);
+		}
+
+		for (const seriesId of seriesIds) {
+			await this.reconcileSeriesFileRecords(seriesId);
+		}
+	}
+
+	private async reconcileMovieFileRecords(movieId: string): Promise<void> {
+		const movie = db
+			.select({ path: movies.path, rootFolderId: movies.rootFolderId })
+			.from(movies)
+			.where(eq(movies.id, movieId))
+			.get();
+
+		if (!movie?.rootFolderId) {
+			return;
+		}
+
+		const rootFolder = db
+			.select({ path: rootFolders.path })
+			.from(rootFolders)
+			.where(eq(rootFolders.id, movie.rootFolderId))
+			.get();
+
+		if (!rootFolder) {
+			return;
+		}
+
+		const files = db.select().from(movieFiles).where(eq(movieFiles.movieId, movieId)).all();
+		const existingFileIds = new Set<string>();
+
+		for (const file of files) {
+			const fullPath = join(rootFolder.path, movie.path, file.relativePath);
+			if (await fileExists(fullPath)) {
+				existingFileIds.add(file.id);
+				continue;
+			}
+
+			db.delete(movieFiles).where(eq(movieFiles.id, file.id)).run();
+		}
+
+		db.update(movies)
+			.set({ hasFile: existingFileIds.size > 0 })
+			.where(eq(movies.id, movieId))
+			.run();
+	}
+
+	private async reconcileMissingEpisodeFile(fileId: string, seriesId: string): Promise<void> {
+		const fileRecord = db.select().from(episodeFiles).where(eq(episodeFiles.id, fileId)).get();
+		if (!fileRecord) {
+			return;
+		}
+
+		db.delete(episodeFiles).where(eq(episodeFiles.id, fileId)).run();
+
+		for (const episodeId of fileRecord.episodeIds ?? []) {
+			const remainingEpisodeFiles = db
+				.select({ id: episodeFiles.id, episodeIds: episodeFiles.episodeIds })
+				.from(episodeFiles)
+				.where(eq(episodeFiles.seriesId, seriesId))
+				.all();
+
+			const stillHasFile = remainingEpisodeFiles.some(
+				(file) => file.episodeIds?.includes(episodeId) ?? false
+			);
+
+			db.update(episodes).set({ hasFile: stillHasFile }).where(eq(episodes.id, episodeId)).run();
+		}
+
+		await this.recalculateSeriesEpisodeCounts(seriesId);
+	}
+
+	private async reconcileSeriesFileRecords(seriesId: string): Promise<void> {
+		const show = db
+			.select({ path: series.path, rootFolderId: series.rootFolderId })
+			.from(series)
+			.where(eq(series.id, seriesId))
+			.get();
+
+		if (!show?.rootFolderId) {
+			return;
+		}
+
+		const rootFolder = db
+			.select({ path: rootFolders.path })
+			.from(rootFolders)
+			.where(eq(rootFolders.id, show.rootFolderId))
+			.get();
+
+		if (!rootFolder) {
+			return;
+		}
+
+		const allEpisodes = db.select().from(episodes).where(eq(episodes.seriesId, seriesId)).all();
+		const files = db.select().from(episodeFiles).where(eq(episodeFiles.seriesId, seriesId)).all();
+		const episodeIdsWithFiles = new Set<string>();
+
+		for (const file of files) {
+			const fullPath = join(rootFolder.path, show.path, file.relativePath);
+			if (await fileExists(fullPath)) {
+				for (const episodeId of file.episodeIds ?? []) {
+					episodeIdsWithFiles.add(episodeId);
+				}
+				continue;
+			}
+
+			db.delete(episodeFiles).where(eq(episodeFiles.id, file.id)).run();
+		}
+
+		for (const episode of allEpisodes) {
+			const shouldHaveFile = episodeIdsWithFiles.has(episode.id);
+			const hasFile = episode.hasFile ?? false;
+
+			if (shouldHaveFile === hasFile) {
+				continue;
+			}
+
+			db.update(episodes)
+				.set({
+					hasFile: shouldHaveFile,
+					lastSearchTime: shouldHaveFile ? episode.lastSearchTime : null
+				})
+				.where(eq(episodes.id, episode.id))
+				.run();
+		}
+
+		await this.recalculateSeriesEpisodeCounts(seriesId);
+	}
+
+	private async recalculateSeriesEpisodeCounts(seriesId: string): Promise<void> {
+		const allEpisodes = db.select().from(episodes).where(eq(episodes.seriesId, seriesId)).all();
+		const regularEpisodes = allEpisodes.filter((episode) => episode.seasonNumber !== 0);
+		const regularEpisodesWithFiles = regularEpisodes.filter((episode) => episode.hasFile);
+
+		db.update(series)
+			.set({
+				episodeFileCount: regularEpisodesWithFiles.length,
+				episodeCount: regularEpisodes.length
+			})
+			.where(eq(series.id, seriesId))
+			.run();
+
+		const seasonCounts = new Map<number, { total: number; withFiles: number }>();
+		for (const episode of allEpisodes) {
+			const existing = seasonCounts.get(episode.seasonNumber) ?? { total: 0, withFiles: 0 };
+			existing.total += 1;
+			if (episode.hasFile) {
+				existing.withFiles += 1;
+			}
+			seasonCounts.set(episode.seasonNumber, existing);
+		}
+
+		for (const [seasonNumber, counts] of seasonCounts) {
+			db.update(seasons)
+				.set({
+					episodeCount: counts.total,
+					episodeFileCount: counts.withFiles
+				})
+				.where(and(eq(seasons.seriesId, seriesId), eq(seasons.seasonNumber, seasonNumber)))
+				.run();
 		}
 	}
 
@@ -764,7 +981,8 @@ export class RenamePreviewService {
 		show: typeof series.$inferSelect,
 		file: typeof episodeFiles.$inferSelect,
 		episodeMap: Map<string, typeof episodes.$inferSelect>,
-		rootFolderPath: string
+		rootFolderPath: string,
+		absoluteEpisodeMap: Map<string, number>
 	): RenamePreviewItem {
 		try {
 			// Get current filename for fallback parsing
@@ -816,7 +1034,10 @@ export class RenamePreviewService {
 				seasonNumber: file.seasonNumber,
 				episodeNumbers,
 				episodeTitle: firstEpisode.title ?? undefined,
-				absoluteNumber: firstEpisode.absoluteEpisodeNumber ?? undefined,
+				absoluteNumber:
+					firstEpisode.absoluteEpisodeNumber ??
+					absoluteEpisodeMap.get(firstEpisode.id) ??
+					undefined,
 				airDate: firstEpisode.airDate ?? undefined,
 				isAnime,
 				isDaily,
@@ -893,6 +1114,35 @@ export class RenamePreviewService {
 				error: error instanceof Error ? error.message : 'Failed to generate filename'
 			};
 		}
+	}
+
+	private buildAbsoluteEpisodeFallbackMap(
+		allEpisodes: Array<typeof episodes.$inferSelect>
+	): Map<string, number> {
+		const absoluteEpisodeMap = new Map<string, number>();
+		let lastAbsolute = 0;
+
+		const regularEpisodes = [...allEpisodes]
+			.filter((episode) => episode.seasonNumber > 0)
+			.sort((a, b) => {
+				if (a.seasonNumber !== b.seasonNumber) {
+					return a.seasonNumber - b.seasonNumber;
+				}
+				return a.episodeNumber - b.episodeNumber;
+			});
+
+		for (const episode of regularEpisodes) {
+			if (typeof episode.absoluteEpisodeNumber === 'number' && episode.absoluteEpisodeNumber > 0) {
+				lastAbsolute = episode.absoluteEpisodeNumber;
+				absoluteEpisodeMap.set(episode.id, episode.absoluteEpisodeNumber);
+				continue;
+			}
+
+			lastAbsolute += 1;
+			absoluteEpisodeMap.set(episode.id, lastAbsolute);
+		}
+
+		return absoluteEpisodeMap;
 	}
 
 	/**

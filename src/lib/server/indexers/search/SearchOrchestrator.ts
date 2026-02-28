@@ -348,6 +348,12 @@ export class SearchOrchestrator {
 			filtered = this.filterByCategoryMatch(filtered, searchType);
 		}
 
+		// Hard filter by ID match with title+year fallback
+		// Completely removes releases with wrong IDs or mismatched title/year
+		if (isMovieSearch(enrichedCriteria) || isTvSearch(enrichedCriteria)) {
+			filtered = this.filterByIdOrTitleMatch(filtered, enrichedCriteria);
+		}
+
 		// Filter by title relevance (safety net for irrelevant results)
 		if (enrichedCriteria.searchType !== 'basic') {
 			filtered = this.filterByTitleRelevance(filtered, enrichedCriteria);
@@ -802,14 +808,60 @@ export class SearchOrchestrator {
 		// with incomplete ID mapping (common on some Newznab instances).
 		if (hasSearchableIds(criteria) && indexerSupportsIds) {
 			const idCriteria = createIdOnlyCriteria(criteria);
-			const idReleases = await indexer.search(idCriteria);
-
-			if (idReleases.length > 0) {
-				return { releases: idReleases, searchMethod: 'id' };
-			}
+			let idReleases = await indexer.search(idCriteria);
 
 			const hasTextFallbackSource =
 				!!criteria.query || !!(criteria.searchTitles && criteria.searchTitles.length > 0);
+
+			// Some Newznab providers over-constrain movie ID searches when q/year
+			// are present together. Retry once with IDs only before text fallback.
+			if (idReleases.length === 0 && isMovieSearch(criteria) && (criteria.query || criteria.year)) {
+				const movieIdOnlyCriteria = {
+					...criteria,
+					query: undefined,
+					year: undefined
+				};
+				const movieIdOnlyReleases = await indexer.search(movieIdOnlyCriteria);
+				if (movieIdOnlyReleases.length > 0) {
+					logger.debug('Movie ID retry without q/year returned results', {
+						indexer: indexer.name,
+						imdbId: criteria.imdbId,
+						tmdbId: criteria.tmdbId
+					});
+					idReleases = movieIdOnlyReleases;
+				}
+			}
+
+			if (idReleases.length > 0) {
+				// For interactive movie searches, supplement ID results with text variants.
+				// This matches NZBHydra-style behavior where text variants can surface
+				// additional releases even when ID lookup succeeds.
+				const shouldSupplementWithText =
+					isMovieSearch(criteria) &&
+					criteria.searchSource === 'interactive' &&
+					hasTextFallbackSource;
+				if (shouldSupplementWithText) {
+					const textReleases = await this.executeMultiTitleTextSearch(indexer, criteria);
+					if (textReleases.length > 0) {
+						const merged = [...idReleases];
+						const seenGuids = new Set(idReleases.map((r) => r.guid));
+						for (const release of textReleases) {
+							if (!seenGuids.has(release.guid)) {
+								seenGuids.add(release.guid);
+								merged.push(release);
+							}
+						}
+						logger.debug('Supplemented movie ID results with text fallback', {
+							indexer: indexer.name,
+							idResults: idReleases.length,
+							textResults: textReleases.length,
+							mergedResults: merged.length
+						});
+						return { releases: merged, searchMethod: 'text' };
+					}
+				}
+				return { releases: idReleases, searchMethod: 'id' };
+			}
 
 			if (!hasTextFallbackSource) {
 				return { releases: [], searchMethod: 'id' };
@@ -1303,9 +1355,11 @@ export class SearchOrchestrator {
 			const releaseName = normalize(extractReleaseName(release.title));
 			if (releaseName.length === 0) return true; // Can't parse, keep it
 
-			// Check if any expected title is a substring of the release name or vice versa
+			// Check if any expected title is similar enough to the release name
+			// Using Levenshtein distance-based similarity instead of substring matching
+			// to prevent false positives like "TransformersOne" matching "Transformers"
 			const matches = normalizedExpected.some((expected) => {
-				return releaseName.includes(expected) || expected.includes(releaseName);
+				return this.calculateTitleSimilarity(releaseName, expected) >= 0.7;
 			});
 
 			if (!matches) {
@@ -1329,6 +1383,222 @@ export class SearchOrchestrator {
 		}
 
 		return filtered;
+	}
+
+	/**
+	 * Calculate title similarity using Levenshtein distance.
+	 * Returns a value between 0 (completely different) and 1 (identical).
+	 */
+	private calculateTitleSimilarity(a: string, b: string): number {
+		if (a === b) return 1.0;
+
+		const m = a.length;
+		const n = b.length;
+
+		// Create distance matrix
+		const d: number[][] = [];
+		for (let i = 0; i <= n; i++) {
+			d[i] = [i];
+		}
+		for (let j = 0; j <= m; j++) {
+			d[0][j] = j;
+		}
+
+		// Fill the matrix
+		for (let i = 1; i <= n; i++) {
+			for (let j = 1; j <= m; j++) {
+				if (b.charAt(i - 1) === a.charAt(j - 1)) {
+					d[i][j] = d[i - 1][j - 1];
+				} else {
+					d[i][j] = Math.min(
+						d[i - 1][j - 1] + 1, // substitution
+						d[i][j - 1] + 1, // insertion
+						d[i - 1][j] + 1 // deletion
+					);
+				}
+			}
+		}
+
+		const maxLength = Math.max(m, n);
+		if (maxLength === 0) return 1.0;
+
+		return 1 - d[n][m] / maxLength;
+	}
+
+	/**
+	 * Filter releases by ID match with title+year fallback.
+	 *
+	 * PRIORITY 1: ID Matching (preferred)
+	 * - If indexer provides TMDB/IMDB/TVDB ID and it doesn't match search criteria, hard reject
+	 * - If IDs match exactly, accept immediately
+	 *
+	 * PRIORITY 2: Title + Year Fallback (when no IDs)
+	 * - Validate title similarity >= 0.7 AND year within 1 year
+	 * - If can't validate (no criteria), keep release
+	 *
+	 * This completely removes mismatched releases (not just marks as rejected).
+	 */
+	private filterByIdOrTitleMatch(
+		releases: ReleaseResult[],
+		criteria: SearchCriteria
+	): ReleaseResult[] {
+		// Only process movie or TV searches
+		if (!isMovieSearch(criteria) && !isTvSearch(criteria)) {
+			return releases;
+		}
+
+		// Get search IDs (type-safe access)
+		const searchTmdbId =
+			isMovieSearch(criteria) || isTvSearch(criteria) ? criteria.tmdbId : undefined;
+		const searchImdbId =
+			isMovieSearch(criteria) || isTvSearch(criteria) ? criteria.imdbId : undefined;
+		const searchTvdbId = isTvSearch(criteria) ? criteria.tvdbId : undefined;
+		const searchYear = isMovieSearch(criteria) || isTvSearch(criteria) ? criteria.year : undefined;
+
+		// Skip if we have no way to validate (no search IDs or titles)
+		const hasSearchIds = searchTmdbId || searchImdbId || searchTvdbId;
+		const hasSearchTitles = criteria.searchTitles && criteria.searchTitles.length > 0;
+		const hasSearchYear = searchYear;
+
+		if (!hasSearchIds && !hasSearchTitles && !hasSearchYear) {
+			return releases;
+		}
+
+		const beforeCount = releases.length;
+
+		const filtered = releases.filter((release) => {
+			let parsed: ReturnType<typeof parseRelease> | undefined;
+			const getParsed = () => {
+				if (!parsed) {
+					parsed = parseRelease(release.title);
+				}
+				return parsed;
+			};
+
+			// PRIORITY 1: ID Matching (if both sides have IDs)
+
+			// TMDB ID check
+			if (searchTmdbId && release.tmdbId) {
+				if (release.tmdbId !== searchTmdbId) {
+					logger.debug('[SearchOrchestrator] ID mismatch - removing release', {
+						releaseTitle: release.title,
+						releaseTmdbId: release.tmdbId,
+						criteriaTmdbId: searchTmdbId,
+						indexer: release.indexerName
+					});
+					return false; // Hard reject
+				}
+				// IDs match - accept immediately
+				return true;
+			}
+
+			// IMDB ID check
+			if (searchImdbId && release.imdbId) {
+				if (release.imdbId !== searchImdbId) {
+					logger.debug('[SearchOrchestrator] ID mismatch - removing release', {
+						releaseTitle: release.title,
+						releaseImdbId: release.imdbId,
+						criteriaImdbId: searchImdbId,
+						indexer: release.indexerName
+					});
+					return false; // Hard reject
+				}
+				// IDs match - accept immediately
+				return true;
+			}
+
+			// TVDB ID check (TV only)
+			if (searchTvdbId && release.tvdbId) {
+				if (release.tvdbId !== searchTvdbId) {
+					logger.debug('[SearchOrchestrator] TVDB ID mismatch - removing release', {
+						releaseTitle: release.title,
+						releaseTvdbId: release.tvdbId,
+						criteriaTvdbId: searchTvdbId,
+						indexer: release.indexerName
+					});
+					return false; // Hard reject
+				}
+				// IDs match - accept immediately
+				return true;
+			}
+
+			// For movies, enforce strict year matching whenever we can parse a year
+			// from the release title, even if title variants are unavailable.
+			if (isMovieSearch(criteria) && searchYear) {
+				const parsedRelease = getParsed();
+				if (parsedRelease.year && Math.abs(parsedRelease.year - searchYear) > 1) {
+					logger.debug('[SearchOrchestrator] Year mismatch - removing movie release', {
+						releaseTitle: release.title,
+						releaseYear: parsedRelease.year,
+						criteriaYear: searchYear,
+						indexer: release.indexerName
+					});
+					return false;
+				}
+			}
+
+			// PRIORITY 2: Title + Year Fallback (if no ID match possible)
+			if (hasSearchTitles && hasSearchYear) {
+				// Parse release title
+				const parsedRelease = getParsed();
+
+				// Check title similarity
+				const releaseName = this.normalizeForComparison(parsedRelease.cleanTitle);
+				const titleMatch = criteria.searchTitles!.some((expectedTitle) => {
+					const expectedName = this.normalizeForComparison(expectedTitle);
+					const similarity = this.calculateTitleSimilarity(releaseName, expectedName);
+					return similarity >= 0.7;
+				});
+
+				// Check year (allow 1 year difference for release/production year differences)
+				const yearMatch = parsedRelease.year && Math.abs(parsedRelease.year - searchYear!) <= 1;
+
+				if (!titleMatch || !yearMatch) {
+					logger.debug('[SearchOrchestrator] Title/Year mismatch - removing release', {
+						releaseTitle: release.title,
+						parsedTitle: parsedRelease.cleanTitle,
+						parsedYear: parsedRelease.year,
+						criteriaYear: searchYear,
+						titleMatch,
+						yearMatch
+					});
+					return false; // Hard reject
+				}
+
+				// Title and year match - accept
+				return true;
+			}
+
+			// If we have no way to validate (no IDs, no criteria), keep it
+			// Let downstream filters handle it
+			return true;
+		});
+
+		if (filtered.length < beforeCount) {
+			logger.info('[SearchOrchestrator] ID/Title filter removed mismatched releases', {
+				before: beforeCount,
+				after: filtered.length,
+				removed: beforeCount - filtered.length,
+				criteriaTmdbId: searchTmdbId,
+				criteriaImdbId: searchImdbId,
+				hadSearchTitles: hasSearchTitles,
+				criteriaYear: searchYear
+			});
+		}
+
+		return filtered;
+	}
+
+	/**
+	 * Normalize a string for title comparison.
+	 * Removes punctuation, converts to lowercase, normalizes whitespace.
+	 */
+	private normalizeForComparison(str: string): string {
+		return str
+			.toLowerCase()
+			.replace(/[^\w\s]/g, '') // Remove punctuation
+			.replace(/\s+/g, ' ') // Normalize whitespace
+			.trim();
 	}
 
 	/**

@@ -18,6 +18,7 @@
 	import { SvelteSet, SvelteMap } from 'svelte/reactivity';
 	import { page } from '$app/stores';
 	import { goto } from '$app/navigation';
+	import { resolvePath } from '$lib/utils/routing';
 	import { createDynamicSSE } from '$lib/sse';
 	import { mobileSSEStatus } from '$lib/sse/mobileStatus.svelte';
 
@@ -387,6 +388,17 @@
 		isSearchModalOpen = true;
 	}
 
+	function handleImport() {
+		const query = [
+			`mediaType=tv`,
+			`tmdbId=${encodeURIComponent(String(series.tmdbId))}`,
+			`libraryId=${encodeURIComponent(series.id)}`,
+			`title=${encodeURIComponent(series.title)}`,
+			...(series.year ? [`year=${encodeURIComponent(String(series.year))}`] : [])
+		].join('&');
+		void goto(resolvePath(`/library/import?${query}`));
+	}
+
 	function handleEdit() {
 		isEditModalOpen = true;
 	}
@@ -514,6 +526,7 @@
 				series.scoringProfileId = editData.scoringProfileId;
 				series.rootFolderId = editData.rootFolderId;
 				series.seasonFolder = editData.seasonFolder;
+				series.seriesType = editData.seriesType;
 				series.wantsSubtitles = editData.wantsSubtitles;
 
 				const newFolder = data.rootFolders.find((f) => f.id === editData.rootFolderId);
@@ -1241,6 +1254,7 @@
 		onMonitorToggle={handleMonitorToggle}
 		onSearch={handleSearch}
 		onSearchMissing={handleSearchMissing}
+		onImport={handleImport}
 		onEdit={handleEdit}
 		onDelete={handleDelete}
 		onRefresh={handleRefresh}

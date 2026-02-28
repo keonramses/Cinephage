@@ -1,0 +1,1606 @@
+import { randomUUID } from 'node:crypto';
+import { basename, dirname, extname, join, resolve } from 'node:path';
+import { readdir, stat, unlink } from 'node:fs/promises';
+import { eq, inArray } from 'drizzle-orm';
+import { db } from '$lib/server/db/index.js';
+import { movies, rootFolders, series, unmatchedFiles } from '$lib/server/db/schema.js';
+import { tmdb } from '$lib/server/tmdb.js';
+import { logger } from '$lib/logging';
+import { parseRelease, extractExternalIds } from '$lib/server/indexers/parser/ReleaseParser.js';
+import { isVideoFile, mediaInfoService, MediaInfoService } from '$lib/server/library/media-info.js';
+import { unmatchedFileService } from '$lib/server/library/unmatched-file-service.js';
+import { namingSettingsService } from '$lib/server/library/naming/NamingSettingsService.js';
+import {
+	NamingService,
+	releaseToNamingInfo,
+	type MediaNamingInfo
+} from '$lib/server/library/naming/NamingService.js';
+import {
+	ensureDirectory,
+	ImportMode,
+	transferFileWithMode
+} from '$lib/server/downloadClients/import/FileTransfer.js';
+import { validateRootFolder, type MediaType } from '$lib/server/library/LibraryAddService.js';
+import {
+	extractSeasonFromPath,
+	getMediaParseStem,
+	resolveTvEpisodeIdentifier
+} from '$lib/server/library/tv-episode-resolver.js';
+
+interface SourceMediaFile {
+	path: string;
+	size: number;
+}
+
+interface SuggestedMatch {
+	tmdbId: number;
+	title: string;
+	year?: number;
+	confidence: number;
+	mediaType: MediaType;
+}
+
+export interface ManualImportMatch extends SuggestedMatch {
+	inLibrary: boolean;
+	libraryId?: string;
+	rootFolderId?: string | null;
+	rootFolderPath?: string | null;
+}
+
+interface ManualImportDetectionData {
+	sourcePath: string;
+	selectedFilePath: string;
+	fileName: string;
+	detectedFileCount: number;
+	detectedSeasons?: number[];
+	suggestedSeason?: number;
+	parsedTitle: string;
+	parsedYear?: number;
+	parsedSeason?: number;
+	parsedEpisode?: number;
+	inferredMediaType: MediaType;
+	matches: ManualImportMatch[];
+}
+
+export interface ManualImportDetectionGroup extends ManualImportDetectionData {
+	id: string;
+	displayName: string;
+	sourceType: 'file' | 'folder';
+}
+
+export interface ManualImportDetectionResult extends ManualImportDetectionData {
+	grouped: boolean;
+	totalGroups: number;
+	selectedGroupId: string;
+	groups: ManualImportDetectionGroup[];
+}
+
+export interface ExecuteManualImportRequest {
+	sourcePath?: string;
+	selectedFilePath?: string;
+	mediaType: MediaType;
+	tmdbId: number;
+	importTarget: 'new' | 'existing';
+	rootFolderId?: string;
+	seasonNumber?: number;
+	episodeNumber?: number;
+}
+
+export interface ExecuteManualImportResult {
+	success: boolean;
+	mediaType: MediaType;
+	tmdbId: number;
+	libraryId: string;
+	importedPath: string;
+	importedPaths: string[];
+	importedCount: number;
+}
+
+/**
+ * ManualImportService
+ *
+ * Supports:
+ * - Detecting media from a user-selected local path
+ * - Suggesting TMDB matches with confidence
+ * - Importing files into managed root folders
+ * - Reusing unmatched matcher flow for DB linking + media info + subtitle trigger
+ */
+export class ManualImportService {
+	private static instance: ManualImportService;
+	private namingService: NamingService;
+
+	private constructor() {
+		this.namingService = new NamingService(namingSettingsService.getConfigSync());
+	}
+
+	static getInstance(): ManualImportService {
+		if (!ManualImportService.instance) {
+			ManualImportService.instance = new ManualImportService();
+		}
+		return ManualImportService.instance;
+	}
+
+	async detectFromPath(
+		sourcePath: string,
+		preferredMediaType?: MediaType
+	): Promise<ManualImportDetectionResult> {
+		const normalizedSourcePath = resolve(sourcePath);
+		const detectionGroupPaths = await this.resolveDetectionGroupPaths(normalizedSourcePath);
+		const groups: ManualImportDetectionGroup[] = [];
+
+		for (const groupPath of detectionGroupPaths) {
+			try {
+				groups.push(await this.detectGroupFromPath(groupPath, preferredMediaType));
+			} catch (error) {
+				logger.warn('[ManualImport] Skipping group that failed detection', {
+					groupPath,
+					error: error instanceof Error ? error.message : String(error)
+				});
+			}
+		}
+
+		if (groups.length === 0) {
+			throw new Error('No media files found in selected directory');
+		}
+
+		const selectedGroup = groups[0];
+		return {
+			...selectedGroup,
+			grouped: groups.length > 1,
+			totalGroups: groups.length,
+			selectedGroupId: selectedGroup.id,
+			groups
+		};
+	}
+
+	private async detectGroupFromPath(
+		groupPath: string,
+		preferredMediaType?: MediaType
+	): Promise<ManualImportDetectionGroup> {
+		const normalizedGroupPath = resolve(groupPath);
+		const sourceFiles = await this.resolveSourceFiles(normalizedGroupPath);
+		const selectedFile = this.selectPrimarySourceFile(sourceFiles);
+		const fileStem = getMediaParseStem(selectedFile.path);
+		const parsed = parseRelease(fileStem);
+		const tvIdentifier = resolveTvEpisodeIdentifier({
+			filePath: selectedFile.path,
+			parsed
+		});
+		const parsedTitle = parsed.cleanTitle || fileStem;
+		const inferredMediaType: MediaType = preferredMediaType || (tvIdentifier ? 'tv' : 'movie');
+		const detectedSeasons = this.extractDetectedSeasons(sourceFiles);
+		const suggestedSeason = extractSeasonFromPath(selectedFile.path);
+		const matches = await this.findMatches(
+			parsedTitle,
+			parsed.year,
+			inferredMediaType,
+			selectedFile.path
+		);
+		const enrichedMatches = await this.enrichMatchesWithLibraryStatus(matches);
+		const sourceStats = await stat(normalizedGroupPath);
+		const sourceType: 'file' | 'folder' = sourceStats.isDirectory() ? 'folder' : 'file';
+		const displayName =
+			sourceType === 'folder' ? basename(normalizedGroupPath) : basename(normalizedGroupPath);
+
+		return {
+			id: normalizedGroupPath,
+			displayName,
+			sourceType,
+			sourcePath: normalizedGroupPath,
+			selectedFilePath: selectedFile.path,
+			fileName: basename(selectedFile.path),
+			detectedFileCount: sourceFiles.length,
+			detectedSeasons:
+				inferredMediaType === 'tv' && detectedSeasons.length > 0 ? detectedSeasons : undefined,
+			suggestedSeason: inferredMediaType === 'tv' ? suggestedSeason : undefined,
+			parsedTitle,
+			parsedYear: parsed.year,
+			parsedSeason: tvIdentifier?.numbering === 'standard' ? tvIdentifier.seasonNumber : undefined,
+			parsedEpisode:
+				tvIdentifier?.numbering === 'standard' ? tvIdentifier.episodeNumbers[0] : undefined,
+			inferredMediaType,
+			matches: enrichedMatches
+		};
+	}
+
+	async executeImport(request: ExecuteManualImportRequest): Promise<ExecuteManualImportResult> {
+		const importSourcePath = request.sourcePath ?? request.selectedFilePath;
+		if (!importSourcePath) {
+			throw new Error('A source path is required for import');
+		}
+		const sourcePath = resolve(importSourcePath);
+		const sourceFiles = await this.resolveSourceFiles(sourcePath);
+		if (sourceFiles.length === 0) {
+			throw new Error('No importable media files found');
+		}
+
+		this.namingService.updateConfig(namingSettingsService.getConfigSync());
+
+		let rootFolder: typeof rootFolders.$inferSelect;
+		const importedPaths: string[] = [];
+		const unmatchedIds: string[] = [];
+		const episodeMapping: Record<string, { season: number; episode: number }> = {};
+
+		if (request.mediaType === 'movie') {
+			const movieContext = await this.resolveMovieContext(request);
+			rootFolder = movieContext.rootFolder;
+			if (rootFolder.readOnly) {
+				throw new Error('Cannot import to read-only root folder');
+			}
+
+			const sourceFile = this.selectPrimarySourceFile(sourceFiles);
+			const sourceBaseName = getMediaParseStem(sourceFile.path);
+			const parsed = parseRelease(sourceBaseName);
+			const namingInfo = await this.buildMovieNamingInfo(
+				sourceFile.path,
+				parsed,
+				movieContext.namingInfoBase
+			);
+			const destinationPath = this.buildMovieDestinationPath(
+				rootFolder.path,
+				movieContext.folderName,
+				namingInfo,
+				extname(sourceFile.path)
+			);
+
+			await this.transferSourceFile(
+				sourceFile.path,
+				destinationPath,
+				rootFolder.preserveSymlinks ?? false
+			);
+			const unmatchedId = await this.insertUnmatchedImportRecord({
+				destinationPath,
+				rootFolderId: rootFolder.id,
+				mediaType: 'movie',
+				parsedTitle: parsed.cleanTitle || sourceBaseName,
+				parsedYear: parsed.year,
+				tmdbId: request.tmdbId
+			});
+			importedPaths.push(destinationPath);
+			unmatchedIds.push(unmatchedId);
+		} else {
+			const tvContext = await this.resolveTvContext(request);
+			rootFolder = tvContext.rootFolder;
+			if (rootFolder.readOnly) {
+				throw new Error('Cannot import to read-only root folder');
+			}
+
+			const episodeTitleCache = new Map<number, Map<number, string | undefined>>();
+			const tvFiles = this.selectTvSourceFiles(sourceFiles);
+			const destinationSet = new Set<string>();
+
+			for (const sourceFile of tvFiles) {
+				const sourceBaseName = getMediaParseStem(sourceFile.path);
+				const parsed = parseRelease(sourceBaseName);
+				const fileMapping = this.resolveTvEpisodeMapping(
+					parsed,
+					request,
+					tvFiles.length,
+					sourceFile.path
+				);
+
+				if (!fileMapping) {
+					throw new Error(
+						`Could not determine season/episode for "${basename(sourceFile.path)}". Add season/episode tags to the filename or import one file at a time with manual overrides.`
+					);
+				}
+
+				const episodeTitle = await this.getEpisodeTitleCached(
+					request.tmdbId,
+					fileMapping.seasonNumber,
+					fileMapping.episodeNumber,
+					episodeTitleCache
+				);
+				const namingInfo = await this.buildEpisodeNamingInfo(
+					sourceFile.path,
+					parsed,
+					tvContext.namingInfoBase,
+					fileMapping.seasonNumber,
+					fileMapping.episodeNumber,
+					episodeTitle
+				);
+				const destinationPath = this.buildEpisodeDestinationPath(
+					rootFolder.path,
+					tvContext.seriesFolderName,
+					tvContext.useSeasonFolders,
+					fileMapping.seasonNumber,
+					namingInfo,
+					extname(sourceFile.path)
+				);
+
+				if (destinationSet.has(destinationPath)) {
+					throw new Error(
+						`Import naming collision detected for "${basename(sourceFile.path)}". Multiple files resolved to the same destination path.`
+					);
+				}
+				destinationSet.add(destinationPath);
+
+				await this.transferSourceFile(
+					sourceFile.path,
+					destinationPath,
+					rootFolder.preserveSymlinks ?? false
+				);
+				const unmatchedId = await this.insertUnmatchedImportRecord({
+					destinationPath,
+					rootFolderId: rootFolder.id,
+					mediaType: 'tv',
+					parsedTitle: parsed.cleanTitle || sourceBaseName,
+					parsedYear: parsed.year,
+					parsedSeason: fileMapping.seasonNumber,
+					parsedEpisode: fileMapping.episodeNumber,
+					tmdbId: request.tmdbId
+				});
+
+				importedPaths.push(destinationPath);
+				unmatchedIds.push(unmatchedId);
+				episodeMapping[unmatchedId] = {
+					season: fileMapping.seasonNumber,
+					episode: fileMapping.episodeNumber
+				};
+			}
+		}
+
+		if (unmatchedIds.length === 0) {
+			throw new Error('No files were queued for import');
+		}
+
+		try {
+			const matchResult = await unmatchedFileService.matchFiles({
+				fileIds: unmatchedIds,
+				tmdbId: request.tmdbId,
+				mediaType: request.mediaType,
+				...(request.mediaType === 'tv'
+					? {
+							episodeMapping: {
+								...episodeMapping
+							}
+						}
+					: {})
+			});
+
+			if (!matchResult.success) {
+				throw new Error(matchResult.errors[0] || 'Failed to link imported file');
+			}
+		} catch (error) {
+			for (const unmatchedId of unmatchedIds) {
+				await db
+					.delete(unmatchedFiles)
+					.where(eq(unmatchedFiles.id, unmatchedId))
+					.catch(() => undefined);
+			}
+			for (const importedPath of importedPaths) {
+				await unlink(importedPath).catch(() => undefined);
+			}
+
+			throw error;
+		}
+
+		if (request.mediaType === 'movie') {
+			const [movie] = await db
+				.select({ id: movies.id })
+				.from(movies)
+				.where(eq(movies.tmdbId, request.tmdbId))
+				.limit(1);
+
+			if (!movie) {
+				throw new Error('Movie import completed but library item was not found');
+			}
+
+			return {
+				success: true,
+				mediaType: 'movie',
+				tmdbId: request.tmdbId,
+				libraryId: movie.id,
+				importedPath: importedPaths[0],
+				importedPaths,
+				importedCount: importedPaths.length
+			};
+		}
+
+		const [show] = await db
+			.select({ id: series.id })
+			.from(series)
+			.where(eq(series.tmdbId, request.tmdbId))
+			.limit(1);
+
+		if (!show) {
+			throw new Error('Series import completed but library item was not found');
+		}
+
+		return {
+			success: true,
+			mediaType: 'tv',
+			tmdbId: request.tmdbId,
+			libraryId: show.id,
+			importedPath: importedPaths[0],
+			importedPaths,
+			importedCount: importedPaths.length
+		};
+	}
+
+	private buildMovieDestinationPath(
+		rootFolderPath: string,
+		folderName: string,
+		namingInfo: MediaNamingInfo,
+		sourceExtension: string
+	): string {
+		const fileName = this.namingService.generateMovieFileName({
+			...namingInfo,
+			originalExtension: sourceExtension
+		});
+		return join(rootFolderPath, folderName, fileName);
+	}
+
+	private buildEpisodeDestinationPath(
+		rootFolderPath: string,
+		seriesFolderName: string,
+		useSeasonFolders: boolean,
+		seasonNumber: number,
+		namingInfo: MediaNamingInfo,
+		sourceExtension: string
+	): string {
+		const episodeFileName = this.namingService.generateEpisodeFileName({
+			...namingInfo,
+			originalExtension: sourceExtension
+		});
+		const seasonFolderName = this.namingService.generateSeasonFolderName(seasonNumber);
+		return useSeasonFolders
+			? join(rootFolderPath, seriesFolderName, seasonFolderName, episodeFileName)
+			: join(rootFolderPath, seriesFolderName, episodeFileName);
+	}
+
+	private async resolveMovieContext(request: ExecuteManualImportRequest): Promise<{
+		rootFolder: typeof rootFolders.$inferSelect;
+		folderName: string;
+		namingInfoBase: MediaNamingInfo;
+	}> {
+		if (request.importTarget === 'existing') {
+			const [movie] = await db
+				.select({
+					id: movies.id,
+					title: movies.title,
+					year: movies.year,
+					path: movies.path,
+					imdbId: movies.imdbId,
+					rootFolderId: movies.rootFolderId
+				})
+				.from(movies)
+				.where(eq(movies.tmdbId, request.tmdbId))
+				.limit(1);
+
+			if (!movie) {
+				throw new Error('Selected movie is not in the library');
+			}
+
+			if (!movie.rootFolderId) {
+				throw new Error('Selected movie has no root folder configured');
+			}
+
+			const [rootFolder] = await db
+				.select()
+				.from(rootFolders)
+				.where(eq(rootFolders.id, movie.rootFolderId))
+				.limit(1);
+
+			if (!rootFolder || rootFolder.mediaType !== 'movie') {
+				throw new Error('Selected movie root folder is missing or invalid');
+			}
+
+			return {
+				rootFolder,
+				folderName: movie.path,
+				namingInfoBase: {
+					title: movie.title,
+					year: movie.year ?? undefined,
+					tmdbId: request.tmdbId,
+					imdbId: movie.imdbId ?? undefined
+				}
+			};
+		}
+
+		if (!request.rootFolderId) {
+			throw new Error('Root folder is required for new movie import');
+		}
+
+		await validateRootFolder(request.rootFolderId, 'movie');
+		const [rootFolder] = await db
+			.select()
+			.from(rootFolders)
+			.where(eq(rootFolders.id, request.rootFolderId))
+			.limit(1);
+
+		if (!rootFolder) {
+			throw new Error('Root folder not found');
+		}
+
+		const tmdbMovie = await tmdb.getMovie(request.tmdbId);
+		const externalIds = await tmdb.getMovieExternalIds(request.tmdbId).catch(() => ({
+			imdb_id: null
+		}));
+		const year = tmdbMovie.release_date
+			? parseInt(tmdbMovie.release_date.split('-')[0], 10)
+			: undefined;
+		const folderName = this.namingService.generateMovieFolderName({
+			title: tmdbMovie.title,
+			year,
+			tmdbId: request.tmdbId
+		});
+
+		return {
+			rootFolder,
+			folderName,
+			namingInfoBase: {
+				title: tmdbMovie.title,
+				year,
+				tmdbId: request.tmdbId,
+				imdbId: externalIds.imdb_id ?? undefined
+			}
+		};
+	}
+
+	private async resolveTvContext(request: ExecuteManualImportRequest): Promise<{
+		rootFolder: typeof rootFolders.$inferSelect;
+		seriesFolderName: string;
+		useSeasonFolders: boolean;
+		namingInfoBase: MediaNamingInfo;
+	}> {
+		if (request.importTarget === 'existing') {
+			const [show] = await db
+				.select({
+					id: series.id,
+					title: series.title,
+					year: series.year,
+					path: series.path,
+					imdbId: series.imdbId,
+					tvdbId: series.tvdbId,
+					seasonFolder: series.seasonFolder,
+					rootFolderId: series.rootFolderId
+				})
+				.from(series)
+				.where(eq(series.tmdbId, request.tmdbId))
+				.limit(1);
+
+			if (!show) {
+				throw new Error('Selected series is not in the library');
+			}
+
+			if (!show.rootFolderId) {
+				throw new Error('Selected series has no root folder configured');
+			}
+
+			const [rootFolder] = await db
+				.select()
+				.from(rootFolders)
+				.where(eq(rootFolders.id, show.rootFolderId))
+				.limit(1);
+
+			if (!rootFolder || rootFolder.mediaType !== 'tv') {
+				throw new Error('Selected series root folder is missing or invalid');
+			}
+
+			return {
+				rootFolder,
+				seriesFolderName: show.path,
+				useSeasonFolders: show.seasonFolder ?? true,
+				namingInfoBase: {
+					title: show.title,
+					year: show.year ?? undefined,
+					tmdbId: request.tmdbId,
+					tvdbId: show.tvdbId ?? undefined,
+					imdbId: show.imdbId ?? undefined
+				}
+			};
+		}
+
+		if (!request.rootFolderId) {
+			throw new Error('Root folder is required for new TV import');
+		}
+
+		await validateRootFolder(request.rootFolderId, 'tv');
+		const [rootFolder] = await db
+			.select()
+			.from(rootFolders)
+			.where(eq(rootFolders.id, request.rootFolderId))
+			.limit(1);
+
+		if (!rootFolder) {
+			throw new Error('Root folder not found');
+		}
+
+		const tvShow = await tmdb.getTVShow(request.tmdbId);
+		const externalIds = await tmdb.getTvExternalIds(request.tmdbId).catch(() => ({
+			tvdb_id: null,
+			imdb_id: null
+		}));
+		const year = tvShow.first_air_date
+			? parseInt(tvShow.first_air_date.split('-')[0], 10)
+			: undefined;
+		const seriesFolderName = this.namingService.generateSeriesFolderName({
+			title: tvShow.name,
+			year,
+			tmdbId: request.tmdbId,
+			tvdbId: externalIds.tvdb_id ?? undefined
+		});
+
+		return {
+			rootFolder,
+			seriesFolderName,
+			useSeasonFolders: true,
+			namingInfoBase: {
+				title: tvShow.name,
+				year,
+				tmdbId: request.tmdbId,
+				tvdbId: externalIds.tvdb_id ?? undefined,
+				imdbId: externalIds.imdb_id ?? undefined
+			}
+		};
+	}
+
+	private async getEpisodeTitle(
+		tmdbId: number,
+		seasonNumber: number,
+		episodeNumber: number
+	): Promise<string | undefined> {
+		try {
+			const tmdbSeason = await tmdb.getSeason(tmdbId, seasonNumber);
+			return tmdbSeason.episodes?.find((ep) => ep.episode_number === episodeNumber)?.name;
+		} catch {
+			return undefined;
+		}
+	}
+
+	private async getEpisodeTitleCached(
+		tmdbId: number,
+		seasonNumber: number,
+		episodeNumber: number,
+		cache: Map<number, Map<number, string | undefined>>
+	): Promise<string | undefined> {
+		const cachedSeason = cache.get(seasonNumber);
+		if (cachedSeason && cachedSeason.has(episodeNumber)) {
+			return cachedSeason.get(episodeNumber);
+		}
+
+		const episodeTitle = await this.getEpisodeTitle(tmdbId, seasonNumber, episodeNumber);
+		const seasonCache = cache.get(seasonNumber) ?? new Map<number, string | undefined>();
+		seasonCache.set(episodeNumber, episodeTitle);
+		cache.set(seasonNumber, seasonCache);
+		return episodeTitle;
+	}
+
+	private async resolveDetectionGroupPaths(pathValue: string): Promise<string[]> {
+		return this.resolveDetectionGroupPathsInternal(resolve(pathValue), {
+			allowSelfFallback: true
+		});
+	}
+
+	private async resolveDetectionGroupPathsInternal(
+		pathValue: string,
+		options: { allowSelfFallback: boolean }
+	): Promise<string[]> {
+		const fullPath = resolve(pathValue);
+		const fileStats = await stat(fullPath);
+
+		if (fileStats.isFile()) {
+			if (!isVideoFile(fullPath)) {
+				throw new Error('Selected path is not a supported media file');
+			}
+			return [fullPath];
+		}
+
+		if (!fileStats.isDirectory()) {
+			throw new Error('Selected path is not a file or directory');
+		}
+
+		const entries = (await readdir(fullPath, {
+			withFileTypes: true,
+			encoding: 'utf8'
+		})) as Array<{
+			name: string;
+			isDirectory: () => boolean;
+			isFile: () => boolean;
+			isSymbolicLink: () => boolean;
+		}>;
+
+		const detectedFileGroups: string[] = [];
+		const containerFolders: string[] = [];
+
+		for (const entry of entries) {
+			if (entry.name.startsWith('.')) {
+				continue;
+			}
+
+			const entryPath = join(fullPath, entry.name);
+			const normalizedEntryPath = resolve(entryPath);
+			if (!this.isPathWithinRoot(normalizedEntryPath, fullPath)) {
+				logger.warn('[ManualImport] Skipping path outside requested import scope', {
+					rootPath: fullPath,
+					fullPath: normalizedEntryPath
+				});
+				continue;
+			}
+
+			if (entry.isSymbolicLink()) {
+				logger.debug('[ManualImport] Skipping symlink while grouping import scan', {
+					entryPath: normalizedEntryPath
+				});
+				continue;
+			}
+
+			if (entry.isDirectory()) {
+				const groupingType = await this.classifyDirectoryGroupingType(normalizedEntryPath);
+				if (groupingType === 'none') {
+					continue;
+				}
+
+				if (groupingType === 'group') {
+					const nestedFiles: SourceMediaFile[] = [];
+					await this.collectVideoFiles(normalizedEntryPath, nestedFiles, normalizedEntryPath);
+					for (const nestedFile of nestedFiles) {
+						detectedFileGroups.push(resolve(nestedFile.path));
+					}
+					continue;
+				}
+
+				containerFolders.push(normalizedEntryPath);
+				continue;
+			}
+
+			if (entry.isFile() && isVideoFile(normalizedEntryPath)) {
+				detectedFileGroups.push(normalizedEntryPath);
+			}
+		}
+
+		const resolvedGroupSet = new Set(detectedFileGroups);
+
+		if (containerFolders.length > 0) {
+			const sortedContainers = [...containerFolders].sort((a, b) =>
+				a.localeCompare(b, undefined, { numeric: true })
+			);
+			for (const containerPath of sortedContainers) {
+				const nestedGroups = await this.resolveDetectionGroupPathsInternal(containerPath, {
+					allowSelfFallback: false
+				});
+				for (const nestedGroup of nestedGroups) {
+					resolvedGroupSet.add(nestedGroup);
+				}
+			}
+		}
+
+		if (resolvedGroupSet.size > 0) {
+			return [...resolvedGroupSet].sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
+		}
+
+		if (!options.allowSelfFallback) {
+			return [];
+		}
+
+		const fallbackFiles: SourceMediaFile[] = [];
+		await this.collectVideoFiles(fullPath, fallbackFiles, fullPath);
+		if (fallbackFiles.length === 0) {
+			return [];
+		}
+
+		return [...new Set(fallbackFiles.map((file) => resolve(file.path)))].sort((a, b) =>
+			a.localeCompare(b, undefined, { numeric: true })
+		);
+	}
+
+	private async classifyDirectoryGroupingType(
+		directoryPath: string
+	): Promise<'group' | 'container' | 'none'> {
+		const entries = (await readdir(directoryPath, {
+			withFileTypes: true,
+			encoding: 'utf8'
+		})) as Array<{
+			name: string;
+			isDirectory: () => boolean;
+			isFile: () => boolean;
+			isSymbolicLink: () => boolean;
+		}>;
+
+		let hasDirectVideo = false;
+		const childDirectories: Array<{ name: string; path: string }> = [];
+
+		for (const entry of entries) {
+			if (entry.name.startsWith('.')) {
+				continue;
+			}
+
+			const entryPath = join(directoryPath, entry.name);
+			const normalizedEntryPath = resolve(entryPath);
+			if (!this.isPathWithinRoot(normalizedEntryPath, directoryPath)) {
+				continue;
+			}
+			if (entry.isSymbolicLink()) {
+				continue;
+			}
+
+			if (entry.isFile() && isVideoFile(normalizedEntryPath)) {
+				hasDirectVideo = true;
+				break;
+			}
+
+			if (entry.isDirectory()) {
+				childDirectories.push({ name: entry.name, path: normalizedEntryPath });
+			}
+		}
+
+		if (hasDirectVideo) {
+			return 'group';
+		}
+		if (childDirectories.length === 0) {
+			return 'none';
+		}
+
+		const allSeasonLike = childDirectories.every((dir) => this.isSeasonLikeFolderName(dir.name));
+		if (allSeasonLike) {
+			for (const childDirectory of childDirectories) {
+				if (await this.directoryContainsVideoFiles(childDirectory.path, childDirectory.path)) {
+					return 'group';
+				}
+			}
+			return 'none';
+		}
+
+		for (const childDirectory of childDirectories) {
+			if (await this.directoryContainsVideoFiles(childDirectory.path, childDirectory.path)) {
+				return 'container';
+			}
+		}
+
+		return 'none';
+	}
+
+	private async directoryContainsVideoFiles(
+		directoryPath: string,
+		rootPath: string
+	): Promise<boolean> {
+		let entries: Array<{
+			name: string;
+			isDirectory: () => boolean;
+			isFile: () => boolean;
+			isSymbolicLink: () => boolean;
+		}>;
+		try {
+			entries = (await readdir(directoryPath, {
+				withFileTypes: true,
+				encoding: 'utf8'
+			})) as unknown as typeof entries;
+		} catch (error) {
+			const fsError = error as NodeJS.ErrnoException;
+			if (fsError?.code === 'ENOENT' || fsError?.code === 'EACCES' || fsError?.code === 'EPERM') {
+				logger.debug('[ManualImport] Skipping inaccessible directory while checking for media', {
+					directoryPath,
+					code: fsError.code
+				});
+				return false;
+			}
+			throw error;
+		}
+
+		for (const entry of entries) {
+			if (entry.name.startsWith('.')) {
+				continue;
+			}
+
+			const entryPath = join(directoryPath, entry.name);
+			const normalizedEntryPath = resolve(entryPath);
+			if (!this.isPathWithinRoot(normalizedEntryPath, rootPath)) {
+				continue;
+			}
+			if (entry.isSymbolicLink()) {
+				continue;
+			}
+
+			if (entry.isFile() && isVideoFile(normalizedEntryPath)) {
+				return true;
+			}
+
+			if (entry.isDirectory()) {
+				if (await this.directoryContainsVideoFiles(normalizedEntryPath, rootPath)) {
+					return true;
+				}
+			}
+		}
+
+		return false;
+	}
+
+	private isSeasonLikeFolderName(folderName: string): boolean {
+		return /^(?:season[\s._-]*\d{1,3}|s\d{1,3})$/i.test(folderName.trim());
+	}
+
+	private async resolveSourceFiles(pathValue: string): Promise<SourceMediaFile[]> {
+		const fullPath = resolve(pathValue);
+		const fileStats = await stat(fullPath);
+
+		if (fileStats.isFile()) {
+			if (!isVideoFile(fullPath)) {
+				throw new Error('Selected path is not a supported media file');
+			}
+			return [{ path: fullPath, size: fileStats.size }];
+		}
+
+		if (!fileStats.isDirectory()) {
+			throw new Error('Selected path is not a file or directory');
+		}
+
+		const files: SourceMediaFile[] = [];
+		await this.collectVideoFiles(fullPath, files, fullPath);
+
+		if (files.length === 0) {
+			throw new Error('No media files found in selected directory');
+		}
+
+		files.sort((a, b) => a.path.localeCompare(b.path, undefined, { numeric: true }));
+		return files;
+	}
+
+	private selectPrimarySourceFile(files: SourceMediaFile[]): SourceMediaFile {
+		const nonStrmFiles = files.filter((file) => extname(file.path).toLowerCase() !== '.strm');
+		const candidates = nonStrmFiles.length > 0 ? nonStrmFiles : files;
+		candidates.sort((a, b) => b.size - a.size);
+		return candidates[0];
+	}
+
+	private selectTvSourceFiles(files: SourceMediaFile[]): SourceMediaFile[] {
+		const nonStrmFiles = files.filter((file) => extname(file.path).toLowerCase() !== '.strm');
+		const selected = nonStrmFiles.length > 0 ? nonStrmFiles : files;
+		return [...selected].sort((a, b) => a.path.localeCompare(b.path, undefined, { numeric: true }));
+	}
+
+	private extractDetectedSeasons(files: SourceMediaFile[]): number[] {
+		const seasons = new Set<number>();
+		for (const file of files) {
+			const fileStem = getMediaParseStem(file.path);
+			const parsed = parseRelease(fileStem);
+			const tvIdentifier = resolveTvEpisodeIdentifier({
+				filePath: file.path,
+				parsed
+			});
+			if (tvIdentifier?.numbering === 'standard') {
+				seasons.add(tvIdentifier.seasonNumber);
+			}
+		}
+
+		return [...seasons].sort((a, b) => a - b);
+	}
+
+	private resolveTvEpisodeMapping(
+		parsed: ReturnType<typeof parseRelease>,
+		request: ExecuteManualImportRequest,
+		totalFiles: number,
+		sourceFilePath: string
+	): { seasonNumber: number; episodeNumber: number } | null {
+		const resolved = resolveTvEpisodeIdentifier({
+			filePath: sourceFilePath,
+			parsed,
+			seasonHint: request.seasonNumber
+		});
+
+		if (resolved?.numbering === 'standard') {
+			return {
+				seasonNumber: resolved.seasonNumber,
+				episodeNumber: resolved.episodeNumbers[0]
+			};
+		}
+
+		if (totalFiles > 1) {
+			return null;
+		}
+
+		return {
+			seasonNumber: request.seasonNumber ?? 1,
+			episodeNumber: request.episodeNumber ?? 1
+		};
+	}
+
+	private async transferSourceFile(
+		sourcePath: string,
+		destinationPath: string,
+		preserveSymlinks: boolean
+	): Promise<void> {
+		await ensureDirectory(dirname(destinationPath));
+		const transferResult = await transferFileWithMode(sourcePath, destinationPath, {
+			importMode: ImportMode.HardlinkOrCopy,
+			canMoveFiles: false,
+			preserveSymlinks
+		});
+
+		if (!transferResult.success) {
+			throw new Error(transferResult.error || 'Failed to transfer source file');
+		}
+	}
+
+	private async insertUnmatchedImportRecord(input: {
+		destinationPath: string;
+		rootFolderId: string;
+		mediaType: MediaType;
+		parsedTitle: string;
+		parsedYear?: number;
+		parsedSeason?: number;
+		parsedEpisode?: number;
+		tmdbId: number;
+	}): Promise<string> {
+		const destinationStats = await stat(input.destinationPath);
+		const unmatchedId = randomUUID();
+
+		await db.insert(unmatchedFiles).values({
+			id: unmatchedId,
+			path: input.destinationPath,
+			rootFolderId: input.rootFolderId,
+			mediaType: input.mediaType,
+			size: destinationStats.size,
+			parsedTitle: input.parsedTitle,
+			parsedYear: input.parsedYear,
+			parsedSeason: input.mediaType === 'tv' ? (input.parsedSeason ?? null) : null,
+			parsedEpisode: input.mediaType === 'tv' ? (input.parsedEpisode ?? null) : null,
+			reason: 'manual_import',
+			suggestedMatches: [
+				{
+					tmdbId: input.tmdbId,
+					title: input.parsedTitle,
+					year: input.parsedYear,
+					confidence: 1
+				}
+			]
+		});
+
+		return unmatchedId;
+	}
+
+	private async buildMovieNamingInfo(
+		sourceFilePath: string,
+		parsed: ReturnType<typeof parseRelease>,
+		namingInfoBase: MediaNamingInfo
+	): Promise<MediaNamingInfo> {
+		const probedInfo = await this.probeMediaInfoForNaming(sourceFilePath);
+		return this.enrichNamingInfo(namingInfoBase, parsed, sourceFilePath, probedInfo);
+	}
+
+	private async buildEpisodeNamingInfo(
+		sourceFilePath: string,
+		parsed: ReturnType<typeof parseRelease>,
+		namingInfoBase: MediaNamingInfo,
+		seasonNumber: number,
+		episodeNumber: number,
+		episodeTitle?: string
+	): Promise<MediaNamingInfo> {
+		const probedInfo = await this.probeMediaInfoForNaming(sourceFilePath);
+		return this.enrichNamingInfo(
+			{
+				...namingInfoBase,
+				seasonNumber,
+				episodeNumbers: [episodeNumber],
+				episodeTitle
+			},
+			parsed,
+			sourceFilePath,
+			probedInfo
+		);
+	}
+
+	private async probeMediaInfoForNaming(sourceFilePath: string): Promise<{
+		width?: number;
+		height?: number;
+		videoCodec?: string;
+		videoHdrFormat?: string;
+		audioCodec?: string;
+		audioChannels?: number;
+	} | null> {
+		try {
+			return await mediaInfoService.extractMediaInfo(sourceFilePath, { allowStrmProbe: true });
+		} catch (error) {
+			logger.debug('[ManualImport] Probe failed while preparing naming metadata', {
+				sourceFilePath,
+				error: error instanceof Error ? error.message : String(error)
+			});
+			return null;
+		}
+	}
+
+	private enrichNamingInfo(
+		namingInfoBase: MediaNamingInfo,
+		parsed: ReturnType<typeof parseRelease>,
+		sourceFilePath: string,
+		probedInfo: {
+			width?: number;
+			height?: number;
+			videoCodec?: string;
+			videoHdrFormat?: string;
+			audioCodec?: string;
+			audioChannels?: number;
+		} | null
+	): MediaNamingInfo {
+		const parsedNamingInfo = releaseToNamingInfo(parsed, sourceFilePath);
+
+		const parsedResolution = this.normalizeMetadataToken(parsedNamingInfo.resolution);
+		const parsedCodec = this.normalizeMetadataToken(parsedNamingInfo.codec);
+		const parsedHdr = this.normalizeMetadataToken(parsedNamingInfo.hdr);
+		const parsedAudioCodec = this.normalizeMetadataToken(parsedNamingInfo.audioCodec);
+		const parsedAudioChannels = this.normalizeMetadataToken(parsedNamingInfo.audioChannels);
+
+		return {
+			...parsedNamingInfo,
+			...namingInfoBase,
+			resolution: parsedResolution ?? this.mapMediaInfoResolution(probedInfo),
+			codec: parsedCodec ?? this.mapMediaInfoCodec(probedInfo?.videoCodec),
+			hdr: parsedHdr ?? this.mapMediaInfoHdr(probedInfo?.videoHdrFormat),
+			audioCodec: parsedAudioCodec ?? this.normalizeMetadataToken(probedInfo?.audioCodec),
+			audioChannels:
+				parsedAudioChannels ?? this.mapMediaInfoAudioChannels(probedInfo?.audioChannels),
+			originalExtension: extname(sourceFilePath)
+		};
+	}
+
+	private normalizeMetadataToken(value?: string | null): string | undefined {
+		if (!value) return undefined;
+		const trimmed = value.trim();
+		if (!trimmed) return undefined;
+		const normalized = trimmed.toLowerCase();
+		if (normalized === 'unknown' || normalized === 'n/a' || normalized === '-') {
+			return undefined;
+		}
+		return trimmed;
+	}
+
+	private mapMediaInfoResolution(
+		mediaInfo?: {
+			width?: number;
+			height?: number;
+		} | null
+	): string | undefined {
+		if (!mediaInfo) return undefined;
+		const label = MediaInfoService.getResolutionLabel(
+			mediaInfo.width,
+			mediaInfo.height
+		).toLowerCase();
+		if (label === 'unknown') return undefined;
+		if (label === '4k') return '2160p';
+		return /^\d{3,4}p$/.test(label) ? label : undefined;
+	}
+
+	private mapMediaInfoCodec(codec?: string): string | undefined {
+		const normalized = this.normalizeMetadataToken(codec)?.toLowerCase();
+		if (!normalized) return undefined;
+		const compact = normalized.replace(/[^a-z0-9+]/g, '');
+
+		if (compact.includes('av1')) return 'av1';
+		if (compact.includes('hevc') || compact.includes('h265') || compact.includes('x265'))
+			return 'h265';
+		if (compact.includes('avc') || compact.includes('h264') || compact.includes('x264'))
+			return 'h264';
+		if (compact.includes('vc1')) return 'vc1';
+		if (compact.includes('mpeg2') || compact.includes('m2v')) return 'mpeg2';
+		if (compact.includes('xvid')) return 'xvid';
+		if (compact.includes('divx')) return 'divx';
+
+		return undefined;
+	}
+
+	private mapMediaInfoHdr(hdr?: string): string | undefined {
+		const normalized = this.normalizeMetadataToken(hdr)?.toLowerCase();
+		if (!normalized) return undefined;
+
+		if (normalized.includes('dolby') && normalized.includes('vision')) return 'dolby-vision';
+		if (normalized.includes('hdr10+')) return 'hdr10+';
+		if (normalized.includes('hdr10')) return 'hdr10';
+		if (normalized.includes('hlg')) return 'hlg';
+		if (normalized.includes('pq')) return 'pq';
+		if (normalized.includes('sdr')) return 'sdr';
+		if (normalized.includes('hdr')) return 'hdr';
+
+		return undefined;
+	}
+
+	private mapMediaInfoAudioChannels(channels?: number): string | undefined {
+		if (!channels || channels <= 0) {
+			return undefined;
+		}
+
+		if (channels === 1) return '1.0';
+		if (channels === 2) return '2.0';
+		if (channels === 6) return '5.1';
+		if (channels === 8) return '7.1';
+		return `${channels}.0`;
+	}
+
+	private async collectVideoFiles(
+		dirPath: string,
+		accumulator: SourceMediaFile[],
+		rootPath: string
+	): Promise<void> {
+		let entries: Array<{
+			name: string;
+			isDirectory: () => boolean;
+			isFile: () => boolean;
+			isSymbolicLink: () => boolean;
+		}>;
+		try {
+			entries = (await readdir(dirPath, {
+				withFileTypes: true,
+				encoding: 'utf8'
+			})) as unknown as typeof entries;
+		} catch (error) {
+			const fsError = error as NodeJS.ErrnoException;
+			if (fsError?.code === 'ENOENT' || fsError?.code === 'EACCES' || fsError?.code === 'EPERM') {
+				logger.debug('[ManualImport] Skipping inaccessible directory during scan', {
+					dirPath,
+					code: fsError.code
+				});
+				return;
+			}
+			throw error;
+		}
+
+		for (const entry of entries) {
+			const entryName = entry.name;
+			if (entryName.startsWith('.')) {
+				continue;
+			}
+
+			const fullPath = join(dirPath, entryName);
+			const normalizedFullPath = resolve(fullPath);
+			if (!this.isPathWithinRoot(normalizedFullPath, rootPath)) {
+				logger.warn('[ManualImport] Skipping path outside requested import scope', {
+					rootPath,
+					fullPath: normalizedFullPath
+				});
+				continue;
+			}
+
+			if (entry.isSymbolicLink()) {
+				logger.debug('[ManualImport] Skipping symlink during import scan', { fullPath });
+				continue;
+			}
+
+			if (entry.isDirectory()) {
+				try {
+					await this.collectVideoFiles(fullPath, accumulator, rootPath);
+				} catch (error) {
+					const fsError = error as NodeJS.ErrnoException;
+					if (
+						fsError?.code === 'ENOENT' ||
+						fsError?.code === 'EACCES' ||
+						fsError?.code === 'EPERM'
+					) {
+						logger.debug('[ManualImport] Skipping transient nested directory during scan', {
+							fullPath,
+							code: fsError.code
+						});
+						continue;
+					}
+					throw error;
+				}
+				continue;
+			}
+
+			if (!entry.isFile() || !isVideoFile(fullPath)) {
+				continue;
+			}
+
+			try {
+				const itemStats = await stat(fullPath);
+				accumulator.push({ path: fullPath, size: itemStats.size });
+			} catch (error) {
+				const fsError = error as NodeJS.ErrnoException;
+				if (fsError?.code === 'ENOENT' || fsError?.code === 'EACCES' || fsError?.code === 'EPERM') {
+					logger.debug('[ManualImport] Skipping inaccessible file during scan', {
+						fullPath,
+						code: fsError.code
+					});
+					continue;
+				}
+				throw error;
+			}
+		}
+	}
+
+	private isPathWithinRoot(pathToCheck: string, rootPath: string): boolean {
+		const normalizedPath = resolve(pathToCheck);
+		const normalizedRoot = resolve(rootPath);
+		if (normalizedPath === normalizedRoot) {
+			return true;
+		}
+		return normalizedPath.startsWith(normalizedRoot + '/');
+	}
+
+	private async enrichMatchesWithLibraryStatus(
+		matches: SuggestedMatch[]
+	): Promise<ManualImportMatch[]> {
+		if (matches.length === 0) {
+			return [];
+		}
+
+		const movieTmdbIds = matches.filter((m) => m.mediaType === 'movie').map((m) => m.tmdbId);
+		const tvTmdbIds = matches.filter((m) => m.mediaType === 'tv').map((m) => m.tmdbId);
+		const rootFolderIds = new Set<string>();
+
+		const movieRows =
+			movieTmdbIds.length > 0
+				? await db
+						.select({ id: movies.id, tmdbId: movies.tmdbId, rootFolderId: movies.rootFolderId })
+						.from(movies)
+						.where(inArray(movies.tmdbId, movieTmdbIds))
+				: [];
+
+		const seriesRows =
+			tvTmdbIds.length > 0
+				? await db
+						.select({ id: series.id, tmdbId: series.tmdbId, rootFolderId: series.rootFolderId })
+						.from(series)
+						.where(inArray(series.tmdbId, tvTmdbIds))
+				: [];
+
+		for (const row of [...movieRows, ...seriesRows]) {
+			if (row.rootFolderId) {
+				rootFolderIds.add(row.rootFolderId);
+			}
+		}
+
+		const folderRows =
+			rootFolderIds.size > 0
+				? await db
+						.select({ id: rootFolders.id, path: rootFolders.path })
+						.from(rootFolders)
+						.where(inArray(rootFolders.id, [...rootFolderIds]))
+				: [];
+		const folderMap = new Map(folderRows.map((folder) => [folder.id, folder.path]));
+
+		const movieMap = new Map(movieRows.map((row) => [row.tmdbId, row]));
+		const seriesMap = new Map(seriesRows.map((row) => [row.tmdbId, row]));
+
+		return matches.map((match) => {
+			const existing =
+				match.mediaType === 'movie' ? movieMap.get(match.tmdbId) : seriesMap.get(match.tmdbId);
+			if (!existing) {
+				return {
+					...match,
+					inLibrary: false
+				};
+			}
+			return {
+				...match,
+				inLibrary: true,
+				libraryId: existing.id,
+				rootFolderId: existing.rootFolderId,
+				rootFolderPath: existing.rootFolderId ? folderMap.get(existing.rootFolderId) : null
+			};
+		});
+	}
+
+	private async findMatches(
+		title: string,
+		year: number | undefined,
+		mediaType: MediaType,
+		filePath: string
+	): Promise<SuggestedMatch[]> {
+		try {
+			const extractedIds = extractExternalIds(filePath);
+
+			if (extractedIds.tmdbId) {
+				const direct = await this.lookupByTmdbId(extractedIds.tmdbId, mediaType);
+				if (direct) {
+					return [direct];
+				}
+			}
+
+			if (extractedIds.tvdbId) {
+				const tvdb = await this.lookupByTvdbId(extractedIds.tvdbId);
+				if (tvdb) {
+					return [tvdb];
+				}
+			}
+
+			if (extractedIds.imdbId) {
+				const imdb = await this.lookupByImdbId(extractedIds.imdbId, mediaType);
+				if (imdb) {
+					return [imdb];
+				}
+			}
+
+			const results =
+				mediaType === 'movie'
+					? await tmdb.searchMovies(title, year, true)
+					: await tmdb.searchTv(title, year, true);
+
+			if (!results.results || results.results.length === 0) {
+				return [];
+			}
+
+			const matches = results.results.slice(0, 5).map((result) => {
+				const resultTitle = result.title || result.name || '';
+				const resultDate = result.release_date || result.first_air_date;
+				const resultYear = resultDate ? parseInt(resultDate.split('-')[0], 10) : undefined;
+
+				return {
+					tmdbId: result.id,
+					title: resultTitle,
+					year: resultYear,
+					confidence: this.calculateMatchConfidence(title, year, resultTitle, resultYear),
+					mediaType
+				} satisfies SuggestedMatch;
+			});
+
+			matches.sort((a, b) => b.confidence - a.confidence);
+			return matches;
+		} catch (error) {
+			logger.error(
+				'[ManualImport] Failed to find TMDB matches',
+				error instanceof Error ? error : undefined,
+				{
+					title,
+					mediaType
+				}
+			);
+			return [];
+		}
+	}
+
+	private async lookupByTmdbId(
+		tmdbId: number,
+		mediaType: MediaType
+	): Promise<SuggestedMatch | null> {
+		try {
+			if (mediaType === 'movie') {
+				const movie = await tmdb.getMovie(tmdbId);
+				return {
+					tmdbId: movie.id,
+					title: movie.title,
+					year: movie.release_date ? parseInt(movie.release_date.split('-')[0], 10) : undefined,
+					confidence: 1,
+					mediaType
+				};
+			}
+			const show = await tmdb.getTVShow(tmdbId);
+			return {
+				tmdbId: show.id,
+				title: show.name,
+				year: show.first_air_date ? parseInt(show.first_air_date.split('-')[0], 10) : undefined,
+				confidence: 1,
+				mediaType
+			};
+		} catch {
+			return null;
+		}
+	}
+
+	private async lookupByTvdbId(tvdbId: number): Promise<SuggestedMatch | null> {
+		try {
+			const result = await tmdb.findByExternalId(String(tvdbId), 'tvdb_id');
+			if (result.tv_results.length === 0) {
+				return null;
+			}
+			const show = result.tv_results[0];
+			return {
+				tmdbId: show.id,
+				title: show.name,
+				year: show.first_air_date ? parseInt(show.first_air_date.split('-')[0], 10) : undefined,
+				confidence: 1,
+				mediaType: 'tv'
+			};
+		} catch {
+			return null;
+		}
+	}
+
+	private async lookupByImdbId(
+		imdbId: string,
+		preferredMediaType: MediaType
+	): Promise<SuggestedMatch | null> {
+		try {
+			const result = await tmdb.findByExternalId(imdbId, 'imdb_id');
+
+			if (preferredMediaType === 'movie' && result.movie_results.length > 0) {
+				const movie = result.movie_results[0];
+				return {
+					tmdbId: movie.id,
+					title: movie.title,
+					year: movie.release_date ? parseInt(movie.release_date.split('-')[0], 10) : undefined,
+					confidence: 1,
+					mediaType: 'movie'
+				};
+			}
+
+			if (preferredMediaType === 'tv' && result.tv_results.length > 0) {
+				const show = result.tv_results[0];
+				return {
+					tmdbId: show.id,
+					title: show.name,
+					year: show.first_air_date ? parseInt(show.first_air_date.split('-')[0], 10) : undefined,
+					confidence: 1,
+					mediaType: 'tv'
+				};
+			}
+
+			if (result.movie_results.length > 0) {
+				const movie = result.movie_results[0];
+				return {
+					tmdbId: movie.id,
+					title: movie.title,
+					year: movie.release_date ? parseInt(movie.release_date.split('-')[0], 10) : undefined,
+					confidence: 1,
+					mediaType: 'movie'
+				};
+			}
+
+			if (result.tv_results.length > 0) {
+				const show = result.tv_results[0];
+				return {
+					tmdbId: show.id,
+					title: show.name,
+					year: show.first_air_date ? parseInt(show.first_air_date.split('-')[0], 10) : undefined,
+					confidence: 1,
+					mediaType: 'tv'
+				};
+			}
+		} catch {
+			return null;
+		}
+		return null;
+	}
+
+	private calculateMatchConfidence(
+		parsedTitle: string,
+		parsedYear: number | undefined,
+		tmdbTitle: string,
+		tmdbYear: number | undefined
+	): number {
+		let score = this.calculateSimilarity(parsedTitle, tmdbTitle);
+
+		if (parsedYear && tmdbYear && parsedYear === tmdbYear) {
+			score = Math.min(1, score + 0.2);
+		} else if (parsedYear && tmdbYear && Math.abs(parsedYear - tmdbYear) > 1) {
+			score = score * 0.7;
+		}
+
+		const normalizedParsed = this.normalizeTitle(parsedTitle);
+		const normalizedTmdb = this.normalizeTitle(tmdbTitle);
+		if (normalizedParsed === normalizedTmdb) {
+			score = Math.max(score, 0.95);
+		}
+
+		return Math.round(score * 100) / 100;
+	}
+
+	private calculateSimilarity(a: string, b: string): number {
+		const s1 = a.toLowerCase().trim();
+		const s2 = b.toLowerCase().trim();
+
+		if (s1 === s2) return 1;
+		if (!s1 || !s2) return 0;
+
+		const matrix: number[][] = [];
+		for (let i = 0; i <= s1.length; i++) {
+			matrix[i] = [i];
+		}
+		for (let j = 0; j <= s2.length; j++) {
+			matrix[0][j] = j;
+		}
+
+		for (let i = 1; i <= s1.length; i++) {
+			for (let j = 1; j <= s2.length; j++) {
+				const cost = s1[i - 1] === s2[j - 1] ? 0 : 1;
+				matrix[i][j] = Math.min(
+					matrix[i - 1][j] + 1,
+					matrix[i][j - 1] + 1,
+					matrix[i - 1][j - 1] + cost
+				);
+			}
+		}
+
+		const distance = matrix[s1.length][s2.length];
+		const maxLength = Math.max(s1.length, s2.length);
+		return 1 - distance / maxLength;
+	}
+
+	private normalizeTitle(title: string): string {
+		return title
+			.toLowerCase()
+			.replace(/[^a-z0-9]/g, '')
+			.replace(/^the/, '')
+			.replace(/^a/, '');
+	}
+}
+
+export const manualImportService = ManualImportService.getInstance();

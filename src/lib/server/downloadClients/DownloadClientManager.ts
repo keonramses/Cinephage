@@ -17,6 +17,10 @@ import type {
 	DownloadClientHealth
 } from '$lib/types/downloadClient';
 import { QBittorrentClient } from './qbittorrent/QBittorrentClient';
+import { TransmissionClient } from './transmission/TransmissionClient';
+import { DelugeClient } from './deluge/DelugeClient';
+import { RTorrentClient } from './rtorrent/RTorrentClient';
+import { Aria2Client } from './aria2/Aria2Client';
 import { SABnzbdClient, type SABnzbdConfig } from './sabnzbd';
 import { NZBGetClient } from './nzbget';
 import { NZBMountClient } from './nzbmount/NZBMountClient';
@@ -506,6 +510,18 @@ export class DownloadClientManager {
 			case 'qbittorrent':
 				return new QBittorrentClient(config);
 
+			case 'transmission':
+				return new TransmissionClient(config);
+
+			case 'deluge':
+				return new DelugeClient(config);
+
+			case 'rtorrent':
+				return new RTorrentClient(config);
+
+			case 'aria2':
+				return new Aria2Client(config);
+
 			case 'sabnzbd':
 				return new SABnzbdClient(config as SABnzbdConfig);
 
@@ -515,8 +531,6 @@ export class DownloadClientManager {
 				return new NZBMountClient(config);
 
 			// Future implementations
-			// case 'transmission':
-			//   return new TransmissionClient(config);
 
 			default:
 				logger.warn(`Unsupported download client implementation: ${implementation}`);

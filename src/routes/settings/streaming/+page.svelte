@@ -1,11 +1,42 @@
 <script lang="ts">
-	import { enhance } from '$app/forms';
 	import { HardDrive, Trash2, RefreshCw, Archive, Clock } from 'lucide-svelte';
-	import type { PageData, ActionData } from './$types';
+	import { getResponseErrorMessage, readResponsePayload } from '$lib/utils/http';
+	import { toasts } from '$lib/stores/toast.svelte';
+	import type { PageData } from './$types';
 
-	let { data, form }: { data: PageData; form: ActionData } = $props();
+	let { data }: { data: PageData } = $props();
 
 	let cleaning = $state(false);
+	let cleanupResult = $state<{ cleaned: number; freedMB: number } | null>(null);
+
+	async function handleCleanup() {
+		cleaning = true;
+		try {
+			const response = await fetch('/api/settings/streaming/cache/cleanup', {
+				method: 'POST',
+				headers: { Accept: 'application/json' }
+			});
+			const result = await readResponsePayload<{
+				success?: boolean;
+				cleaned?: number;
+				freedMB?: number;
+			}>(response);
+
+			if (!response.ok || !result || typeof result === 'string') {
+				throw new Error(getResponseErrorMessage(result, 'Failed to clean expired files'));
+			}
+
+			cleanupResult = {
+				cleaned: result.cleaned ?? 0,
+				freedMB: result.freedMB ?? 0
+			};
+			toasts.success('Expired cache files cleaned');
+		} catch (error) {
+			toasts.error(error instanceof Error ? error.message : 'Failed to clean expired files');
+		} finally {
+			cleaning = false;
+		}
+	}
 </script>
 
 <svelte:head>
@@ -64,37 +95,29 @@
 
 			<!-- Cleanup Action -->
 			<div class="mt-4">
-				{#if form?.success}
+				{#if cleanupResult}
 					<div class="mb-4 alert alert-success">
 						<span>
-							Cleaned up {form.cleaned} file(s), freed {form.freedMB >= 1024
-								? `${(form.freedMB / 1024).toFixed(1)} GB`
-								: `${form.freedMB} MB`}
+							Cleaned up {cleanupResult.cleaned} file(s), freed {cleanupResult.freedMB >= 1024
+								? `${(cleanupResult.freedMB / 1024).toFixed(1)} GB`
+								: `${cleanupResult.freedMB} MB`}
 						</span>
 					</div>
 				{/if}
 
-				<form
-					method="POST"
-					action="?/cleanup"
-					use:enhance={() => {
-						cleaning = true;
-						return async ({ update }) => {
-							await update();
-							cleaning = false;
-						};
-					}}
+				<button
+					class="btn gap-2 btn-outline btn-warning"
+					onclick={handleCleanup}
+					disabled={cleaning}
 				>
-					<button class="btn gap-2 btn-outline btn-warning" disabled={cleaning}>
-						{#if cleaning}
-							<RefreshCw size={16} class="animate-spin" />
-							Cleaning...
-						{:else}
-							<Trash2 size={16} />
-							Clean Expired Files
-						{/if}
-					</button>
-				</form>
+					{#if cleaning}
+						<RefreshCw size={16} class="animate-spin" />
+						Cleaning...
+					{:else}
+						<Trash2 size={16} />
+						Clean Expired Files
+					{/if}
+				</button>
 			</div>
 		</div>
 	</div>

@@ -14,11 +14,12 @@
 		Calendar,
 		Activity,
 		TrendingUp,
-		PlayCircle,
+		Compass,
 		ArrowRight,
 		Loader2,
 		Minus,
 		Wifi,
+		ListTodo,
 		HardDrive
 	} from 'lucide-svelte';
 	import TmdbImage from '$lib/components/tmdb/TmdbImage.svelte';
@@ -403,6 +404,54 @@
 		</div>
 	</div>
 
+	<!-- Quick Actions -->
+	<div class="card bg-base-200">
+		<div class="card-body items-center gap-4 py-5 text-center">
+			<div class="space-y-1">
+				<div class="text-sm font-medium tracking-[0.2em] text-base-content/45 uppercase">
+					Quick Actions
+				</div>
+			</div>
+			<div class="flex w-full flex-wrap justify-center gap-2.5">
+				<a
+					href={resolve('/discover')}
+					class="btn min-w-34 justify-center border-info bg-info text-info-content btn-sm hover:border-info hover:bg-info/90"
+				>
+					<Compass class="h-4 w-4" />
+					Discover
+				</a>
+				<a
+					href={resolve('/library/import')}
+					class="btn min-w-34 justify-center border-primary bg-primary text-primary-content btn-sm hover:border-primary hover:bg-primary/90"
+				>
+					<Download class="h-4 w-4" />
+					Import
+				</a>
+				<a
+					href={resolve('/activity')}
+					class="btn min-w-34 justify-center border-secondary bg-secondary text-secondary-content btn-sm hover:border-secondary hover:bg-secondary/90"
+				>
+					<Activity class="h-4 w-4" />
+					View Activity
+				</a>
+				<a
+					href={resolve('/settings/integrations/indexers')}
+					class="btn min-w-34 justify-center border-accent bg-accent text-accent-content btn-sm hover:border-accent hover:bg-accent/90"
+				>
+					<TrendingUp class="h-4 w-4" />
+					Indexers
+				</a>
+				<a
+					href={resolve('/settings/tasks')}
+					class="btn min-w-34 justify-center border-warning bg-warning text-warning-content btn-sm hover:border-warning hover:bg-warning/90"
+				>
+					<ListTodo class="h-4 w-4" />
+					Tasks
+				</a>
+			</div>
+		</div>
+	</div>
+
 	<!-- Main Content Grid -->
 	<div class="grid gap-6 lg:grid-cols-3">
 		<!-- Recently Added Section (2/3 width) -->
@@ -675,31 +724,6 @@
 						<p class="mt-2 text-sm">No recent activity</p>
 					</div>
 				{/if}
-			</div>
-		</div>
-	</div>
-
-	<!-- Quick Actions -->
-	<div class="card bg-base-200">
-		<div class="card-body">
-			<h2 class="card-title">Quick Actions</h2>
-			<div class="flex flex-wrap gap-2">
-				<a href={resolve('/discover')} class="btn btn-outline btn-sm">
-					<Search class="h-4 w-4" />
-					Discover
-				</a>
-				<a href={resolve('/activity')} class="btn btn-outline btn-sm">
-					<Download class="h-4 w-4" />
-					View Activity
-				</a>
-				<a href={resolve('/settings/integrations/indexers')} class="btn btn-outline btn-sm">
-					<TrendingUp class="h-4 w-4" />
-					Indexers
-				</a>
-				<a href={resolve('/settings/tasks')} class="btn btn-outline btn-sm">
-					<PlayCircle class="h-4 w-4" />
-					Tasks
-				</a>
 			</div>
 		</div>
 	</div>

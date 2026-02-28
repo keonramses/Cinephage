@@ -1,0 +1,450 @@
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { RTorrentClient } from './RTorrentClient';
+
+function xmlResponse(innerValue: string): string {
+	return `<?xml version="1.0"?><methodResponse><params><param><value>${innerValue}</value></param></params></methodResponse>`;
+}
+
+function xmlString(value: string): string {
+	return xmlResponse(`<string>${value}</string>`);
+}
+
+function xmlInt(value: number): string {
+	return xmlResponse(`<int>${value}</int>`);
+}
+
+function xmlI8(value: number): string {
+	return xmlResponse(`<i8>${value}</i8>`);
+}
+
+function xmlStringArray(values: string[]): string {
+	const entries = values.map((value) => `<value><string>${value}</string></value>`).join('');
+	return xmlResponse(`<array><data>${entries}</data></array>`);
+}
+
+describe('RTorrentClient', () => {
+	beforeEach(() => {
+		vi.restoreAllMocks();
+	});
+
+	afterEach(() => {
+		vi.unstubAllGlobals();
+	});
+
+	it('collects hashes from fallback views when main is empty', async () => {
+		const hash = '8eaca075d467a373b871dff7b9b694ea532b6a43';
+		const fetchMock = vi.fn(async (_url: string, init?: RequestInit) => {
+			const body = String(init?.body ?? '');
+			const method = body.match(/<methodName>([^<]+)<\/methodName>/)?.[1] ?? '';
+
+			if (method === 'd.multicall2') {
+				if (body.includes('<string>default</string>')) {
+					return new Response(xmlStringArray([hash]), { status: 200 });
+				}
+				return new Response(xmlStringArray([]), { status: 200 });
+			}
+
+			if (method === 'd.multicall' || method === 'download_list') {
+				return new Response(xmlStringArray([]), { status: 200 });
+			}
+
+			return new Response(xmlInt(0), { status: 200 });
+		});
+		vi.stubGlobal('fetch', fetchMock);
+
+		const client = new RTorrentClient({
+			host: 'localhost',
+			port: 80,
+			useSsl: false
+		});
+
+		const getTorrentHashes = (
+			client as unknown as { getTorrentHashes: () => Promise<string[]> }
+		).getTorrentHashes.bind(client);
+		const hashes = await getTorrentHashes();
+
+		expect(hashes).toEqual([hash]);
+	});
+
+	it('does not falsely treat a missing hash as duplicate during add', async () => {
+		const infoHash = '3bd0fecad68932cb2e320d4dc19b750a36824173';
+		const methodsCalled: string[] = [];
+
+		const fetchMock = vi.fn(async (_url: string, init?: RequestInit) => {
+			const body = String(init?.body ?? '');
+			const method = body.match(/<methodName>([^<]+)<\/methodName>/)?.[1] ?? '';
+			methodsCalled.push(method);
+
+			if (method === 'd.multicall2' || method === 'd.multicall' || method === 'download_list') {
+				return new Response(xmlStringArray([]), { status: 200 });
+			}
+
+			if (method === 'load.start') {
+				return new Response(xmlInt(0), { status: 200 });
+			}
+
+			if (method === 'system.client_version' || method === 'system.client_version.get') {
+				return new Response(xmlString('0.0.0'), { status: 200 });
+			}
+
+			return new Response(xmlInt(0), { status: 200 });
+		});
+		vi.stubGlobal('fetch', fetchMock);
+
+		const client = new RTorrentClient({
+			host: 'localhost',
+			port: 80,
+			useSsl: false
+		});
+
+		const result = await client.addDownload({ infoHash, category: 'movies' });
+
+		expect(result).toBe(infoHash);
+		expect(methodsCalled).toContain('load.start');
+	});
+
+	it('treats started magnet metadata state as downloading (not paused)', async () => {
+		const hash = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
+
+		const fetchMock = vi.fn(async (_url: string, init?: RequestInit) => {
+			const body = String(init?.body ?? '');
+			const method = body.match(/<methodName>([^<]+)<\/methodName>/)?.[1] ?? '';
+
+			if (method === 'd.multicall2') {
+				if (body.includes('<string>main</string>')) {
+					return new Response(xmlStringArray([hash]), { status: 200 });
+				}
+				return new Response(xmlStringArray([]), { status: 200 });
+			}
+
+			if (method === 'd.multicall' || method === 'download_list') {
+				return new Response(xmlStringArray([]), { status: 200 });
+			}
+
+			switch (method) {
+				case 'd.name':
+					return new Response(xmlString('magnet item'), { status: 200 });
+				case 'd.size_bytes':
+				case 'd.completed_bytes':
+				case 'd.down.rate':
+				case 'd.up.rate':
+				case 'd.is_active':
+				case 'd.complete':
+				case 'd.ratio':
+				case 'd.creation_date':
+					return new Response(xmlInt(0), { status: 200 });
+				case 'd.state':
+					return new Response(xmlInt(1), { status: 200 });
+				case 'd.directory':
+					return new Response(xmlString('/downloads/incoming'), { status: 200 });
+				case 'd.custom1':
+					return new Response(xmlString('movies'), { status: 200 });
+				default:
+					return new Response(xmlInt(0), { status: 200 });
+			}
+		});
+		vi.stubGlobal('fetch', fetchMock);
+
+		const client = new RTorrentClient({
+			host: 'localhost',
+			port: 80,
+			useSsl: false
+		});
+
+		const download = await client.getDownload(hash);
+
+		expect(download).toBeTruthy();
+		expect(download?.status).toBe('downloading');
+	});
+
+	it('parses i8 numeric RPC values for status/progress/rates', async () => {
+		const hash = 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb';
+
+		const fetchMock = vi.fn(async (_url: string, init?: RequestInit) => {
+			const body = String(init?.body ?? '');
+			const method = body.match(/<methodName>([^<]+)<\/methodName>/)?.[1] ?? '';
+
+			if (method === 'd.multicall2') {
+				if (body.includes('<string>main</string>')) {
+					return new Response(xmlStringArray([hash]), { status: 200 });
+				}
+				return new Response(xmlStringArray([]), { status: 200 });
+			}
+
+			if (method === 'd.multicall' || method === 'download_list') {
+				return new Response(xmlStringArray([]), { status: 200 });
+			}
+
+			switch (method) {
+				case 'd.name':
+					return new Response(xmlString('active download'), { status: 200 });
+				case 'd.size_bytes':
+					return new Response(xmlI8(2_000_000_000), { status: 200 });
+				case 'd.completed_bytes':
+					return new Response(xmlI8(20_000_000), { status: 200 });
+				case 'd.down.rate':
+					return new Response(xmlI8(160_000), { status: 200 });
+				case 'd.up.rate':
+					return new Response(xmlI8(0), { status: 200 });
+				case 'd.is_active':
+				case 'd.state':
+					return new Response(xmlI8(1), { status: 200 });
+				case 'd.complete':
+					return new Response(xmlI8(0), { status: 200 });
+				case 'd.ratio':
+				case 'd.creation_date':
+					return new Response(xmlI8(0), { status: 200 });
+				case 'd.directory':
+					return new Response(xmlString('/downloads/incoming'), { status: 200 });
+				case 'd.custom1':
+					return new Response(xmlString('movies'), { status: 200 });
+				default:
+					return new Response(xmlInt(0), { status: 200 });
+			}
+		});
+		vi.stubGlobal('fetch', fetchMock);
+
+		const client = new RTorrentClient({
+			host: 'localhost',
+			port: 80,
+			useSsl: false
+		});
+
+		const download = await client.getDownload(hash);
+
+		expect(download).toBeTruthy();
+		expect(download?.status).toBe('downloading');
+		expect(download?.size).toBe(2_000_000_000);
+		expect(download?.downloadSpeed).toBe(160_000);
+		expect(download?.progress).toBeGreaterThan(0);
+	});
+
+	it('uses rTorrent base_path as contentPath when available', async () => {
+		const hash = 'cccccccccccccccccccccccccccccccccccccccc';
+		const basePath = '/downloads/completed/The.Lord.of.the.Rings.mp4';
+
+		const fetchMock = vi.fn(async (_url: string, init?: RequestInit) => {
+			const body = String(init?.body ?? '');
+			const method = body.match(/<methodName>([^<]+)<\/methodName>/)?.[1] ?? '';
+
+			if (method === 'd.multicall2') {
+				if (body.includes('<string>main</string>')) {
+					return new Response(xmlStringArray([hash]), { status: 200 });
+				}
+				return new Response(xmlStringArray([]), { status: 200 });
+			}
+
+			if (method === 'd.multicall' || method === 'download_list') {
+				return new Response(xmlStringArray([]), { status: 200 });
+			}
+
+			switch (method) {
+				case 'd.name':
+					return new Response(xmlString('The.Lord.of.the.Rings.mp4'), { status: 200 });
+				case 'd.directory':
+					return new Response(xmlString('/downloads/completed'), { status: 200 });
+				case 'd.base_path':
+					return new Response(xmlString(basePath), { status: 200 });
+				case 'd.size_bytes':
+				case 'd.completed_bytes':
+				case 'd.down.rate':
+				case 'd.up.rate':
+				case 'd.is_active':
+				case 'd.state':
+				case 'd.complete':
+				case 'd.ratio':
+				case 'd.creation_date':
+					return new Response(xmlI8(0), { status: 200 });
+				case 'd.custom1':
+					return new Response(xmlString('movies'), { status: 200 });
+				default:
+					return new Response(xmlInt(0), { status: 200 });
+			}
+		});
+		vi.stubGlobal('fetch', fetchMock);
+
+		const client = new RTorrentClient({
+			host: 'localhost',
+			port: 80,
+			useSsl: false
+		});
+
+		const download = await client.getDownload(hash);
+
+		expect(download).toBeTruthy();
+		expect(download?.contentPath).toBe(basePath);
+	});
+
+	it('does not duplicate name when directory already includes torrent name', async () => {
+		const hash = 'dddddddddddddddddddddddddddddddddddddddd';
+		const name = 'The Lord of the Rings The Fellowship of the Ring EXTENDED (2001)';
+		const directory = `/downloads/completed/${name}`;
+
+		const fetchMock = vi.fn(async (_url: string, init?: RequestInit) => {
+			const body = String(init?.body ?? '');
+			const method = body.match(/<methodName>([^<]+)<\/methodName>/)?.[1] ?? '';
+
+			if (method === 'd.multicall2') {
+				if (body.includes('<string>main</string>')) {
+					return new Response(xmlStringArray([hash]), { status: 200 });
+				}
+				return new Response(xmlStringArray([]), { status: 200 });
+			}
+
+			if (method === 'd.multicall' || method === 'download_list') {
+				return new Response(xmlStringArray([]), { status: 200 });
+			}
+
+			switch (method) {
+				case 'd.name':
+					return new Response(xmlString(name), { status: 200 });
+				case 'd.directory':
+					return new Response(xmlString(directory), { status: 200 });
+				case 'd.base_path':
+					return new Response(xmlString(''), { status: 200 });
+				case 'd.size_bytes':
+				case 'd.completed_bytes':
+				case 'd.down.rate':
+				case 'd.up.rate':
+				case 'd.is_active':
+				case 'd.state':
+				case 'd.complete':
+				case 'd.ratio':
+				case 'd.creation_date':
+					return new Response(xmlI8(0), { status: 200 });
+				case 'd.custom1':
+					return new Response(xmlString('movies'), { status: 200 });
+				default:
+					return new Response(xmlInt(0), { status: 200 });
+			}
+		});
+		vi.stubGlobal('fetch', fetchMock);
+
+		const client = new RTorrentClient({
+			host: 'localhost',
+			port: 80,
+			useSsl: false
+		});
+
+		const download = await client.getDownload(hash);
+
+		expect(download).toBeTruthy();
+		expect(download?.contentPath).toBe(directory);
+	});
+
+	it('matches directory and name when spacing differs (double spaces)', async () => {
+		const hash = 'eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee';
+		const name = 'The Lord of the Rings The Fellowship of the Ring EXTENDED (2001)';
+		const directory =
+			'/downloads/completed/The Lord of the Rings The Fellowship of the Ring  EXTENDED (2001)';
+
+		const fetchMock = vi.fn(async (_url: string, init?: RequestInit) => {
+			const body = String(init?.body ?? '');
+			const method = body.match(/<methodName>([^<]+)<\/methodName>/)?.[1] ?? '';
+
+			if (method === 'd.multicall2') {
+				if (body.includes('<string>main</string>')) {
+					return new Response(xmlStringArray([hash]), { status: 200 });
+				}
+				return new Response(xmlStringArray([]), { status: 200 });
+			}
+
+			if (method === 'd.multicall' || method === 'download_list') {
+				return new Response(xmlStringArray([]), { status: 200 });
+			}
+
+			switch (method) {
+				case 'd.name':
+					return new Response(xmlString(name), { status: 200 });
+				case 'd.directory':
+					return new Response(xmlString(directory), { status: 200 });
+				case 'd.base_path':
+					return new Response(xmlString(''), { status: 200 });
+				case 'd.size_bytes':
+				case 'd.completed_bytes':
+				case 'd.down.rate':
+				case 'd.up.rate':
+				case 'd.is_active':
+				case 'd.state':
+				case 'd.complete':
+				case 'd.ratio':
+				case 'd.creation_date':
+					return new Response(xmlI8(0), { status: 200 });
+				case 'd.custom1':
+					return new Response(xmlString('movies'), { status: 200 });
+				default:
+					return new Response(xmlInt(0), { status: 200 });
+			}
+		});
+		vi.stubGlobal('fetch', fetchMock);
+
+		const client = new RTorrentClient({
+			host: 'localhost',
+			port: 80,
+			useSsl: false
+		});
+
+		const download = await client.getDownload(hash);
+
+		expect(download).toBeTruthy();
+		expect(download?.contentPath).toBe(directory);
+	});
+
+	it('collapses duplicate terminal segment from base_path', async () => {
+		const hash = 'ffffffffffffffffffffffffffffffffffffffff';
+		const name = 'The Lord of the Rings The Fellowship of the Ring  EXTENDED (2001)';
+		const duplicateBasePath = `/downloads/completed/${name}/${name}`;
+		const expectedPath = `/downloads/completed/${name}`;
+
+		const fetchMock = vi.fn(async (_url: string, init?: RequestInit) => {
+			const body = String(init?.body ?? '');
+			const method = body.match(/<methodName>([^<]+)<\/methodName>/)?.[1] ?? '';
+
+			if (method === 'd.multicall2') {
+				if (body.includes('<string>main</string>')) {
+					return new Response(xmlStringArray([hash]), { status: 200 });
+				}
+				return new Response(xmlStringArray([]), { status: 200 });
+			}
+
+			if (method === 'd.multicall' || method === 'download_list') {
+				return new Response(xmlStringArray([]), { status: 200 });
+			}
+
+			switch (method) {
+				case 'd.name':
+					return new Response(xmlString(name), { status: 200 });
+				case 'd.directory':
+					return new Response(xmlString(`/downloads/completed/${name}`), { status: 200 });
+				case 'd.base_path':
+					return new Response(xmlString(duplicateBasePath), { status: 200 });
+				case 'd.size_bytes':
+				case 'd.completed_bytes':
+				case 'd.down.rate':
+				case 'd.up.rate':
+				case 'd.is_active':
+				case 'd.state':
+				case 'd.complete':
+				case 'd.ratio':
+				case 'd.creation_date':
+					return new Response(xmlI8(0), { status: 200 });
+				case 'd.custom1':
+					return new Response(xmlString('movies'), { status: 200 });
+				default:
+					return new Response(xmlInt(0), { status: 200 });
+			}
+		});
+		vi.stubGlobal('fetch', fetchMock);
+
+		const client = new RTorrentClient({
+			host: 'localhost',
+			port: 80,
+			useSsl: false
+		});
+
+		const download = await client.getDownload(hash);
+
+		expect(download).toBeTruthy();
+		expect(download?.contentPath).toBe(expectedPath);
+	});
+});

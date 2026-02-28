@@ -49,6 +49,33 @@ export interface PathMappingOptions {
 	tempRemotePath?: string | null;
 }
 
+function joinMappedPath(localBasePath: string, relativePath: string): string {
+	const normalizedLocal = localBasePath.replace(/\/+$/, '');
+	const normalizedRelative = relativePath.replace(/^\/+/, '');
+
+	if (!normalizedRelative) {
+		return normalizedLocal;
+	}
+
+	const relativeParts = normalizedRelative.split('/').filter(Boolean);
+	const localParts = normalizedLocal.split('/').filter(Boolean);
+
+	// Avoid duplicated segment joins like:
+	// remote: /downloads + local: /mnt/rutorrent/completed + client: /downloads/completed/file
+	// old: /mnt/rutorrent/completed/completed/file
+	// new: /mnt/rutorrent/completed/file
+	if (localParts.length > 0 && relativeParts.length > 0) {
+		const localTail = localParts[localParts.length - 1].toLowerCase();
+		const relativeHead = relativeParts[0].toLowerCase();
+		if (localTail === relativeHead) {
+			const remainder = relativeParts.slice(1).join('/');
+			return remainder ? `${normalizedLocal}/${remainder}` : normalizedLocal;
+		}
+	}
+
+	return `${normalizedLocal}/${normalizedRelative}`;
+}
+
 /**
  * Map a path from client's perspective to local filesystem path.
  * Supports dual folder mapping for SABnzbd (temp + completed folders).
@@ -77,7 +104,7 @@ export function mapClientPathToLocal(
 
 		if (normalizedClientPath.startsWith(normalizedRemote)) {
 			const relativePath = normalizedClientPath.slice(normalizedRemote.length);
-			const mappedPath = normalizedLocal + relativePath;
+			const mappedPath = joinMappedPath(normalizedLocal, relativePath);
 
 			logger.debug('Path mapped (completed folder)', {
 				clientPath,
@@ -97,7 +124,7 @@ export function mapClientPathToLocal(
 
 		if (normalizedClientPath.startsWith(normalizedTempRemote)) {
 			const relativePath = normalizedClientPath.slice(normalizedTempRemote.length);
-			const mappedPath = normalizedTempLocal + relativePath;
+			const mappedPath = joinMappedPath(normalizedTempLocal, relativePath);
 
 			logger.debug('Path mapped (temp folder)', {
 				clientPath,
@@ -202,7 +229,7 @@ export function mapClientPathToLocalWithResult(
 
 		if (normalizedClientPath.startsWith(normalizedRemote)) {
 			const relativePath = normalizedClientPath.slice(normalizedRemote.length);
-			const mappedPath = normalizedLocal + relativePath;
+			const mappedPath = joinMappedPath(normalizedLocal, relativePath);
 
 			logger.debug('Path mapped (completed folder)', {
 				clientPath,
@@ -222,7 +249,7 @@ export function mapClientPathToLocalWithResult(
 
 		if (normalizedClientPath.startsWith(normalizedTempRemote)) {
 			const relativePath = normalizedClientPath.slice(normalizedTempRemote.length);
-			const mappedPath = normalizedTempLocal + relativePath;
+			const mappedPath = joinMappedPath(normalizedTempLocal, relativePath);
 
 			logger.debug('Path mapped (temp folder)', {
 				clientPath,

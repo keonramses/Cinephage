@@ -969,6 +969,43 @@ describe('RenamePreviewService', () => {
 		});
 	});
 
+	describe('Anime Rename Fallbacks', () => {
+		it('builds fallback absolute numbering from episode order when DB values are missing', () => {
+			const service = new RenamePreviewService() as any;
+			const absoluteEpisodeMap = service.buildAbsoluteEpisodeFallbackMap([
+				{
+					id: 'special',
+					seasonNumber: 0,
+					episodeNumber: 1,
+					absoluteEpisodeNumber: null
+				},
+				{
+					id: 'ep1',
+					seasonNumber: 1,
+					episodeNumber: 1,
+					absoluteEpisodeNumber: null
+				},
+				{
+					id: 'ep2',
+					seasonNumber: 1,
+					episodeNumber: 2,
+					absoluteEpisodeNumber: null
+				},
+				{
+					id: 'ep3',
+					seasonNumber: 2,
+					episodeNumber: 1,
+					absoluteEpisodeNumber: null
+				}
+			]);
+
+			expect(absoluteEpisodeMap.get('special')).toBeUndefined();
+			expect(absoluteEpisodeMap.get('ep1')).toBe(1);
+			expect(absoluteEpisodeMap.get('ep2')).toBe(2);
+			expect(absoluteEpisodeMap.get('ep3')).toBe(3);
+		});
+	});
+
 	describe('Media Server ID Formats', () => {
 		it('should format Plex ID correctly', () => {
 			const service = new NamingService({

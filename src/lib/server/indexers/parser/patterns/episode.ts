@@ -157,7 +157,7 @@ const EPISODE_PATTERNS: Array<{
 	},
 	// - 045 - anime style with dashes around number
 	{
-		pattern: /\s-\s(\d{2,4})\s/,
+		pattern: /\s-\s(\d{2,4})(?=\s|$)/,
 		extract: (match) => ({
 			absoluteEpisode: parseInt(match[1], 10)
 		})

@@ -88,7 +88,7 @@
     src = ../.;
   };
 
-  npmDepsHash = "sha256-DYdRywwG/KPKTv/47n4gdYKfArZGmjAg1FtW9JgX6xM=";
+  npmDepsHash = "sha256-ONA6qECTD8YPQpRCYrPscogJrwTeFO43esXf6A1hL94=";
 
   buildPhase = ''
     runHook preBuild

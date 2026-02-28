@@ -3,8 +3,7 @@ import type { RequestHandler } from './$types.js';
 import { db } from '$lib/server/db/index.js';
 import { downloadHistory, movies, movieFiles, rootFolders } from '$lib/server/db/schema.js';
 import { eq, inArray } from 'drizzle-orm';
-import { unlink, rmdir } from 'node:fs/promises';
-import { join } from 'node:path';
+import { deleteDirectoryWithinRoot } from '$lib/server/filesystem/delete-helpers.js';
 import { logger } from '$lib/logging';
 import { deleteAllAlternateTitles } from '$lib/server/services/index.js';
 
@@ -130,22 +129,7 @@ export const DELETE: RequestHandler = async ({ request }) => {
 
 				// Delete files from disk if requested
 				if (deleteFiles && movie.rootFolderPath && movie.path) {
-					for (const file of files) {
-						const fullPath = join(movie.rootFolderPath, movie.path, file.relativePath);
-						try {
-							await unlink(fullPath);
-						} catch {
-							// File may not exist, continue anyway
-						}
-					}
-
-					// Try to remove the movie folder if empty
-					const movieFolder = join(movie.rootFolderPath, movie.path);
-					try {
-						await rmdir(movieFolder);
-					} catch {
-						// Folder not empty or doesn't exist
-					}
+					await deleteDirectoryWithinRoot(movie.rootFolderPath, movie.path);
 				}
 
 				// Delete movie file records from database

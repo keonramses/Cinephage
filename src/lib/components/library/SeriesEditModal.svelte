@@ -11,6 +11,7 @@
 		rootFolderId: string | null;
 		seasonFolder: boolean | null;
 		wantsSubtitles: boolean | null;
+		seriesType: string | null;
 	}
 
 	interface QualityProfile {
@@ -45,6 +46,7 @@
 		rootFolderId: string | null;
 		seasonFolder: boolean;
 		wantsSubtitles: boolean;
+		seriesType: 'standard' | 'anime' | 'daily';
 	}
 
 	let { open, series, qualityProfiles, rootFolders, saving, onClose, onSave }: Props = $props();
@@ -55,6 +57,21 @@
 	let rootFolderId = $state('');
 	let seasonFolder = $state(true);
 	let wantsSubtitles = $state(true);
+	let seriesType = $state<'standard' | 'anime' | 'daily'>('standard');
+
+	const seriesTypeOptions: Array<{
+		value: 'standard' | 'anime' | 'daily';
+		label: string;
+		description: string;
+	}> = [
+		{ value: 'standard', label: 'Standard', description: 'Episodes with S##E## numbering' },
+		{ value: 'anime', label: 'Anime', description: 'Episodes with absolute numbering' },
+		{ value: 'daily', label: 'Daily', description: 'Episodes with date-based numbering' }
+	];
+
+	function normalizeSeriesType(value: string | null | undefined): 'standard' | 'anime' | 'daily' {
+		return value === 'anime' || value === 'daily' ? value : 'standard';
+	}
 
 	// Reset form when modal opens
 	$effect(() => {
@@ -68,6 +85,7 @@
 			rootFolderId = series.rootFolderId ?? '';
 			seasonFolder = series.seasonFolder ?? true;
 			wantsSubtitles = series.wantsSubtitles ?? true;
+			seriesType = normalizeSeriesType(series.seriesType);
 		}
 	});
 
@@ -92,7 +110,8 @@
 			scoringProfileId: qualityProfileId || null,
 			rootFolderId: rootFolderId || null,
 			seasonFolder,
-			wantsSubtitles
+			wantsSubtitles,
+			seriesType
 		});
 	}
 </script>
@@ -140,6 +159,23 @@
 			description="Automatically search and download subtitles for episodes"
 			variant="toggle"
 		/>
+
+		<!-- Series Type -->
+		<div class="form-control">
+			<label class="label" for="series-type">
+				<span class="label-text font-medium">Series Type</span>
+			</label>
+			<select id="series-type" bind:value={seriesType} class="select-bordered select w-full">
+				{#each seriesTypeOptions as option (option.value)}
+					<option value={option.value}>{option.label}</option>
+				{/each}
+			</select>
+			<div class="label">
+				<span class="label-text-alt wrap-break-word whitespace-normal text-base-content/60">
+					{seriesTypeOptions.find((option) => option.value === seriesType)?.description}
+				</span>
+			</div>
+		</div>
 
 		<!-- Quality Profile -->
 		<div class="form-control">

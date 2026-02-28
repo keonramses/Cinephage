@@ -13,12 +13,11 @@ import {
 	series,
 	episodes,
 	subtitles,
-	movieFiles,
-	episodeFiles,
 	type LanguagePreference
 } from '$lib/server/db/schema';
 import { eq } from 'drizzle-orm';
 import { randomUUID } from 'node:crypto';
+import { extname } from 'node:path';
 import { logger } from '$lib/logging';
 import type { SubtitleStatus, LanguageCode } from '../types';
 import { normalizeLanguageCode } from '$lib/shared/languages';
@@ -261,17 +260,7 @@ export class LanguageProfileService {
 			.from(subtitles)
 			.where(eq(subtitles.movieId, movieId));
 
-		// Get embedded subtitles from movie file mediaInfo
-		const [movieFile] = await db
-			.select({ mediaInfo: movieFiles.mediaInfo })
-			.from(movieFiles)
-			.where(eq(movieFiles.movieId, movieId))
-			.limit(1);
-
-		const embeddedLanguages =
-			(movieFile?.mediaInfo as { subtitleLanguages?: string[] })?.subtitleLanguages ?? [];
-
-		return this.calculateStatus(profile, existingSubtitles, embeddedLanguages);
+		return this.calculateStatus(profile, existingSubtitles);
 	}
 
 	/**
@@ -298,20 +287,7 @@ export class LanguageProfileService {
 			.from(subtitles)
 			.where(eq(subtitles.episodeId, episodeId));
 
-		// Get embedded subtitles from episode file mediaInfo
-		// Episode files store episodeIds as an array, so we need to find a file containing this episode
-		const allEpisodeFiles = await db
-			.select({ mediaInfo: episodeFiles.mediaInfo, episodeIds: episodeFiles.episodeIds })
-			.from(episodeFiles)
-			.where(eq(episodeFiles.seriesId, episode.seriesId));
-
-		// Find the file that contains this episode
-		const matchingFile = allEpisodeFiles.find((f) => f.episodeIds?.includes(episodeId));
-
-		const embeddedLanguages =
-			(matchingFile?.mediaInfo as { subtitleLanguages?: string[] })?.subtitleLanguages ?? [];
-
-		return this.calculateStatus(profile, existingSubtitles, embeddedLanguages);
+		return this.calculateStatus(profile, existingSubtitles);
 	}
 
 	/**
@@ -334,12 +310,6 @@ export class LanguageProfileService {
 		// Get all episodes for this series
 		const seriesEpisodes = await db.select().from(episodes).where(eq(episodes.seriesId, seriesId));
 
-		// Get all episode files for this series (for embedded subtitle lookup)
-		const allEpisodeFiles = await db
-			.select({ mediaInfo: episodeFiles.mediaInfo, episodeIds: episodeFiles.episodeIds })
-			.from(episodeFiles)
-			.where(eq(episodeFiles.seriesId, seriesId));
-
 		const missing: string[] = [];
 
 		for (const episode of seriesEpisodes) {
@@ -348,12 +318,7 @@ export class LanguageProfileService {
 				.from(subtitles)
 				.where(eq(subtitles.episodeId, episode.id));
 
-			// Find the file that contains this episode
-			const matchingFile = allEpisodeFiles.find((f) => f.episodeIds?.includes(episode.id));
-			const embeddedLanguages =
-				(matchingFile?.mediaInfo as { subtitleLanguages?: string[] })?.subtitleLanguages ?? [];
-
-			const status = this.calculateStatus(profile, existingSubtitles, embeddedLanguages);
+			const status = this.calculateStatus(profile, existingSubtitles);
 			if (!status.satisfied && status.missing.length > 0) {
 				missing.push(episode.id);
 			}
@@ -375,17 +340,7 @@ export class LanguageProfileService {
 			.from(subtitles)
 			.where(eq(subtitles.movieId, movieId));
 
-		// Get embedded subtitles from movie file mediaInfo
-		const [movieFile] = await db
-			.select({ mediaInfo: movieFiles.mediaInfo })
-			.from(movieFiles)
-			.where(eq(movieFiles.movieId, movieId))
-			.limit(1);
-
-		const embeddedLanguages =
-			(movieFile?.mediaInfo as { subtitleLanguages?: string[] })?.subtitleLanguages ?? [];
-
-		return this.checkCutoffSatisfied(profile, existingSubtitles, embeddedLanguages);
+		return this.checkCutoffSatisfied(profile, existingSubtitles);
 	}
 
 	// =========================================================================
@@ -396,17 +351,17 @@ export class LanguageProfileService {
 	 * Calculate subtitle status against a profile
 	 * @param profile - The language profile to check against
 	 * @param existingSubtitles - External subtitle files from the subtitles table
-	 * @param embeddedLanguages - Embedded subtitle languages from mediaInfo (ISO 639-2 codes)
 	 */
 	private calculateStatus(
 		profile: LanguageProfile,
-		existingSubtitles: Array<typeof subtitles.$inferSelect>,
-		embeddedLanguages: string[] = []
+		existingSubtitles: Array<typeof subtitles.$inferSelect>
 	): SubtitleStatus {
-		const normalizedExisting = existingSubtitles.map((sub) => ({
-			...sub,
-			normalizedLanguage: normalizeLanguageCode(sub.language)
-		}));
+		const normalizedExisting = existingSubtitles
+			.filter((sub) => this.isExternalSubtitleRecord(sub))
+			.map((sub) => ({
+				...sub,
+				normalizedLanguage: normalizeLanguageCode(sub.language)
+			}));
 
 		const existing: SubtitleStatus['existing'] = normalizedExisting.map((sub) => ({
 			language: sub.normalizedLanguage,
@@ -415,9 +370,6 @@ export class LanguageProfileService {
 			isHearingImpaired: sub.isHearingImpaired ?? false,
 			matchScore: sub.matchScore ?? undefined
 		}));
-
-		// Normalize embedded language codes (e.g., "eng" -> "en")
-		const normalizedEmbedded = embeddedLanguages.map((lang) => normalizeLanguageCode(lang));
 
 		const missing: SubtitleStatus['missing'] = [];
 		let cutoffReached = false;
@@ -433,11 +385,7 @@ export class LanguageProfileService {
 					(!langPref.excludeHi || !(sub.isHearingImpaired ?? false))
 			);
 
-			// Check if we have this language embedded in the video file
-			// Embedded subs are treated as regular (non-forced, non-HI) subtitles
-			const hasEmbedded = !langPref.forced && normalizedEmbedded.includes(langPref.code);
-
-			const hasLanguage = hasExternal || hasEmbedded;
+			const hasLanguage = hasExternal;
 
 			if (!hasLanguage) {
 				missing.push({
@@ -473,16 +421,14 @@ export class LanguageProfileService {
 	 */
 	private checkCutoffSatisfied(
 		profile: LanguageProfile,
-		existingSubtitles: Array<typeof subtitles.$inferSelect>,
-		embeddedLanguages: string[] = []
+		existingSubtitles: Array<typeof subtitles.$inferSelect>
 	): boolean {
-		const normalizedExisting = existingSubtitles.map((sub) => ({
-			...sub,
-			normalizedLanguage: normalizeLanguageCode(sub.language)
-		}));
-
-		// Normalize embedded language codes (e.g., "eng" -> "en")
-		const normalizedEmbedded = embeddedLanguages.map((lang) => normalizeLanguageCode(lang));
+		const normalizedExisting = existingSubtitles
+			.filter((sub) => this.isExternalSubtitleRecord(sub))
+			.map((sub) => ({
+				...sub,
+				normalizedLanguage: normalizeLanguageCode(sub.language)
+			}));
 
 		for (let i = 0; i <= Math.min(profile.cutoffIndex, profile.languages.length - 1); i++) {
 			const langPref = profile.languages[i];
@@ -495,10 +441,7 @@ export class LanguageProfileService {
 					(!langPref.excludeHi || !(sub.isHearingImpaired ?? false))
 			);
 
-			// Check embedded subtitles (non-forced only)
-			const hasEmbedded = !langPref.forced && normalizedEmbedded.includes(langPref.code);
-
-			const hasLanguage = hasExternal || hasEmbedded;
+			const hasLanguage = hasExternal;
 
 			if (langPref.isCutoff && hasLanguage) {
 				return true;
@@ -508,13 +451,11 @@ export class LanguageProfileService {
 		// Check if cutoff index language is satisfied
 		if (profile.languages[profile.cutoffIndex]) {
 			const cutoffLang = profile.languages[profile.cutoffIndex];
-			const hasExternal = normalizedExisting.some(
+			return normalizedExisting.some(
 				(sub) =>
 					sub.normalizedLanguage === cutoffLang.code &&
 					(sub.isForced ?? false) === cutoffLang.forced
 			);
-			const hasEmbedded = !cutoffLang.forced && normalizedEmbedded.includes(cutoffLang.code);
-			return hasExternal || hasEmbedded;
 		}
 
 		return false;
@@ -535,6 +476,18 @@ export class LanguageProfileService {
 			createdAt: row.createdAt ?? undefined,
 			updatedAt: row.updatedAt ?? undefined
 		};
+	}
+
+	private isExternalSubtitleRecord(subtitle: typeof subtitles.$inferSelect): boolean {
+		const format = (subtitle.format ?? '').trim().toLowerCase();
+		if (format === 'embedded') {
+			return false;
+		}
+
+		// Guard against legacy placeholder records that may have been stored with non-file paths.
+		const extension = extname(subtitle.relativePath ?? '').toLowerCase();
+		const knownExternalExtensions = new Set(['.srt', '.ass', '.ssa', '.sub', '.vtt', '.idx']);
+		return knownExternalExtensions.has(extension);
 	}
 }
 

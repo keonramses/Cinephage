@@ -5,7 +5,8 @@ import { z } from 'zod';
 
 const validatePathSchema = z.object({
 	path: z.string().min(1, 'Path is required'),
-	readOnly: z.boolean().optional().default(false)
+	readOnly: z.boolean().optional().default(false),
+	folderId: z.string().optional()
 });
 
 /**
@@ -32,11 +33,11 @@ export const POST: RequestHandler = async ({ request }) => {
 		);
 	}
 
-	const { path, readOnly } = result.data;
+	const { path, readOnly, folderId } = result.data;
 	const service = getRootFolderService();
 
 	try {
-		const validation = await service.validatePath(path, readOnly);
+		const validation = await service.validatePath(path, readOnly, folderId);
 		return json(validation);
 	} catch (error) {
 		const message = error instanceof Error ? error.message : 'Unknown error';

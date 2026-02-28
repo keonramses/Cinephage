@@ -189,6 +189,90 @@ describe('LanguageProfileService', () => {
 
 			expect(profile.languages[0].isCutoff).toBe(true);
 		});
+
+		it('should not treat embedded subtitles as satisfying profile requirements', () => {
+			const profile: LanguageProfile = {
+				id: 'test-profile',
+				name: 'Test Profile',
+				languages: [
+					{ code: 'en', forced: false, hearingImpaired: false, excludeHi: false, isCutoff: false }
+				],
+				cutoffIndex: 0,
+				upgradesAllowed: true,
+				minimumScore: 60,
+				isDefault: false
+			};
+
+			const status = (profileService as any).calculateStatus(profile, [
+				{
+					id: 'embedded-en',
+					language: 'en',
+					relativePath: 'embedded:en',
+					format: 'embedded',
+					isForced: false,
+					isHearingImpaired: false
+				}
+			]) as SubtitleStatus;
+
+			expect(status.satisfied).toBe(false);
+			expect(status.missing).toHaveLength(1);
+			expect(status.missing[0].code).toBe('en');
+		});
+
+		it('should not treat embedded subtitles as satisfying cutoff', () => {
+			const profile: LanguageProfile = {
+				id: 'test-profile',
+				name: 'Test Profile',
+				languages: [
+					{ code: 'en', forced: false, hearingImpaired: false, excludeHi: false, isCutoff: true }
+				],
+				cutoffIndex: 0,
+				upgradesAllowed: true,
+				minimumScore: 60,
+				isDefault: false
+			};
+
+			const satisfied = (profileService as any).checkCutoffSatisfied(profile, [
+				{
+					id: 'embedded-en',
+					language: 'en',
+					relativePath: 'embedded:en',
+					format: 'embedded',
+					isForced: false,
+					isHearingImpaired: false
+				}
+			]) as boolean;
+
+			expect(satisfied).toBe(false);
+		});
+
+		it('should treat external subtitle files as satisfying requirements', () => {
+			const profile: LanguageProfile = {
+				id: 'test-profile',
+				name: 'Test Profile',
+				languages: [
+					{ code: 'en', forced: false, hearingImpaired: false, excludeHi: false, isCutoff: false }
+				],
+				cutoffIndex: 0,
+				upgradesAllowed: true,
+				minimumScore: 60,
+				isDefault: false
+			};
+
+			const status = (profileService as any).calculateStatus(profile, [
+				{
+					id: 'external-en',
+					language: 'en',
+					relativePath: 'Movie.Name.en.srt',
+					format: 'srt',
+					isForced: false,
+					isHearingImpaired: false
+				}
+			]) as SubtitleStatus;
+
+			expect(status.satisfied).toBe(true);
+			expect(status.missing).toHaveLength(0);
+		});
 	});
 
 	describe('SubtitleStatus interface validation', () => {

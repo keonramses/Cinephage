@@ -18,6 +18,7 @@
 	import { FileEdit, Wifi, WifiOff, Loader2 } from 'lucide-svelte';
 	import { page } from '$app/stores';
 	import { goto } from '$app/navigation';
+	import { resolvePath } from '$lib/utils/routing';
 	import { createDynamicSSE } from '$lib/sse';
 	import { mobileSSEStatus } from '$lib/sse/mobileStatus.svelte';
 
@@ -240,6 +241,17 @@
 
 	function handleSearch() {
 		isSearchModalOpen = true;
+	}
+
+	function handleImport() {
+		const query = [
+			`mediaType=movie`,
+			`tmdbId=${encodeURIComponent(String(movie.tmdbId))}`,
+			`libraryId=${encodeURIComponent(movie.id)}`,
+			`title=${encodeURIComponent(movie.title)}`,
+			...(movie.year ? [`year=${encodeURIComponent(String(movie.year))}`] : [])
+		].join('&');
+		void goto(resolvePath(`/library/import?${query}`));
 	}
 
 	async function handleAutoSearch() {
@@ -594,6 +606,7 @@
 		onMonitorToggle={handleMonitorToggle}
 		onAutoSearch={handleAutoSearch}
 		onSearch={handleSearch}
+		onImport={handleImport}
 		onEdit={handleEdit}
 		onDelete={handleDelete}
 		onScoreClick={handleScoreClick}

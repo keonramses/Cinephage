@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { Folder, ChevronUp, Loader2, Home, Check } from 'lucide-svelte';
+	import { getResponseErrorMessage, readResponsePayload } from '$lib/utils/http';
 
 	interface DirectoryEntry {
 		name: string;
@@ -28,15 +29,30 @@
 
 		try {
 			const response = await fetch(`/api/filesystem/browse?path=${encodeURIComponent(path)}`);
-			const data = await response.json();
+			const payload = await readResponsePayload<{
+				currentPath?: string;
+				parentPath?: string | null;
+				entries?: DirectoryEntry[];
+				error?: string;
+			}>(response);
 
-			if (data.error) {
-				error = data.error;
+			if (!response.ok) {
+				error = getResponseErrorMessage(payload, 'Failed to browse directory');
+				return;
 			}
 
-			currentPath = data.currentPath;
-			parentPath = data.parentPath;
-			entries = data.entries || [];
+			if (!payload || typeof payload !== 'object') {
+				error = 'Invalid response from filesystem browser';
+				return;
+			}
+
+			if (payload.error) {
+				error = payload.error;
+			}
+
+			currentPath = payload.currentPath ?? path;
+			parentPath = payload.parentPath ?? null;
+			entries = payload.entries ?? [];
 		} catch (e) {
 			error = e instanceof Error ? e.message : 'Failed to browse directory';
 		} finally {
@@ -125,11 +141,13 @@
 	</div>
 
 	<!-- Footer with actions -->
-	<div class="flex items-center justify-between border-t border-base-300 bg-base-200 p-3">
+	<div
+		class="flex flex-col gap-2 border-t border-base-300 bg-base-200 p-3 sm:flex-row sm:items-center sm:justify-between"
+	>
 		<div class="text-sm text-base-content/60">
 			Double-click to enter, select current folder below
 		</div>
-		<div class="flex gap-2">
+		<div class="flex w-full flex-col-reverse gap-2 sm:w-auto sm:flex-row">
 			<button type="button" class="btn btn-ghost btn-sm" onclick={onCancel}> Cancel </button>
 			<button type="button" class="btn gap-1 btn-sm btn-primary" onclick={handleSelect}>
 				<Check class="h-4 w-4" />

@@ -10,8 +10,7 @@ import {
 	rootFolders
 } from '$lib/server/db/schema.js';
 import { eq, inArray } from 'drizzle-orm';
-import { unlink, rmdir, readdir } from 'node:fs/promises';
-import { join } from 'node:path';
+import { deleteDirectoryWithinRoot } from '$lib/server/filesystem/delete-helpers.js';
 import { logger } from '$lib/logging';
 import { deleteAllAlternateTitles } from '$lib/server/services/index.js';
 
@@ -139,32 +138,7 @@ export const DELETE: RequestHandler = async ({ request }) => {
 
 				// Delete files from disk if requested
 				if (deleteFiles && seriesItem.rootFolderPath && seriesItem.path) {
-					for (const file of files) {
-						const fullPath = join(seriesItem.rootFolderPath, seriesItem.path, file.relativePath);
-						try {
-							await unlink(fullPath);
-						} catch {
-							// File may not exist, continue anyway
-						}
-					}
-
-					// Try to remove empty season folders and the series folder
-					const seriesFolder = join(seriesItem.rootFolderPath, seriesItem.path);
-					try {
-						const entries = await readdir(seriesFolder, { withFileTypes: true });
-						for (const entry of entries) {
-							if (entry.isDirectory()) {
-								try {
-									await rmdir(join(seriesFolder, entry.name));
-								} catch {
-									// Not empty
-								}
-							}
-						}
-						await rmdir(seriesFolder);
-					} catch {
-						// Folder not empty or doesn't exist
-					}
+					await deleteDirectoryWithinRoot(seriesItem.rootFolderPath, seriesItem.path);
 				}
 
 				// Delete all episode file records from database

@@ -81,10 +81,11 @@ export class ActivityService {
 		pagination: PaginationOptions = { limit: 50, offset: 0 }
 	): Promise<ActivityQueryResult> {
 		// Fetch data from all three sources
-		const [activeDownloads, historyItems, monitoringItems] = await Promise.all([
+		const [activeDownloads, historyItems, monitoringItems, failedQueueItems] = await Promise.all([
 			this.fetchActiveDownloads(),
 			this.fetchHistoryItems(),
-			this.fetchMonitoringItems(filters.includeNoResults)
+			this.fetchMonitoringItems(filters.includeNoResults),
+			this.fetchFailedQueueItems()
 		]);
 
 		// Batch fetch all media info
@@ -95,10 +96,12 @@ export class ActivityService {
 			activeDownloads.map((d) => d.id)
 		);
 
+		const failedQueueIndex = this.buildFailedQueueIndex(failedQueueItems);
+
 		// Transform all sources to activities
 		const activities: UnifiedActivity[] = [
 			...this.transformQueueItems(activeDownloads, mediaMaps, monitoringByQueueId),
-			...this.transformHistoryItems(historyItems, mediaMaps, activeDownloads),
+			...this.transformHistoryItems(historyItems, mediaMaps, activeDownloads, failedQueueIndex),
 			...this.transformMonitoringItems(monitoringItems, mediaMaps)
 		];
 
@@ -275,7 +278,8 @@ export class ActivityService {
 	transformHistoryItem(
 		history: DownloadHistoryRecord,
 		mediaMaps: MediaMaps,
-		activeDownloads: DownloadQueueRecord[] = []
+		activeDownloads: DownloadQueueRecord[] = [],
+		failedQueueIndex?: Map<string, string>
 	): UnifiedActivity | null {
 		// Skip if this release is still in the queue
 		if (activeDownloads.some((d) => d.title === history.title)) {
@@ -284,6 +288,10 @@ export class ActivityService {
 
 		const timeline = this.buildHistoryTimeline(history);
 		const mediaInfo = this.resolveMediaInfo(history, mediaMaps);
+		const queueItemId =
+			history.status === 'failed'
+				? this.findFailedQueueItemId(history, failedQueueIndex)
+				: undefined;
 
 		return {
 			id: `history-${history.id}`,
@@ -311,6 +319,7 @@ export class ActivityService {
 			timeline,
 			startedAt: history.grabbedAt || history.createdAt || new Date().toISOString(),
 			completedAt: history.importedAt || history.completedAt || null,
+			queueItemId,
 			downloadHistoryId: history.id,
 			importedPath: history.importedPath ?? undefined
 		};
@@ -394,6 +403,10 @@ export class ActivityService {
 			)
 			.orderBy(desc(downloadQueue.addedAt))
 			.all();
+	}
+
+	private async fetchFailedQueueItems(): Promise<DownloadQueueRecord[]> {
+		return db.select().from(downloadQueue).where(eq(downloadQueue.status, 'failed')).all();
 	}
 
 	private async fetchHistoryItems(): Promise<DownloadHistoryRecord[]> {
@@ -532,10 +545,13 @@ export class ActivityService {
 	private transformHistoryItems(
 		historyItems: DownloadHistoryRecord[],
 		mediaMaps: MediaMaps,
-		activeDownloads: DownloadQueueRecord[]
+		activeDownloads: DownloadQueueRecord[],
+		failedQueueIndex?: Map<string, string>
 	): UnifiedActivity[] {
 		return historyItems
-			.map((history) => this.transformHistoryItem(history, mediaMaps, activeDownloads))
+			.map((history) =>
+				this.transformHistoryItem(history, mediaMaps, activeDownloads, failedQueueIndex)
+			)
 			.filter((activity): activity is UnifiedActivity => activity !== null);
 	}
 
@@ -547,6 +563,41 @@ export class ActivityService {
 		return monitoringItems
 			.map((mon) => this.transformMonitoringItem(mon, mediaMaps, processedKeys))
 			.filter((activity): activity is UnifiedActivity => activity !== null);
+	}
+
+	private buildFailedQueueIndex(queueItems: DownloadQueueRecord[]): Map<string, string> {
+		const index = new Map<string, string>();
+
+		for (const item of queueItems) {
+			if (item.downloadId) {
+				index.set(`download:${item.downloadId}`, item.id);
+			}
+			if (item.title && item.addedAt) {
+				index.set(`title:${item.title.toLowerCase()}|grabbed:${item.addedAt}`, item.id);
+			}
+		}
+
+		return index;
+	}
+
+	private findFailedQueueItemId(
+		history: DownloadHistoryRecord,
+		failedQueueIndex?: Map<string, string>
+	): string | undefined {
+		if (!failedQueueIndex) return undefined;
+
+		if (history.downloadId) {
+			const byDownloadId = failedQueueIndex.get(`download:${history.downloadId}`);
+			if (byDownloadId) return byDownloadId;
+		}
+
+		if (history.title && history.grabbedAt) {
+			return failedQueueIndex.get(
+				`title:${history.title.toLowerCase()}|grabbed:${history.grabbedAt}`
+			);
+		}
+
+		return undefined;
 	}
 
 	private buildQueueTimeline(

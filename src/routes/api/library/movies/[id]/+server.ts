@@ -16,8 +16,7 @@ import { searchSubtitlesForNewMedia } from '$lib/server/subtitles/services/Subti
 import { monitoringScheduler } from '$lib/server/monitoring/MonitoringScheduler.js';
 import { getDownloadClientManager } from '$lib/server/downloadClients/DownloadClientManager.js';
 import { deleteAllAlternateTitles } from '$lib/server/services/index.js';
-import { unlink, rmdir } from 'node:fs/promises';
-import { join } from 'node:path';
+import { deleteDirectoryWithinRoot } from '$lib/server/filesystem/delete-helpers.js';
 import { logger } from '$lib/logging';
 import { libraryMediaEvents } from '$lib/server/library/LibraryMediaEvents';
 import { tmdb } from '$lib/server/tmdb.js';
@@ -263,24 +262,8 @@ export const DELETE: RequestHandler = async ({ params, url }) => {
 
 		// Delete files from disk if requested
 		if (deleteFiles && movie.rootFolderPath && movie.path) {
-			for (const file of files) {
-				const fullPath = join(movie.rootFolderPath, movie.path, file.relativePath);
-				try {
-					await unlink(fullPath);
-					logger.debug('[API] Deleted file', { fullPath });
-				} catch {
-					logger.warn('[API] Could not delete file', { fullPath });
-				}
-			}
-
-			// Try to remove the movie folder if it's empty
-			const movieFolder = join(movie.rootFolderPath, movie.path);
-			try {
-				await rmdir(movieFolder);
-				logger.debug('[API] Removed movie folder', { movieFolder });
-			} catch {
-				// Folder not empty or doesn't exist - that's fine
-			}
+			const movieFolder = await deleteDirectoryWithinRoot(movie.rootFolderPath, movie.path);
+			logger.debug('[API] Removed movie folder and all contents', { movieFolder });
 		}
 
 		// Delete movie file records from database

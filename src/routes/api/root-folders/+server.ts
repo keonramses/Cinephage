@@ -1,6 +1,7 @@
 import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
 import { getRootFolderService } from '$lib/server/downloadClients/RootFolderService';
+import { isAppError } from '$lib/errors';
 import { rootFolderCreateSchema } from '$lib/validation/schemas';
 
 /**
@@ -53,6 +54,9 @@ export const POST: RequestHandler = async ({ request }) => {
 
 		return json({ success: true, folder: created });
 	} catch (error) {
+		if (isAppError(error)) {
+			return json(error.toJSON(), { status: error.statusCode });
+		}
 		const message = error instanceof Error ? error.message : 'Unknown error';
 		return json({ error: message }, { status: 500 });
 	}

@@ -7,7 +7,12 @@ import { db } from '$lib/server/db';
 import { rootFolders as rootFoldersTable } from '$lib/server/db/schema';
 import { eq, and } from 'drizzle-orm';
 import { randomUUID } from 'node:crypto';
+import { ValidationError } from '$lib/errors';
 import { logger } from '$lib/logging';
+import {
+	findOverlappingRootFolder,
+	getRootFolderOverlapMessage
+} from '$lib/server/filesystem/root-folder-overlap.js';
 import * as fs from 'fs/promises';
 import * as path from 'path';
 import { getLibraryScheduler } from '$lib/server/library/library-scheduler.js';
@@ -98,8 +103,10 @@ export class RootFolderService {
 		// Validate path exists (use read-only mode if specified)
 		const validation = await this.validatePath(input.path, input.readOnly ?? false);
 		if (!validation.valid) {
-			throw new Error(validation.error || 'Invalid path');
+			throw new ValidationError(validation.error || 'Invalid path', { path: input.path });
 		}
+
+		await this.assertNoPathOverlap(input.path);
 
 		// If this is being set as default, unset any existing defaults for this media type
 		if (input.isDefault) {
@@ -170,9 +177,13 @@ export class RootFolderService {
 		if (updates.path && updates.path !== existing.path) {
 			const validation = await this.validatePath(updates.path, readOnly);
 			if (!validation.valid) {
-				throw new Error(validation.error || 'Invalid path');
+				throw new ValidationError(validation.error || 'Invalid path', {
+					path: updates.path
+				});
 			}
 		}
+
+		await this.assertNoPathOverlap(updates.path ?? existing.path, id);
 
 		// If this is being set as default, unset any existing defaults for this media type
 		const mediaType = updates.mediaType ?? existing.mediaType;
@@ -222,7 +233,11 @@ export class RootFolderService {
 	 * @param folderPath - The path to validate
 	 * @param readOnly - If true, only check read access (skip write check)
 	 */
-	async validatePath(folderPath: string, readOnly = false): Promise<PathValidationResult> {
+	async validatePath(
+		folderPath: string,
+		readOnly = false,
+		excludeId?: string
+	): Promise<PathValidationResult> {
 		try {
 			// Normalize path
 			const normalizedPath = path.resolve(folderPath);
@@ -254,6 +269,16 @@ export class RootFolderService {
 			if (readOnly) {
 				try {
 					await fs.access(normalizedPath, fs.constants.R_OK);
+					const overlapMessage = await this.getPathOverlapMessage(normalizedPath, excludeId);
+					if (overlapMessage) {
+						return {
+							valid: false,
+							exists: true,
+							writable: false,
+							error: overlapMessage
+						};
+					}
+
 					return {
 						valid: true,
 						exists: true,
@@ -284,6 +309,17 @@ export class RootFolderService {
 
 			// Get free space
 			const freeSpaceBytes = await this.getFreeSpace(normalizedPath);
+			const overlapMessage = await this.getPathOverlapMessage(normalizedPath, excludeId);
+			if (overlapMessage) {
+				return {
+					valid: false,
+					exists: true,
+					writable: true,
+					error: overlapMessage,
+					freeSpaceBytes,
+					freeSpaceFormatted: this.formatBytes(freeSpaceBytes)
+				};
+			}
 
 			return {
 				valid: true,
@@ -299,6 +335,33 @@ export class RootFolderService {
 				writable: false,
 				error: error instanceof Error ? error.message : 'Unknown error'
 			};
+		}
+	}
+
+	private async getPathOverlapMessage(
+		folderPath: string,
+		excludeId?: string
+	): Promise<string | null> {
+		const existingFolders = await db
+			.select({
+				id: rootFoldersTable.id,
+				path: rootFoldersTable.path,
+				name: rootFoldersTable.name
+			})
+			.from(rootFoldersTable);
+
+		const overlap = await findOverlappingRootFolder(folderPath, existingFolders, excludeId);
+		if (!overlap) {
+			return null;
+		}
+
+		return getRootFolderOverlapMessage(folderPath, overlap);
+	}
+
+	private async assertNoPathOverlap(folderPath: string, excludeId?: string): Promise<void> {
+		const overlapMessage = await this.getPathOverlapMessage(folderPath, excludeId);
+		if (overlapMessage) {
+			throw new ValidationError(overlapMessage, { path: folderPath, excludeId });
 		}
 	}
 
@@ -362,9 +425,9 @@ export class RootFolderService {
 	 * This is more reliable than fs.access() which only checks permission bits.
 	 */
 	private async testWriteAccess(dirPath: string): Promise<boolean> {
-		const testDir = path.join(dirPath, `.cinephage-write-test-${Date.now()}`);
+		let testDir: string | null = null;
 		try {
-			await fs.mkdir(testDir);
+			testDir = await fs.mkdtemp(path.join(dirPath, '.cinephage-write-test-'));
 			await fs.rmdir(testDir);
 			return true;
 		} catch (err) {
@@ -376,10 +439,12 @@ export class RootFolderService {
 				errorMessage: errObj.message
 			});
 			// Attempt cleanup in case mkdir succeeded but rmdir failed
-			try {
-				await fs.rmdir(testDir);
-			} catch {
-				// Ignore cleanup errors
+			if (testDir) {
+				try {
+					await fs.rmdir(testDir);
+				} catch {
+					// Ignore cleanup errors
+				}
 			}
 			return false;
 		}

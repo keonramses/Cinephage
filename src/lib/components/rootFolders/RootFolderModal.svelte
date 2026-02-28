@@ -17,7 +17,11 @@
 		onClose: () => void;
 		onSave: (data: RootFolderFormData) => void;
 		onDelete?: () => void;
-		onValidatePath: (path: string, readOnly?: boolean) => Promise<PathValidationResult>;
+		onValidatePath: (
+			path: string,
+			readOnly?: boolean,
+			folderId?: string
+		) => Promise<PathValidationResult>;
 	}
 
 	let {
@@ -82,7 +86,7 @@
 		validating = true;
 		validationResult = null;
 		try {
-			validationResult = await onValidatePath(path, readOnly);
+			validationResult = await onValidatePath(path, readOnly, folder?.id ?? undefined);
 		} finally {
 			validating = false;
 		}
@@ -118,7 +122,7 @@
 		/>
 	{:else}
 		<!-- Form -->
-		<div class="space-y-4">
+		<div class="root-folder-editor space-y-4">
 			<div class="grid grid-cols-1 gap-3 sm:grid-cols-2 sm:gap-4">
 				<div class="form-control">
 					<label class="label py-1" for="name">

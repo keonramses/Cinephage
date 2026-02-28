@@ -8,16 +8,17 @@
 		AlertCircle,
 		ExternalLink
 	} from 'lucide-svelte';
-	import type { PageData, ActionData } from './$types';
+	import type { PageData } from './$types';
 	import type {
 		RootFolder,
 		RootFolderFormData,
 		PathValidationResult
 	} from '$lib/types/downloadClient';
-
 	import { RootFolderModal, RootFolderList } from '$lib/components/rootFolders';
+	import { toasts } from '$lib/stores/toast.svelte';
+	import { getResponseErrorMessage, readResponsePayload } from '$lib/utils/http';
 
-	let { data, form }: { data: PageData; form: ActionData } = $props();
+	let { data }: { data: PageData } = $props();
 
 	// Library Scan state
 	interface ScanProgress {
@@ -107,8 +108,8 @@
 			});
 
 			if (!response.ok) {
-				const result = await response.json();
-				throw new Error(result.error || 'Failed to start scan');
+				const payload = await readResponsePayload<Record<string, unknown>>(response);
+				throw new Error(getResponseErrorMessage(payload, 'Failed to start scan'));
 			}
 		} catch (error) {
 			scanError = error instanceof Error ? error.message : 'Failed to start scan';
@@ -149,14 +150,38 @@
 		folderSaveError = null;
 	}
 
-	async function handleValidatePath(path: string, readOnly = false): Promise<PathValidationResult> {
+	async function handleValidatePath(
+		path: string,
+		readOnly = false,
+		folderId?: string
+	): Promise<PathValidationResult> {
 		try {
 			const response = await fetch('/api/root-folders/validate', {
 				method: 'POST',
 				headers: { 'Content-Type': 'application/json' },
-				body: JSON.stringify({ path, readOnly })
+				body: JSON.stringify({ path, readOnly, folderId })
 			});
-			return await response.json();
+			const payload = await readResponsePayload<PathValidationResult>(response);
+
+			if (!response.ok) {
+				return {
+					valid: false,
+					exists: false,
+					writable: false,
+					error: getResponseErrorMessage(payload, 'Failed to validate path')
+				};
+			}
+
+			if (payload && typeof payload === 'object') {
+				return payload as PathValidationResult;
+			}
+
+			return {
+				valid: false,
+				exists: false,
+				writable: false,
+				error: 'Invalid response from path validation'
+			};
 		} catch (e) {
 			return {
 				valid: false,
@@ -171,40 +196,49 @@
 		folderSaving = true;
 		folderSaveError = null;
 		try {
-			const form = new FormData();
-			form.append('data', JSON.stringify(formData));
-
-			let response: Response;
 			const isCreating = folderModalMode === 'add';
-			if (folderModalMode === 'edit' && editingFolder) {
-				form.append('id', editingFolder.id);
-				response = await fetch(`?/updateRootFolder`, {
-					method: 'POST',
-					body: form
-				});
-			} else {
-				response = await fetch(`?/createRootFolder`, {
-					method: 'POST',
-					body: form
-				});
-			}
+			const response =
+				folderModalMode === 'edit' && editingFolder
+					? await fetch(`/api/root-folders/${editingFolder.id}`, {
+							method: 'PUT',
+							headers: {
+								'Content-Type': 'application/json',
+								Accept: 'application/json'
+							},
+							body: JSON.stringify(formData)
+						})
+					: await fetch('/api/root-folders', {
+							method: 'POST',
+							headers: {
+								'Content-Type': 'application/json',
+								Accept: 'application/json'
+							},
+							body: JSON.stringify(formData)
+						});
 
-			// Parse the response to check for errors
-			const result = await response.json();
+			const payload = await readResponsePayload<{
+				success?: boolean;
+				folder?: { id?: string };
+				error?: string;
+			}>(response);
 
-			// SvelteKit form actions return data in a specific format
-			if (result.type === 'failure' || result.data?.rootFolderError) {
-				const errorMessage = result.data?.rootFolderError || 'Failed to save root folder';
-				folderSaveError = errorMessage;
-				return; // Don't close modal on error
+			if (!response.ok) {
+				folderSaveError = getResponseErrorMessage(payload, 'Failed to save root folder');
+				return;
 			}
 
 			await invalidateAll();
 			closeFolderModal();
 
 			// Auto-scan newly created folder
-			if (isCreating && result.data?.createdFolderId) {
-				triggerLibraryScan(result.data.createdFolderId);
+			if (
+				isCreating &&
+				payload &&
+				typeof payload === 'object' &&
+				'folder' in payload &&
+				payload.folder?.id
+			) {
+				triggerLibraryScan(payload.folder.id);
 			}
 		} catch (error) {
 			folderSaveError = error instanceof Error ? error.message : 'An unexpected error occurred';
@@ -215,14 +249,25 @@
 
 	async function handleFolderDelete() {
 		if (!editingFolder) return;
-		const form = new FormData();
-		form.append('id', editingFolder.id);
-		await fetch(`?/deleteRootFolder`, {
-			method: 'POST',
-			body: form
-		});
-		await invalidateAll();
-		closeFolderModal();
+
+		try {
+			const response = await fetch(`/api/root-folders/${editingFolder.id}`, {
+				method: 'DELETE',
+				headers: { Accept: 'application/json' }
+			});
+
+			if (!response.ok) {
+				const payload = await readResponsePayload<Record<string, unknown>>(response);
+				throw new Error(getResponseErrorMessage(payload, 'Failed to delete root folder'));
+			}
+
+			await invalidateAll();
+			closeFolderModal();
+		} catch (error) {
+			toasts.error(
+				error instanceof Error ? error.message : 'An unexpected error occurred while deleting'
+			);
+		}
 	}
 
 	function confirmFolderDelete(folder: RootFolder) {
@@ -232,15 +277,26 @@
 
 	async function handleConfirmFolderDelete() {
 		if (!deleteFolderTarget) return;
-		const form = new FormData();
-		form.append('id', deleteFolderTarget.id);
-		await fetch(`?/deleteRootFolder`, {
-			method: 'POST',
-			body: form
-		});
-		await invalidateAll();
-		confirmFolderDeleteOpen = false;
-		deleteFolderTarget = null;
+
+		try {
+			const response = await fetch(`/api/root-folders/${deleteFolderTarget.id}`, {
+				method: 'DELETE',
+				headers: { Accept: 'application/json' }
+			});
+
+			if (!response.ok) {
+				const payload = await readResponsePayload<Record<string, unknown>>(response);
+				throw new Error(getResponseErrorMessage(payload, 'Failed to delete root folder'));
+			}
+
+			await invalidateAll();
+			confirmFolderDeleteOpen = false;
+			deleteFolderTarget = null;
+		} catch (error) {
+			toasts.error(
+				error instanceof Error ? error.message : 'An unexpected error occurred while deleting'
+			);
+		}
 	}
 </script>
 
@@ -248,9 +304,9 @@
 	<title>General Settings - Cinephage</title>
 </svelte:head>
 
-<div class="w-full p-4">
-	<div class="mb-6">
-		<h1 class="text-3xl font-bold">General Settings</h1>
+<div class="w-full p-3 sm:p-4">
+	<div class="mb-5 sm:mb-6">
+		<h1 class="text-2xl font-bold">General Settings</h1>
 		<p class="text-base-content/70">
 			Configure general application settings and media library folders.
 		</p>
@@ -258,30 +314,18 @@
 
 	<!-- Root Folders Section -->
 	<div class="mb-8">
-		<div class="mb-4 flex items-center justify-between">
-			<div>
+		<div class="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+			<div class="min-w-0">
 				<h2 class="text-2xl font-bold">Root Folders</h2>
 				<p class="text-base-content/70">
 					Configure media library folders where content will be organized.
 				</p>
 			</div>
-			<button class="btn gap-2 btn-primary" onclick={openAddFolderModal}>
+			<button class="btn gap-2 btn-sm btn-primary sm:w-auto" onclick={openAddFolderModal}>
 				<Plus class="h-4 w-4" />
 				Add Folder
 			</button>
 		</div>
-
-		{#if form?.rootFolderError}
-			<div class="mb-4 alert alert-error">
-				<span>{form.rootFolderError}</span>
-			</div>
-		{/if}
-
-		{#if form?.rootFolderSuccess}
-			<div class="mb-4 alert alert-success">
-				<span>Operation completed successfully!</span>
-			</div>
-		{/if}
 
 		<RootFolderList
 			folders={data.rootFolders}
@@ -294,15 +338,15 @@
 
 	<!-- Library Scan Section -->
 	<div class="mb-8">
-		<div class="mb-4 flex items-center justify-between">
-			<div>
+		<div class="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+			<div class="min-w-0">
 				<h2 class="text-2xl font-bold">Library Scan</h2>
 				<p class="text-base-content/70">
 					Scan root folders to discover media files and match them to your library.
 				</p>
 			</div>
 			<button
-				class="btn gap-2 btn-primary"
+				class="btn gap-2 self-start btn-sm btn-primary sm:w-auto"
 				onclick={() => triggerLibraryScan()}
 				disabled={scanning || data.rootFolders.length === 0}
 			>
@@ -333,7 +377,7 @@
 		{#if scanSuccess}
 			<div class="mb-4 alert alert-success">
 				<CheckCircle class="h-5 w-5" />
-				<div class="flex flex-1 items-center justify-between">
+				<div class="flex flex-1 flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
 					<span>{scanSuccess.message}</span>
 					{#if scanSuccess.unmatchedCount > 0}
 						<a href="/library/unmatched" class="btn gap-1 btn-ghost btn-sm">
@@ -348,8 +392,10 @@
 		{/if}
 
 		{#if scanning && scanProgress}
-			<div class="card bg-base-200 p-4">
-				<div class="mb-2 flex justify-between text-sm">
+			<div class="card bg-base-200 p-3 sm:p-4">
+				<div
+					class="mb-2 flex flex-col gap-1 text-sm sm:flex-row sm:items-center sm:justify-between"
+				>
 					<span class="max-w-md truncate">
 						{scanProgress.phase === 'scanning' ? 'Discovering files...' : ''}
 						{scanProgress.phase === 'processing' ? 'Processing...' : ''}
@@ -365,7 +411,7 @@
 					value={scanProgress.filesProcessed}
 					max={scanProgress.filesFound || 1}
 				></progress>
-				<div class="mt-2 flex gap-4 text-xs text-base-content/60">
+				<div class="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-base-content/60">
 					<span>Added: {scanProgress.filesAdded}</span>
 					<span>Updated: {scanProgress.filesUpdated}</span>
 					<span>Removed: {scanProgress.filesRemoved}</span>
@@ -403,7 +449,7 @@
 				Are you sure you want to delete <strong>{deleteFolderTarget?.name}</strong>? This action
 				cannot be undone.
 			</p>
-			<div class="modal-action">
+			<div class="modal-action flex-col-reverse sm:flex-row">
 				<button class="btn btn-ghost" onclick={() => (confirmFolderDeleteOpen = false)}
 					>Cancel</button
 				>

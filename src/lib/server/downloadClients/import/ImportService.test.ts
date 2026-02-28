@@ -115,4 +115,207 @@ describe('ImportService NZB-Mount selection', () => {
 			await rm(downloadDir, { recursive: true, force: true });
 		}
 	});
+
+	it('allows strm import when queue path is a direct .strm file', () => {
+		const service = ImportService.getInstance() as unknown as {
+			getImportOptions: (
+				client?: { implementation?: string },
+				queueItem?: { outputPath?: string | null; clientDownloadPath?: string | null }
+			) => { allowStrmSmall: boolean; preferNonStrm: boolean };
+		};
+
+		const options = service.getImportOptions(undefined, {
+			outputPath: '/mnt/nzbmount/completed/movie.strm',
+			clientDownloadPath: null
+		});
+
+		expect(options.allowStrmSmall).toBe(true);
+		expect(options.preferNonStrm).toBe(false);
+	});
+});
+
+describe('ImportService metadata extraction', () => {
+	beforeEach(() => {
+		ImportService.resetInstance();
+	});
+
+	it('falls back to source filename metadata when queue title has no quality markers', () => {
+		const service = ImportService.getInstance() as unknown as {
+			buildImportedMetadata: (
+				queueItem: {
+					title: string;
+					quality?: Record<string, string>;
+					releaseGroup?: string | null;
+				},
+				sourcePath: string,
+				mediaInfo: { width?: number; height?: number; videoCodec?: string } | null
+			) => {
+				sceneName: string;
+				releaseGroup?: string;
+				quality: {
+					resolution?: string;
+					source?: string;
+					codec?: string;
+					hdr?: string;
+				};
+			};
+		};
+
+		const metadata = service.buildImportedMetadata(
+			{
+				title: 'The Lord of the Rings The Fellowship of the Ring EXTENDED (2001)'
+			},
+			'/tmp/The.Lord.of.the.Rings.2001.720p.BRRip.x264-GRP.mkv',
+			null
+		);
+
+		expect(metadata.sceneName).toBe('The.Lord.of.the.Rings.2001.720p.BRRip.x264-GRP');
+		expect(metadata.releaseGroup).toBe('GRP');
+		expect(metadata.quality.resolution).toBe('720p');
+		expect(metadata.quality.source).toBe('bluray');
+		expect(metadata.quality.codec).toBe('h264');
+	});
+
+	it('uses probe metadata as fallback for resolution and codec', () => {
+		const service = ImportService.getInstance() as unknown as {
+			buildImportedMetadata: (
+				queueItem: {
+					title: string;
+					quality?: Record<string, string>;
+					releaseGroup?: string | null;
+				},
+				sourcePath: string,
+				mediaInfo: { width?: number; height?: number; videoCodec?: string } | null
+			) => {
+				sceneName: string;
+				releaseGroup?: string;
+				quality: {
+					resolution?: string;
+					source?: string;
+					codec?: string;
+					hdr?: string;
+				};
+			};
+		};
+
+		const metadata = service.buildImportedMetadata(
+			{
+				title: 'The Fellowship of the Ring'
+			},
+			'/tmp/The.Fellowship.of.the.Ring.mkv',
+			{ width: 1920, height: 1080, videoCodec: 'HEVC' }
+		);
+
+		expect(metadata.quality.resolution).toBe('1080p');
+		expect(metadata.quality.codec).toBe('h265');
+	});
+});
+
+describe('ImportService episode naming', () => {
+	beforeEach(() => {
+		ImportService.resetInstance();
+	});
+
+	it('applies anime numbering when series type is anime', () => {
+		const service = ImportService.getInstance() as unknown as {
+			buildEpisodeFileName: (
+				seriesData: {
+					title: string;
+					year?: number | null;
+					tvdbId?: number | null;
+					seriesType?: string | null;
+				},
+				seasonNum: number,
+				episodeNums: number[],
+				sourcePath: string,
+				queueItem: { title: string },
+				episodeTitle?: string,
+				absoluteNumber?: number,
+				airDate?: string
+			) => string;
+		};
+
+		const fileName = service.buildEpisodeFileName(
+			{
+				title: 'One Piece',
+				year: 1999,
+				tvdbId: 81797,
+				seriesType: 'anime'
+			},
+			2,
+			[62],
+			'/tmp/[SubsPlease] One Piece - 062.mkv',
+			{ title: '[SubsPlease] One Piece - 062 [1080p]' },
+			'The Strongest of Luffy`s Rivals? Introduce the Buggy Pirate Crew',
+			62
+		);
+
+		expect(fileName).toContain('S02E62');
+		expect(fileName).toContain('062');
+	});
+
+	it('applies daily numbering when series type is daily', () => {
+		const service = ImportService.getInstance() as unknown as {
+			buildEpisodeFileName: (
+				seriesData: {
+					title: string;
+					year?: number | null;
+					tvdbId?: number | null;
+					seriesType?: string | null;
+				},
+				seasonNum: number,
+				episodeNums: number[],
+				sourcePath: string,
+				queueItem: { title: string },
+				episodeTitle?: string,
+				absoluteNumber?: number,
+				airDate?: string
+			) => string;
+		};
+
+		const fileName = service.buildEpisodeFileName(
+			{
+				title: 'The Daily Show',
+				year: 1996,
+				tvdbId: 71256,
+				seriesType: 'daily'
+			},
+			29,
+			[15],
+			'/tmp/the.daily.show.2024.01.15.mkv',
+			{ title: 'The.Daily.Show.2024.01.15.1080p.WEB.h264' },
+			'January 15, 2024',
+			undefined,
+			'2024-01-15'
+		);
+
+		expect(fileName).toContain('2024-01-15');
+		expect(fileName).not.toContain('S29E15');
+	});
+
+	it('builds fallback absolute numbering for anime when DB absolute numbers are missing', () => {
+		const service = ImportService.getInstance() as unknown as {
+			getFallbackAbsoluteEpisodeNumber: (
+				allEpisodes: Array<{
+					id: string;
+					seasonNumber: number;
+					episodeNumber: number;
+					absoluteEpisodeNumber: number | null;
+				}>,
+				episodeId?: string
+			) => number | undefined;
+		};
+
+		const absoluteNumber = service.getFallbackAbsoluteEpisodeNumber(
+			[
+				{ id: 'special', seasonNumber: 0, episodeNumber: 1, absoluteEpisodeNumber: null },
+				{ id: 'ep1', seasonNumber: 1, episodeNumber: 1, absoluteEpisodeNumber: null },
+				{ id: 'ep2', seasonNumber: 1, episodeNumber: 2, absoluteEpisodeNumber: null },
+				{ id: 'ep3', seasonNumber: 2, episodeNumber: 1, absoluteEpisodeNumber: null }
+			],
+			'ep3'
+		);
+
+		expect(absoluteNumber).toBe(3);
+	});
 });

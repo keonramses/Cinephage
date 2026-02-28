@@ -38,7 +38,7 @@ import {
 import { getDownloadClientManager } from '../DownloadClientManager';
 import { unlink, rm } from 'fs/promises';
 import { ReleaseParser } from '$lib/server/indexers/parser/ReleaseParser';
-import { mediaInfoService } from '$lib/server/library/media-info';
+import { mediaInfoService, MediaInfoService } from '$lib/server/library/media-info';
 import {
 	NamingService,
 	releaseToNamingInfo,
@@ -56,6 +56,11 @@ import { ImportWorker, workerManager } from '$lib/server/workers';
 import { monitoringScheduler } from '$lib/server/monitoring/MonitoringScheduler.js';
 import { searchSubtitlesForNewMedia } from '$lib/server/subtitles/services/SubtitleImportService.js';
 import { libraryMediaEvents } from '$lib/server/library/LibraryMediaEvents';
+import {
+	getMediaParseStem,
+	matchEpisodesByIdentifier,
+	resolveTvEpisodeIdentifier
+} from '$lib/server/library/tv-episode-resolver.js';
 
 /**
  * Import result for a single file
@@ -69,6 +74,14 @@ export interface ImportResult {
 	wasUpgrade?: boolean;
 	replacedFileId?: string;
 	replacedFileIds?: string[]; // For upgrades that delete multiple old files
+	sceneName?: string;
+	releaseGroup?: string;
+	quality?: {
+		resolution?: string;
+		source?: string;
+		codec?: string;
+		hdr?: string;
+	};
 }
 
 /**
@@ -474,7 +487,7 @@ export class ImportService extends EventEmitter {
 					.where(eq(downloadClients.id, queueItem.downloadClientId))
 					.limit(1)
 			: [];
-		const importOptions = this.getImportOptions(client);
+		const importOptions = this.getImportOptions(client, queueItem);
 
 		// Create ImportWorker for tracking
 		const mediaType = queueItem.movieId ? 'movie' : 'episode';
@@ -795,8 +808,7 @@ export class ImportService extends EventEmitter {
 		const allowStrmProbe = movie.scoringProfileId !== 'streamer';
 		const mediaInfo = await mediaInfoService.extractMediaInfo(destPath, { allowStrmProbe });
 
-		// Parse quality from release name
-		const parsed = this.parser.parse(queueItem.title);
+		const importedMetadata = this.buildImportedMetadata(queueItem, mainFile.path, mediaInfo);
 
 		// Create or update file record (deduplication)
 		const relativePath = destFileName;
@@ -813,14 +825,9 @@ export class ImportService extends EventEmitter {
 			relativePath,
 			size: transferResult.sizeBytes,
 			dateAdded: new Date().toISOString(),
-			sceneName: queueItem.title,
-			releaseGroup: parsed.releaseGroup ?? undefined,
-			quality: {
-				resolution: parsed.resolution ?? undefined,
-				source: parsed.source ?? undefined,
-				codec: parsed.codec ?? undefined,
-				hdr: parsed.hdr ?? undefined
-			},
+			sceneName: importedMetadata.sceneName,
+			releaseGroup: importedMetadata.releaseGroup,
+			quality: importedMetadata.quality,
 			mediaInfo,
 			infoHash: queueItem.infoHash ?? undefined
 		};
@@ -886,7 +893,10 @@ export class ImportService extends EventEmitter {
 			destPath,
 			fileId,
 			wasUpgrade: isUpgrade,
-			replacedFileIds: deletedFileIds.length > 0 ? deletedFileIds : undefined
+			replacedFileIds: deletedFileIds.length > 0 ? deletedFileIds : undefined,
+			sceneName: fileData.sceneName,
+			releaseGroup: fileData.releaseGroup,
+			quality: fileData.quality
 		});
 
 		worker.fileProcessed(basename(destPath), true);
@@ -897,7 +907,10 @@ export class ImportService extends EventEmitter {
 		// Create history record
 		await this.createHistoryRecord(queueItem, 'imported', {
 			importedPath: destPath,
-			movieFileId: fileId
+			movieFileId: fileId,
+			title: fileData.sceneName,
+			releaseGroup: fileData.releaseGroup,
+			quality: fileData.quality
 		});
 
 		logger.info('Movie imported successfully', {
@@ -1125,6 +1138,7 @@ export class ImportService extends EventEmitter {
 		if (result.success) {
 			// Mark as imported (protocol determines if it shows as 'seeding-imported' or 'imported')
 			const importedPath = result.importedFiles[0]?.destPath || downloadPath;
+			const representativeImport = result.importedFiles.find((file) => file.success);
 			await downloadMonitor.markImported(
 				queueItem.id,
 				importedPath,
@@ -1134,7 +1148,10 @@ export class ImportService extends EventEmitter {
 			// Create history record
 			await this.createHistoryRecord(queueItem, 'imported', {
 				importedPath,
-				episodeFileIds: importedFileIds
+				episodeFileIds: importedFileIds,
+				title: representativeImport?.sceneName,
+				releaseGroup: representativeImport?.releaseGroup,
+				quality: representativeImport?.quality
 			});
 
 			logger.info('Series episodes imported', {
@@ -1182,9 +1199,18 @@ export class ImportService extends EventEmitter {
 		canMoveFiles: boolean
 	): Promise<ImportResult> {
 		// Parse episode info from filename
-		const parsed = this.parser.parse(basename(videoFile.path));
+		const parsed = this.parser.parse(getMediaParseStem(videoFile.path));
+		const identifier = resolveTvEpisodeIdentifier({
+			filePath: videoFile.path,
+			parsed,
+			seasonHint: queueItem.seasonNumber ?? undefined,
+			seriesType:
+				seriesData.seriesType === 'anime' || seriesData.seriesType === 'daily'
+					? seriesData.seriesType
+					: 'standard'
+		});
 
-		if (!parsed.episode) {
+		if (!identifier) {
 			return {
 				success: false,
 				sourcePath: videoFile.path,
@@ -1192,8 +1218,25 @@ export class ImportService extends EventEmitter {
 			};
 		}
 
-		const seasonNum = parsed.episode.season ?? queueItem.seasonNumber ?? 1;
-		const episodeNums = parsed.episode.episodes ?? [1];
+		const seriesEpisodes = await db
+			.select()
+			.from(episodes)
+			.where(eq(episodes.seriesId, seriesData.id));
+		const matchingEpisodes = matchEpisodesByIdentifier(seriesEpisodes, identifier);
+		if (matchingEpisodes.length === 0) {
+			return {
+				success: false,
+				sourcePath: videoFile.path,
+				error: 'Could not match imported file to an episode in the library'
+			};
+		}
+
+		const seasonNum = matchingEpisodes[0].seasonNumber;
+		const episodeNums = matchingEpisodes.map((episode) => episode.episodeNumber);
+		const firstEpisode = matchingEpisodes[0];
+		const absoluteNumber =
+			firstEpisode?.absoluteEpisodeNumber ??
+			this.getFallbackAbsoluteEpisodeNumber(seriesEpisodes, firstEpisode?.id);
 
 		// Build destination path
 		const seriesFolder = join(rootFolder.path, seriesData.path);
@@ -1206,7 +1249,10 @@ export class ImportService extends EventEmitter {
 			seasonNum,
 			episodeNums,
 			videoFile.path,
-			queueItem
+			queueItem,
+			firstEpisode?.title ?? undefined,
+			absoluteNumber,
+			firstEpisode?.airDate ?? undefined
 		);
 		const destPath = join(seasonFolder, destFileName);
 
@@ -1232,16 +1278,9 @@ export class ImportService extends EventEmitter {
 		// Extract media info (skip STRM probing for streamer profile)
 		const allowStrmProbe = seriesData.scoringProfileId !== 'streamer';
 		const mediaInfo = await mediaInfoService.extractMediaInfo(destPath, { allowStrmProbe });
+		const importedMetadata = this.buildImportedMetadata(queueItem, videoFile.path, mediaInfo);
 
-		// Find matching episodes in database
-		const matchingEpisodes = await db
-			.select()
-			.from(episodes)
-			.where(and(eq(episodes.seriesId, seriesData.id), eq(episodes.seasonNumber, seasonNum)));
-
-		const episodeIds = matchingEpisodes
-			.filter((ep) => episodeNums.includes(ep.episodeNumber))
-			.map((ep) => ep.id);
+		const episodeIds = matchingEpisodes.map((ep) => ep.id);
 
 		// Check for existing files covering these episodes (upgrade scenario)
 		const existingFiles = await db
@@ -1293,15 +1332,10 @@ export class ImportService extends EventEmitter {
 			relativePath,
 			size: transferResult.sizeBytes,
 			dateAdded: new Date().toISOString(),
-			sceneName: queueItem.title,
-			releaseGroup: parsed.releaseGroup ?? undefined,
+			sceneName: importedMetadata.sceneName,
+			releaseGroup: importedMetadata.releaseGroup,
 			releaseType: episodeNums.length > 1 ? 'multiEpisode' : 'singleEpisode',
-			quality: {
-				resolution: parsed.resolution ?? undefined,
-				source: parsed.source ?? undefined,
-				codec: parsed.codec ?? undefined,
-				hdr: parsed.hdr ?? undefined
-			},
+			quality: importedMetadata.quality,
 			mediaInfo,
 			infoHash: queueItem.infoHash ?? undefined
 		};
@@ -1380,7 +1414,10 @@ export class ImportService extends EventEmitter {
 			destPath,
 			fileId,
 			wasUpgrade: isUpgrade,
-			replacedFileId: filesToReplace.length > 0 ? filesToReplace[0] : undefined
+			replacedFileId: filesToReplace.length > 0 ? filesToReplace[0] : undefined,
+			sceneName: fileData.sceneName,
+			releaseGroup: fileData.releaseGroup,
+			quality: fileData.quality
 		};
 	}
 
@@ -1433,10 +1470,16 @@ export class ImportService extends EventEmitter {
 		return files;
 	}
 
-	private getImportOptions(client?: typeof downloadClients.$inferSelect): ImportableFileOptions {
+	private getImportOptions(
+		client?: typeof downloadClients.$inferSelect,
+		queueItem?: Pick<typeof downloadQueue.$inferSelect, 'outputPath' | 'clientDownloadPath'>
+	): ImportableFileOptions {
 		const isNzbMount = client?.implementation === 'nzb-mount';
+		const hasDirectStrmPath = [queueItem?.outputPath, queueItem?.clientDownloadPath].some(
+			(path) => path?.toLowerCase().endsWith('.strm') ?? false
+		);
 		return {
-			allowStrmSmall: isNzbMount,
+			allowStrmSmall: isNzbMount || hasDirectStrmPath,
 			preferNonStrm: isNzbMount
 		};
 	}
@@ -1622,9 +1665,13 @@ export class ImportService extends EventEmitter {
 		episodeNums: number[],
 		sourcePath: string,
 		queueItem: typeof downloadQueue.$inferSelect,
-		episodeTitle?: string
+		episodeTitle?: string,
+		absoluteNumber?: number,
+		airDate?: string
 	): string {
 		const parsed = this.parser.parse(queueItem.title);
+		const isAnime = seriesData.seriesType === 'anime';
+		const isDaily = seriesData.seriesType === 'daily';
 
 		// Build naming info from series and parsed release
 		// IMPORTANT: Spread releaseToNamingInfo FIRST, then override with explicit values
@@ -1636,10 +1683,194 @@ export class ImportService extends EventEmitter {
 			tvdbId: seriesData.tvdbId ?? undefined,
 			seasonNumber: seasonNum,
 			episodeNumbers: episodeNums,
-			episodeTitle: episodeTitle
+			episodeTitle,
+			absoluteNumber,
+			airDate,
+			isAnime,
+			isDaily
 		};
 
 		return this.getNamingService().generateEpisodeFileName(namingInfo);
+	}
+
+	private getFallbackAbsoluteEpisodeNumber(
+		allEpisodes: Array<typeof episodes.$inferSelect>,
+		episodeId?: string
+	): number | undefined {
+		if (!episodeId) {
+			return undefined;
+		}
+
+		let lastAbsolute = 0;
+		const regularEpisodes = [...allEpisodes]
+			.filter((episode) => episode.seasonNumber > 0)
+			.sort((a, b) => {
+				if (a.seasonNumber !== b.seasonNumber) {
+					return a.seasonNumber - b.seasonNumber;
+				}
+				return a.episodeNumber - b.episodeNumber;
+			});
+
+		for (const episode of regularEpisodes) {
+			const absoluteNumber =
+				typeof episode.absoluteEpisodeNumber === 'number' && episode.absoluteEpisodeNumber > 0
+					? episode.absoluteEpisodeNumber
+					: lastAbsolute + 1;
+
+			lastAbsolute = absoluteNumber;
+			if (episode.id === episodeId) {
+				return absoluteNumber;
+			}
+		}
+
+		return undefined;
+	}
+
+	private normalizeUnknownValue(value?: string | null): string | undefined {
+		if (!value) return undefined;
+		const trimmed = value.trim();
+		if (!trimmed) return undefined;
+
+		const normalized = trimmed.toLowerCase();
+		if (normalized === 'unknown' || normalized === 'n/a' || normalized === '-') {
+			return undefined;
+		}
+
+		return trimmed;
+	}
+
+	private firstKnownValue(...values: Array<string | null | undefined>): string | undefined {
+		for (const value of values) {
+			const normalized = this.normalizeUnknownValue(value);
+			if (normalized) return normalized;
+		}
+		return undefined;
+	}
+
+	private hasKnownQualityMetadata(parsed: ReturnType<ReleaseParser['parse']>): boolean {
+		return (
+			parsed.resolution !== 'unknown' ||
+			parsed.source !== 'unknown' ||
+			parsed.codec !== 'unknown' ||
+			parsed.hdr !== null ||
+			Boolean(parsed.releaseGroup)
+		);
+	}
+
+	private mapMediaInfoResolution(
+		mediaInfo?: { width?: number; height?: number } | null
+	): string | undefined {
+		if (!mediaInfo) return undefined;
+
+		const label = MediaInfoService.getResolutionLabel(
+			mediaInfo.width,
+			mediaInfo.height
+		).toLowerCase();
+		if (label === 'unknown') return undefined;
+		if (label === '4k') return '2160p';
+		return /^\d{3,4}p$/.test(label) ? label : undefined;
+	}
+
+	private mapMediaInfoCodec(codec?: string): string | undefined {
+		const normalized = this.normalizeUnknownValue(codec)?.toLowerCase();
+		if (!normalized) return undefined;
+		const compact = normalized.replace(/[^a-z0-9+]/g, '');
+
+		if (compact.includes('av1')) return 'av1';
+		if (compact.includes('hevc') || compact.includes('h265') || compact.includes('x265'))
+			return 'h265';
+		if (compact.includes('avc') || compact.includes('h264') || compact.includes('x264'))
+			return 'h264';
+		if (compact.includes('vc1')) return 'vc1';
+		if (compact.includes('mpeg2') || compact.includes('m2v')) return 'mpeg2';
+		if (compact.includes('xvid')) return 'xvid';
+		if (compact.includes('divx')) return 'divx';
+
+		return undefined;
+	}
+
+	private mapMediaInfoHdr(hdr?: string): string | undefined {
+		const normalized = this.normalizeUnknownValue(hdr)?.toLowerCase();
+		if (!normalized) return undefined;
+
+		if (normalized.includes('dolby') && normalized.includes('vision')) return 'dolby-vision';
+		if (normalized.includes('hdr10+')) return 'hdr10+';
+		if (normalized.includes('hdr10')) return 'hdr10';
+		if (normalized.includes('hlg')) return 'hlg';
+		if (normalized.includes('pq')) return 'pq';
+		if (normalized.includes('sdr')) return 'sdr';
+		if (normalized.includes('hdr')) return 'hdr';
+
+		return undefined;
+	}
+
+	private buildImportedMetadata(
+		queueItem: Pick<typeof downloadQueue.$inferSelect, 'title' | 'quality' | 'releaseGroup'>,
+		sourcePath: string,
+		mediaInfo: {
+			width?: number;
+			height?: number;
+			videoCodec?: string;
+			videoHdrFormat?: string;
+		} | null
+	): {
+		sceneName: string;
+		releaseGroup?: string;
+		quality: {
+			resolution?: string;
+			source?: string;
+			codec?: string;
+			hdr?: string;
+		};
+	} {
+		const queueParsed = this.parser.parse(queueItem.title);
+		const sourceName = basename(sourcePath, extname(sourcePath));
+		const sourceParsed = this.parser.parse(sourceName);
+		const queueQuality = queueItem.quality ?? undefined;
+
+		const hasQueueMetadata =
+			this.hasKnownQualityMetadata(queueParsed) ||
+			Boolean(
+				this.firstKnownValue(
+					queueItem.releaseGroup,
+					queueQuality?.resolution,
+					queueQuality?.source,
+					queueQuality?.codec,
+					queueQuality?.hdr
+				)
+			);
+		const hasSourceMetadata = this.hasKnownQualityMetadata(sourceParsed);
+		const sceneName = !hasQueueMetadata && hasSourceMetadata ? sourceName : queueItem.title;
+
+		return {
+			sceneName,
+			releaseGroup: this.firstKnownValue(
+				queueItem.releaseGroup,
+				queueParsed.releaseGroup,
+				sourceParsed.releaseGroup
+			),
+			quality: {
+				resolution: this.firstKnownValue(
+					queueQuality?.resolution,
+					queueParsed.resolution,
+					sourceParsed.resolution,
+					this.mapMediaInfoResolution(mediaInfo)
+				),
+				source: this.firstKnownValue(queueQuality?.source, queueParsed.source, sourceParsed.source),
+				codec: this.firstKnownValue(
+					queueQuality?.codec,
+					queueParsed.codec,
+					sourceParsed.codec,
+					this.mapMediaInfoCodec(mediaInfo?.videoCodec)
+				),
+				hdr: this.firstKnownValue(
+					queueQuality?.hdr,
+					queueParsed.hdr ?? undefined,
+					sourceParsed.hdr ?? undefined,
+					this.mapMediaInfoHdr(mediaInfo?.videoHdrFormat)
+				)
+			}
+		};
 	}
 
 	/**
@@ -1957,6 +2188,9 @@ export class ImportService extends EventEmitter {
 			importedPath?: string;
 			movieFileId?: string;
 			episodeFileIds?: string[];
+			title?: string;
+			releaseGroup?: string;
+			quality?: typeof downloadQueue.$inferSelect.quality;
 		} = {}
 	): Promise<void> {
 		// Get download client name
@@ -1974,11 +2208,11 @@ export class ImportService extends EventEmitter {
 			downloadTimeSeconds = Math.floor((endTime - startTime) / 1000);
 		}
 
-		await db.insert(downloadHistory).values({
+		const historyValues: Partial<typeof downloadHistory.$inferInsert> = {
 			downloadClientId: queueItem.downloadClientId,
 			downloadClientName: client?.name,
 			downloadId: queueItem.downloadId,
-			title: queueItem.title,
+			title: extras.title ?? queueItem.title,
 			indexerId: queueItem.indexerId,
 			indexerName: queueItem.indexerName,
 			protocol: queueItem.protocol,
@@ -1991,15 +2225,63 @@ export class ImportService extends EventEmitter {
 			size: queueItem.size,
 			downloadTimeSeconds,
 			finalRatio: queueItem.ratio,
-			quality: queueItem.quality as typeof downloadHistory.$inferInsert.quality,
+			quality: (extras.quality ?? queueItem.quality) as typeof downloadHistory.$inferInsert.quality,
 			importedPath: extras.importedPath,
 			movieFileId: extras.movieFileId,
 			episodeFileIds: extras.episodeFileIds,
 			grabbedAt: queueItem.addedAt,
 			completedAt: queueItem.completedAt,
-			releaseGroup: queueItem.releaseGroup,
+			releaseGroup: extras.releaseGroup ?? queueItem.releaseGroup,
 			importedAt: new Date().toISOString()
-		});
+		};
+
+		// If this queue attempt was previously recorded as failed, convert that row
+		// to imported/recovered instead of creating duplicate activity rows.
+		if (status === 'imported' && queueItem.addedAt) {
+			const failedCandidates = await db
+				.select({
+					id: downloadHistory.id,
+					downloadId: downloadHistory.downloadId,
+					title: downloadHistory.title,
+					movieId: downloadHistory.movieId,
+					seriesId: downloadHistory.seriesId
+				})
+				.from(downloadHistory)
+				.where(
+					and(
+						eq(downloadHistory.status, 'failed'),
+						eq(downloadHistory.grabbedAt, queueItem.addedAt)
+					)
+				);
+
+			const failedRecord = failedCandidates.find((candidate) => {
+				const sameDownloadId =
+					candidate.downloadId &&
+					queueItem.downloadId &&
+					candidate.downloadId === queueItem.downloadId;
+				if (sameDownloadId) return true;
+
+				const sameTitleAndMedia =
+					candidate.title === queueItem.title &&
+					candidate.movieId === queueItem.movieId &&
+					candidate.seriesId === queueItem.seriesId;
+				return sameTitleAndMedia;
+			});
+
+			if (failedRecord) {
+				await db
+					.update(downloadHistory)
+					.set({
+						...historyValues,
+						status: 'imported',
+						statusReason: null
+					})
+					.where(eq(downloadHistory.id, failedRecord.id));
+				return;
+			}
+		}
+
+		await db.insert(downloadHistory).values(historyValues as typeof downloadHistory.$inferInsert);
 	}
 
 	/**

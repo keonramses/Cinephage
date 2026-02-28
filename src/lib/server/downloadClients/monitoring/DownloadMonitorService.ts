@@ -8,6 +8,7 @@
 
 import { EventEmitter } from 'events';
 import { randomUUID } from 'node:crypto';
+import { stat } from 'fs/promises';
 import { db } from '$lib/server/db';
 import { downloadQueue, downloadHistory, downloadClients } from '$lib/server/db/schema';
 import { eq, and, inArray, not, notInArray } from 'drizzle-orm';
@@ -48,6 +49,9 @@ const MAX_IMPORT_ATTEMPTS = 10;
  * Increased to 5 minutes to handle large archive extractions reliably.
  */
 const COMPLETED_GRACE_PERIOD_MS = 300_000; // 5 minutes
+const MISSING_GRACE_PERIOD_MS = 30_000; // 30 seconds
+const TORRENT_MISSING_GRACE_PERIOD_MS = 180_000; // 3 minutes
+const TORRENT_MAGNET_METADATA_GRACE_PERIOD_MS = 600_000; // 10 minutes
 
 /**
  * Terminal statuses - items that are completely done and hidden from queue UI.
@@ -1144,17 +1148,32 @@ export class DownloadMonitorService extends EventEmitter implements BackgroundSe
 			return;
 		}
 
-		// Grace period: don't mark as failed if added within last 30 seconds
-		// This handles race conditions where qBittorrent hasn't finished processing the torrent yet
-		const GRACE_PERIOD_MS = 30_000;
+		// Grace period before considering a not-found item truly missing.
+		// Torrent magnets can transiently disappear while metadata is fetched/parsing completes.
+		let gracePeriodMs = MISSING_GRACE_PERIOD_MS;
+		const isTorrent = queueItem.protocol === 'torrent';
+		if (isTorrent) {
+			gracePeriodMs = TORRENT_MISSING_GRACE_PERIOD_MS;
+			const awaitingMetadata =
+				!!queueItem.magnetUrl && !queueItem.startedAt && !queueItem.completedAt;
+			if (awaitingMetadata) {
+				gracePeriodMs = TORRENT_MAGNET_METADATA_GRACE_PERIOD_MS;
+			}
+		}
+
 		const addedAt = queueItem.addedAt ? new Date(queueItem.addedAt).getTime() : 0;
 		const timeSinceAdd = Date.now() - addedAt;
+		const transientStatuses = new Set<QueueStatus>(['queued', 'downloading', 'stalled', 'paused']);
+		const currentStatus = queueItem.status as QueueStatus;
 
-		if (timeSinceAdd < GRACE_PERIOD_MS && queueItem.status === 'queued') {
+		if (timeSinceAdd < gracePeriodMs && transientStatuses.has(currentStatus)) {
 			logger.debug('Download not found but within grace period, skipping', {
 				title: queueItem.title,
+				status: currentStatus,
+				protocol: queueItem.protocol,
+				hasMagnet: !!queueItem.magnetUrl,
 				timeSinceAdd,
-				gracePeriod: GRACE_PERIOD_MS
+				gracePeriod: gracePeriodMs
 			});
 			return;
 		}
@@ -1193,6 +1212,54 @@ export class DownloadMonitorService extends EventEmitter implements BackgroundSe
 			this.emit('queue:removed', item.id);
 			this.emitSSE('queue:removed', { id: item.id });
 			return;
+		}
+
+		// Usenet clients can briefly drop queue visibility around completion/moves.
+		// If the output path already exists, treat it as ready-for-import instead of failed.
+		if (queueItem.protocol === 'usenet' && queueItem.outputPath) {
+			try {
+				await stat(queueItem.outputPath);
+
+				logger.info('Usenet download missing from client but output path exists, queueing import', {
+					title: queueItem.title,
+					clientName: client.name,
+					outputPath: queueItem.outputPath
+				});
+
+				const now = new Date().toISOString();
+				await db
+					.update(downloadQueue)
+					.set({
+						status: 'completed',
+						completedAt: queueItem.completedAt ?? now,
+						errorMessage: null
+					})
+					.where(eq(downloadQueue.id, queueItem.id));
+
+				const updatedItem = await this.getQueueItem(queueItem.id);
+				if (updatedItem) {
+					this.emit('queue:completed', updatedItem);
+					this.emitSSE('queue:completed', updatedItem);
+
+					const importService = await getImportService();
+					importService.requestImport(updatedItem.id).catch((err) => {
+						logger.error('Failed to request import for missing usenet download', {
+							queueId: updatedItem.id,
+							title: updatedItem.title,
+							error: err instanceof Error ? err.message : String(err)
+						});
+					});
+				}
+
+				return;
+			} catch (error) {
+				// Path doesn't exist yet, continue with regular missing-download handling.
+				logger.debug('Missing usenet output path is not ready yet', {
+					title: queueItem.title,
+					outputPath: queueItem.outputPath,
+					error: error instanceof Error ? error.message : String(error)
+				});
+			}
 		}
 
 		// Failed items are retained for user visibility and action.

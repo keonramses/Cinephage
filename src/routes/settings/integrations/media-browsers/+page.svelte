@@ -1,9 +1,10 @@
 <script lang="ts">
 	import { invalidateAll } from '$app/navigation';
-	import { Plus } from 'lucide-svelte';
+	import { Plus, Search } from 'lucide-svelte';
 	import { SvelteSet } from 'svelte/reactivity';
 	import { toasts } from '$lib/stores/toast.svelte';
-	import type { PageData, ActionData } from './$types';
+	import { getResponseErrorMessage, readResponsePayload } from '$lib/utils/http';
+	import type { PageData } from './$types';
 	import type {
 		MediaBrowserServerPublic,
 		MediaBrowserTestResult,
@@ -30,7 +31,7 @@
 		pathMappings: MediaBrowserPathMapping[];
 	}
 
-	let { data, form }: { data: PageData; form: ActionData } = $props();
+	let { data }: { data: PageData } = $props();
 
 	// Modal state
 	let modalOpen = $state(false);
@@ -140,6 +141,10 @@
 		saveError = null;
 	}
 
+	function getServerErrorMessage(payload: unknown, fallback: string): string {
+		return getResponseErrorMessage(payload, fallback);
+	}
+
 	function updateFilter<K extends keyof MediaBrowserPageFilters>(
 		key: K,
 		value: MediaBrowserPageFilters[K]
@@ -195,7 +200,14 @@
 						persist: false
 					})
 				});
-				return await response.json();
+				const payload = await readResponsePayload<MediaBrowserTestResult>(response);
+				if (!response.ok || !payload || typeof payload === 'string') {
+					return {
+						success: false,
+						error: getServerErrorMessage(payload, 'Connection test failed')
+					};
+				}
+				return payload;
 			}
 
 			// Add mode: validate unsaved server config directly.
@@ -208,7 +220,14 @@
 					serverType: formData.serverType
 				})
 			});
-			return await response.json();
+			const payload = await readResponsePayload<MediaBrowserTestResult>(response);
+			if (!response.ok || !payload || typeof payload === 'string') {
+				return {
+					success: false,
+					error: getServerErrorMessage(payload, 'Connection test failed')
+				};
+			}
+			return payload;
 		} catch (e) {
 			return { success: false, error: e instanceof Error ? e.message : 'Unknown error' };
 		}
@@ -223,27 +242,28 @@
 				delete payload.apiKey;
 			}
 
-			const form = new FormData();
-			form.append('data', JSON.stringify(payload));
+			const response =
+				modalMode === 'edit' && editingServer
+					? await fetch(`/api/notifications/mediabrowser/${editingServer.id}`, {
+							method: 'PUT',
+							headers: {
+								'Content-Type': 'application/json',
+								Accept: 'application/json'
+							},
+							body: JSON.stringify(payload)
+						})
+					: await fetch('/api/notifications/mediabrowser', {
+							method: 'POST',
+							headers: {
+								'Content-Type': 'application/json',
+								Accept: 'application/json'
+							},
+							body: JSON.stringify(payload)
+						});
 
-			let response: Response;
-			if (modalMode === 'edit' && editingServer) {
-				form.append('id', editingServer.id);
-				response = await fetch(`?/updateServer`, {
-					method: 'POST',
-					body: form
-				});
-			} else {
-				response = await fetch(`?/createServer`, {
-					method: 'POST',
-					body: form
-				});
-			}
-
-			const result = await response.json();
-			if (result.type === 'failure' || result.data?.serverError) {
-				const errorMessage = result.data?.serverError || 'Failed to save server';
-				saveError = errorMessage;
+			const result = await readResponsePayload<Record<string, unknown>>(response);
+			if (!response.ok) {
+				saveError = getServerErrorMessage(result, 'Failed to save server');
 				return;
 			}
 
@@ -258,15 +278,26 @@
 
 	async function handleDelete() {
 		if (!editingServer) return;
+		try {
+			const response = await fetch(`/api/notifications/mediabrowser/${editingServer.id}`, {
+				method: 'DELETE',
+				headers: { Accept: 'application/json' }
+			});
+			const result = await readResponsePayload<Record<string, unknown>>(response);
+			if (!response.ok) {
+				throw new Error(getServerErrorMessage(result, 'Failed to delete server'));
+			}
 
-		const form = new FormData();
-		form.append('id', editingServer.id);
-		await fetch(`?/deleteServer`, {
-			method: 'POST',
-			body: form
-		});
-		await invalidateAll();
-		closeModal();
+			await invalidateAll();
+			closeModal();
+		} catch (error) {
+			toasts.error(
+				getServerErrorMessage(
+					error instanceof Error ? error.message : null,
+					'Failed to delete server'
+				)
+			);
+		}
 	}
 
 	function confirmDelete(server: MediaBrowserServerPublic) {
@@ -276,27 +307,53 @@
 
 	async function handleConfirmDelete() {
 		if (!deleteTarget) return;
+		try {
+			const response = await fetch(`/api/notifications/mediabrowser/${deleteTarget.id}`, {
+				method: 'DELETE',
+				headers: { Accept: 'application/json' }
+			});
+			const result = await readResponsePayload<Record<string, unknown>>(response);
+			if (!response.ok) {
+				throw new Error(getServerErrorMessage(result, 'Failed to delete server'));
+			}
 
-		const form = new FormData();
-		form.append('id', deleteTarget.id);
-		await fetch(`?/deleteServer`, {
-			method: 'POST',
-			body: form
-		});
-		await invalidateAll();
-		confirmDeleteOpen = false;
-		deleteTarget = null;
+			await invalidateAll();
+			confirmDeleteOpen = false;
+			deleteTarget = null;
+		} catch (error) {
+			toasts.error(
+				getServerErrorMessage(
+					error instanceof Error ? error.message : null,
+					'Failed to delete server'
+				)
+			);
+		}
 	}
 
 	async function handleToggle(server: MediaBrowserServerPublic) {
-		const form = new FormData();
-		form.append('id', server.id);
-		form.append('enabled', (!server.enabled).toString());
-		await fetch(`?/toggleServer`, {
-			method: 'POST',
-			body: form
-		});
-		await invalidateAll();
+		try {
+			const response = await fetch(`/api/notifications/mediabrowser/${server.id}`, {
+				method: 'PUT',
+				headers: {
+					'Content-Type': 'application/json',
+					Accept: 'application/json'
+				},
+				body: JSON.stringify({ enabled: !server.enabled })
+			});
+			const result = await readResponsePayload<Record<string, unknown>>(response);
+			if (!response.ok) {
+				throw new Error(getServerErrorMessage(result, 'Failed to update server state'));
+			}
+
+			await invalidateAll();
+		} catch (error) {
+			toasts.error(
+				getServerErrorMessage(
+					error instanceof Error ? error.message : null,
+					'Failed to update server state'
+				)
+			);
+		}
 	}
 
 	async function handleTestFromTable(server: MediaBrowserServerPublic) {
@@ -305,9 +362,9 @@
 			const response = await fetch(`/api/notifications/mediabrowser/${server.id}/test`, {
 				method: 'POST'
 			});
-			const result = await response.json();
-			if (!response.ok || !result.success) {
-				toasts.error(result.error ?? 'Connection test failed');
+			const result = await readResponsePayload<MediaBrowserTestResult>(response);
+			if (!response.ok || !result || typeof result === 'string' || !result.success) {
+				toasts.error(getServerErrorMessage(result, 'Connection test failed'));
 			} else {
 				toasts.success('Connection successful!');
 			}
@@ -321,13 +378,19 @@
 		if (selectedIds.size === 0) return;
 		bulkLoading = true;
 		try {
-			const form = new FormData();
-			form.append('ids', JSON.stringify([...selectedIds]));
-			const response = await fetch(`?/bulkEnable`, { method: 'POST', body: form });
-			if (!response.ok) {
-				const result = await response.json();
-				toasts.error(result?.data?.serverError ?? 'Failed to enable selected servers');
-				return;
+			for (const id of selectedIds) {
+				const response = await fetch(`/api/notifications/mediabrowser/${id}`, {
+					method: 'PUT',
+					headers: {
+						'Content-Type': 'application/json',
+						Accept: 'application/json'
+					},
+					body: JSON.stringify({ enabled: true })
+				});
+				const result = await readResponsePayload<Record<string, unknown>>(response);
+				if (!response.ok) {
+					throw new Error(getServerErrorMessage(result, 'Failed to enable selected servers'));
+				}
 			}
 
 			await invalidateAll();
@@ -343,13 +406,19 @@
 		if (selectedIds.size === 0) return;
 		bulkLoading = true;
 		try {
-			const form = new FormData();
-			form.append('ids', JSON.stringify([...selectedIds]));
-			const response = await fetch(`?/bulkDisable`, { method: 'POST', body: form });
-			if (!response.ok) {
-				const result = await response.json();
-				toasts.error(result?.data?.serverError ?? 'Failed to disable selected servers');
-				return;
+			for (const id of selectedIds) {
+				const response = await fetch(`/api/notifications/mediabrowser/${id}`, {
+					method: 'PUT',
+					headers: {
+						'Content-Type': 'application/json',
+						Accept: 'application/json'
+					},
+					body: JSON.stringify({ enabled: false })
+				});
+				const result = await readResponsePayload<Record<string, unknown>>(response);
+				if (!response.ok) {
+					throw new Error(getServerErrorMessage(result, 'Failed to disable selected servers'));
+				}
 			}
 
 			await invalidateAll();
@@ -374,13 +443,15 @@
 
 		bulkLoading = true;
 		try {
-			const form = new FormData();
-			form.append('ids', JSON.stringify([...selectedIds]));
-			const response = await fetch(`?/bulkDelete`, { method: 'POST', body: form });
-			if (!response.ok) {
-				const result = await response.json();
-				toasts.error(result?.data?.serverError ?? 'Failed to delete selected servers');
-				return;
+			for (const id of selectedIds) {
+				const response = await fetch(`/api/notifications/mediabrowser/${id}`, {
+					method: 'DELETE',
+					headers: { Accept: 'application/json' }
+				});
+				const result = await readResponsePayload<Record<string, unknown>>(response);
+				if (!response.ok) {
+					throw new Error(getServerErrorMessage(result, 'Failed to delete selected servers'));
+				}
 			}
 
 			await invalidateAll();
@@ -403,8 +474,8 @@
 				const response = await fetch(`/api/notifications/mediabrowser/${id}/test`, {
 					method: 'POST'
 				});
-				const result = await response.json();
-				if (response.ok && result.success) {
+				const result = await readResponsePayload<MediaBrowserTestResult>(response);
+				if (response.ok && result && typeof result !== 'string' && result.success) {
 					successCount += 1;
 				} else {
 					failCount += 1;
@@ -421,49 +492,52 @@
 	}
 </script>
 
-<div class="w-full p-4">
-	<div class="mb-6">
-		<h1 class="text-2xl font-bold">Media Servers</h1>
+<div class="w-full p-3 sm:p-4">
+	<div class="mb-5 sm:mb-6">
+		<h1 class="text-xl font-bold sm:text-2xl">Media Servers</h1>
 		<p class="text-base-content/70">
 			Configure Jellyfin and Emby servers for library update notifications.
 		</p>
 	</div>
 
 	<div class="mb-4 flex items-center justify-end">
-		<button class="btn gap-2 btn-primary" onclick={openAddModal}>
+		<button class="btn w-full gap-2 btn-sm btn-primary sm:w-auto" onclick={openAddModal}>
 			<Plus class="h-4 w-4" />
 			Add Server
 		</button>
 	</div>
 
-	<div class="mb-4 flex flex-wrap items-center gap-4">
-		<div class="form-control w-full sm:w-48">
+	<div class="mb-4 flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center sm:gap-4">
+		<div class="form-control relative w-full sm:w-56">
+			<Search
+				class="pointer-events-none absolute top-1/2 left-3 h-4 w-4 -translate-y-1/2 text-base-content/40"
+			/>
 			<input
 				type="text"
 				placeholder="Search servers..."
-				class="input-bordered input input-sm w-full pl-9"
+				class="input input-sm w-full rounded-full border-base-content/20 bg-base-200/60 pr-4 pl-10 transition-all duration-200 placeholder:text-base-content/40 hover:bg-base-200 focus:border-primary/50 focus:bg-base-200 focus:ring-1 focus:ring-primary/20 focus:outline-none"
 				value={filters.search}
 				oninput={(e) => updateFilter('search', e.currentTarget.value)}
 			/>
 		</div>
 
-		<div class="join">
+		<div class="join w-full sm:w-auto">
 			<button
-				class="btn join-item btn-sm"
+				class="btn join-item flex-1 btn-sm sm:flex-none"
 				class:btn-active={filters.type === 'all'}
 				onclick={() => updateFilter('type', 'all')}
 			>
 				All
 			</button>
 			<button
-				class="btn join-item btn-sm"
+				class="btn join-item flex-1 btn-sm sm:flex-none"
 				class:btn-active={filters.type === 'jellyfin'}
 				onclick={() => updateFilter('type', 'jellyfin')}
 			>
 				Jellyfin
 			</button>
 			<button
-				class="btn join-item btn-sm"
+				class="btn join-item flex-1 btn-sm sm:flex-none"
 				class:btn-active={filters.type === 'emby'}
 				onclick={() => updateFilter('type', 'emby')}
 			>
@@ -471,23 +545,23 @@
 			</button>
 		</div>
 
-		<div class="join">
+		<div class="join w-full sm:w-auto">
 			<button
-				class="btn join-item btn-sm"
+				class="btn join-item flex-1 btn-sm sm:flex-none"
 				class:btn-active={filters.status === 'all'}
 				onclick={() => updateFilter('status', 'all')}
 			>
 				All
 			</button>
 			<button
-				class="btn join-item btn-sm"
+				class="btn join-item flex-1 btn-sm sm:flex-none"
 				class:btn-active={filters.status === 'enabled'}
 				onclick={() => updateFilter('status', 'enabled')}
 			>
 				Enabled
 			</button>
 			<button
-				class="btn join-item btn-sm"
+				class="btn join-item flex-1 btn-sm sm:flex-none"
 				class:btn-active={filters.status === 'disabled'}
 				onclick={() => updateFilter('status', 'disabled')}
 			>
@@ -495,18 +569,6 @@
 			</button>
 		</div>
 	</div>
-
-	{#if form?.serverError}
-		<div class="mb-4 alert alert-error">
-			<span>{form.serverError}</span>
-		</div>
-	{/if}
-
-	{#if form?.serverSuccess}
-		<div class="mb-4 alert alert-success">
-			<span>Operation completed successfully!</span>
-		</div>
-	{/if}
 
 	{#if selectedIds.size > 0}
 		<MediaBrowserBulkActions
@@ -519,8 +581,8 @@
 		/>
 	{/if}
 
-	<div class="card bg-base-100 shadow-xl">
-		<div class="card-body p-0">
+	<div class="card bg-base-200/40 shadow-none sm:bg-base-100 sm:shadow-xl">
+		<div class="card-body p-2 sm:p-0">
 			<MediaBrowserTable
 				servers={sortedServers}
 				{selectedIds}

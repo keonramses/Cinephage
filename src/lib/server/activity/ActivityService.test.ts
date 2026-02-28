@@ -138,3 +138,24 @@ describe('ActivityService fallback media resolution', () => {
 		expect(activity?.mediaId).toBe('');
 	});
 });
+
+describe('ActivityService failed activity retry linking', () => {
+	it('attaches queueItemId to failed history activity when a matching failed queue item exists', () => {
+		const service = ActivityService.getInstance();
+		const history = createHistoryRecord('history-failed-retry-link', {
+			status: 'failed',
+			downloadId: 'download-123',
+			statusReason: 'No video files found in download'
+		});
+
+		const activity = service.transformHistoryItem(
+			history,
+			{ movies: new Map(), series: new Map(), episodes: new Map() },
+			[],
+			new Map([['download:download-123', 'queue-abc']])
+		);
+
+		expect(activity).not.toBeNull();
+		expect(activity?.queueItemId).toBe('queue-abc');
+	});
+});
