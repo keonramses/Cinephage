@@ -676,3 +676,40 @@ export const handleError: HandleServerError = ({ error, event }) => {
 		code: isAppError(error) ? error.code : 'INTERNAL_ERROR'
 	};
 };
+
+/**
+ * Graceful shutdown handlers
+ * Ensure all background services are properly cleaned up on exit
+ */
+let isShuttingDown = false;
+
+async function gracefulShutdown(signal: string): Promise<void> {
+	if (isShuttingDown) {
+		logger.info('Shutdown already in progress, waiting...');
+		return;
+	}
+
+	isShuttingDown = true;
+	logger.info(`Received ${signal}, starting graceful shutdown...`);
+
+	try {
+		const serviceManager = getServiceManager();
+		// Set a timeout to force exit if graceful shutdown hangs
+		const timeout = setTimeout(() => {
+			logger.error('Graceful shutdown timed out after 30s, forcing exit');
+			process.exit(1);
+		}, 30000);
+
+		await serviceManager.stopAll();
+		clearTimeout(timeout);
+
+		logger.info('All services stopped successfully');
+		process.exit(0);
+	} catch (error) {
+		logger.error('Error during graceful shutdown', error);
+		process.exit(1);
+	}
+}
+
+process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
+process.on('SIGINT', () => gracefulShutdown('SIGINT'));
