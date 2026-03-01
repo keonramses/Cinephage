@@ -1,5 +1,6 @@
 import { redirect, type RequestEvent } from '@sveltejs/kit';
 import Database from 'better-sqlite3';
+import { getAuthDatabasePath } from './secret.js';
 
 /**
  * Check if admin setup is complete
@@ -8,9 +9,7 @@ import Database from 'better-sqlite3';
 export async function isSetupComplete(): Promise<boolean> {
 	// Check if any users exist in the database
 	// Use Better Auth's database directly since it manages the user table
-	const DB_PATH =
-		process.env.AUTH_DATABASE_URL || process.env.DATABASE_URL || './data/cinephage.db';
-	const authDb = new Database(DB_PATH);
+	const authDb = new Database(getAuthDatabasePath());
 	try {
 		const result = authDb.prepare('SELECT 1 FROM "user" LIMIT 1').get();
 		return !!result;

@@ -1,6 +1,6 @@
 import { randomBytes } from 'node:crypto';
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'node:fs';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import Database from 'better-sqlite3';
 
 const DATA_DIR = process.env.DATA_DIR || 'data';
@@ -11,9 +11,25 @@ function normalizeUrl(url: string): string {
 	return url.trim().replace(/\/+$/, '');
 }
 
+export function getAuthDatabasePath(): string {
+	return (
+		process.env.AUTH_DATABASE_URL || process.env.DATABASE_URL || join(DATA_DIR, 'cinephage.db')
+	);
+}
+
+export function ensureAuthDatabaseDirectory(): void {
+	const dbPath = getAuthDatabasePath();
+
+	// Skip URI-style and in-memory database targets.
+	if (dbPath === ':memory:' || dbPath.startsWith('file:')) {
+		return;
+	}
+
+	mkdirSync(dirname(dbPath), { recursive: true });
+}
+
 function getConfiguredExternalUrl(): string | null {
-	const dbPath =
-		process.env.AUTH_DATABASE_URL || process.env.DATABASE_URL || join(DATA_DIR, 'cinephage.db');
+	const dbPath = getAuthDatabasePath();
 
 	if (!existsSync(dbPath)) {
 		return null;

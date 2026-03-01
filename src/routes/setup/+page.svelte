@@ -212,13 +212,14 @@
 					>
 						<!-- Username -->
 						<div class="form-control">
-							<label class="label">
+							<label class="label" for="setup-username">
 								<span class="label-text flex items-center gap-2">
 									<User class="h-4 w-4" />
 									Username
 								</span>
 							</label>
 							<input
+								id="setup-username"
 								type="text"
 								class="input-bordered input w-full"
 								class:input-error={usernameError}
@@ -227,22 +228,28 @@
 								oninput={validateUsername}
 								minlength={USERNAME_MIN_LENGTH}
 								maxlength={USERNAME_MAX_LENGTH}
+								aria-invalid={Boolean(usernameError)}
+								aria-describedby="setup-username-help"
 								required
 							/>
 							{#if usernameError}
-								<label class="label">
-									<span class="label-text-alt text-error">{usernameError}</span>
-								</label>
+								<div class="label">
+									<span id="setup-username-help" class="label-text-alt text-error"
+										>{usernameError}</span
+									>
+								</div>
 							{:else}
-								<label class="label">
-									<span class="label-text-alt">3-32 characters, letters, numbers, underscores</span>
-								</label>
+								<div class="label">
+									<span id="setup-username-help" class="label-text-alt"
+										>3-32 characters, letters, numbers, underscores</span
+									>
+								</div>
 							{/if}
 						</div>
 
 						<!-- Email -->
 						<div class="form-control">
-							<label class="label">
+							<label class="label" for="setup-email">
 								<span class="label-text flex items-center gap-2">
 									<svg
 										xmlns="http://www.w3.org/2000/svg"
@@ -262,30 +269,34 @@
 								</span>
 							</label>
 							<input
+								id="setup-email"
 								type="email"
 								class="input-bordered input w-full"
 								class:input-error={emailError}
 								placeholder="admin@example.com"
 								bind:value={email}
 								oninput={validateEmail}
+								aria-invalid={Boolean(emailError)}
+								aria-describedby={emailError ? 'setup-email-help' : undefined}
 								required
 							/>
 							{#if emailError}
-								<label class="label">
-									<span class="label-text-alt text-error">{emailError}</span>
-								</label>
+								<div class="label">
+									<span id="setup-email-help" class="label-text-alt text-error">{emailError}</span>
+								</div>
 							{/if}
 						</div>
 
 						<!-- Password -->
 						<div class="form-control">
-							<label class="label">
+							<label class="label" for="setup-password">
 								<span class="label-text flex items-center gap-2">
 									<Lock class="h-4 w-4" />
 									Password
 								</span>
 							</label>
 							<input
+								id="setup-password"
 								type="password"
 								class="input-bordered input w-full"
 								placeholder="••••••••"
@@ -317,10 +328,11 @@
 
 						<!-- Confirm Password -->
 						<div class="form-control">
-							<label class="label">
+							<label class="label" for="setup-confirm-password">
 								<span class="label-text">Confirm Password</span>
 							</label>
 							<input
+								id="setup-confirm-password"
 								type="password"
 								class="input-bordered input w-full"
 								class:input-error={confirmError}
@@ -328,12 +340,16 @@
 								bind:value={confirmPassword}
 								oninput={validateConfirm}
 								minlength="8"
+								aria-invalid={Boolean(confirmError)}
+								aria-describedby={confirmError ? 'setup-confirm-password-help' : undefined}
 								required
 							/>
 							{#if confirmError}
-								<label class="label">
-									<span class="label-text-alt text-error">{confirmError}</span>
-								</label>
+								<div class="label">
+									<span id="setup-confirm-password-help" class="label-text-alt text-error"
+										>{confirmError}</span
+									>
+								</div>
 							{/if}
 						</div>
 

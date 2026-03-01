@@ -4,7 +4,12 @@ import { sveltekitCookies } from 'better-auth/svelte-kit';
 import { getRequestEvent } from '$app/server';
 import { APIError } from 'better-auth/api';
 import Database from 'better-sqlite3';
-import { getAuthSecret, getBaseURL } from './secret.js';
+import {
+	ensureAuthDatabaseDirectory,
+	getAuthDatabasePath,
+	getAuthSecret,
+	getBaseURL
+} from './secret.js';
 import { getSystemSettingsService } from '$lib/server/settings/SystemSettingsService.js';
 import { ac, admin as adminRole, user as userRole } from '$lib/auth/access-control.js';
 import { isHardReservedUsername, isValidUsernameFormat } from '$lib/auth/username-policy.js';
@@ -115,8 +120,9 @@ function generateDisplayUsername(username: string): string {
 }
 
 // Initialize Better Auth's native SQLite database connection
-// Use environment variable or fallback to relative path for portability
-const DB_PATH = process.env.AUTH_DATABASE_URL || process.env.DATABASE_URL || './data/cinephage.db';
+// Use the shared auth database path so Docker and local runtime stay aligned.
+const DB_PATH = getAuthDatabasePath();
+ensureAuthDatabaseDirectory();
 const authDb = new Database(DB_PATH);
 
 /**
