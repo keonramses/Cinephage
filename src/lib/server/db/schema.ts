@@ -27,6 +27,7 @@ export const user = sqliteTable(
 		image: text('image'),
 		username: text('username').unique(),
 		displayUsername: text('displayUsername'),
+		role: text('role').default('admin').notNull(),
 		createdAt: text('createdAt').notNull(),
 		updatedAt: text('updatedAt').notNull()
 	},
