@@ -1,16 +1,26 @@
 import { createAuthClient } from 'better-auth/svelte';
-import { usernameClient } from 'better-auth/client/plugins';
+import { usernameClient, adminClient } from 'better-auth/client/plugins';
+import { ac, admin, user } from './access-control.js';
 
 /**
  * Better Auth client for Svelte
- * Username-based authentication
+ * Username-based authentication with admin capabilities
  *
  * This is the client-side auth client - import from $lib/auth/client
  * NOT from $lib/server/auth/client
  */
 export const authClient = createAuthClient({
 	basePath: '/api/auth',
-	plugins: [usernameClient()]
+	plugins: [
+		usernameClient(),
+		adminClient({
+			ac,
+			roles: {
+				admin,
+				user
+			}
+		})
+	]
 });
 
 // Export types

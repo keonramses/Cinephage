@@ -1,10 +1,12 @@
 import { betterAuth } from 'better-auth';
-import { username, apiKey } from 'better-auth/plugins';
+import { username, apiKey, admin } from 'better-auth/plugins';
 import { sveltekitCookies } from 'better-auth/svelte-kit';
 import { getRequestEvent } from '$app/server';
+import { APIError } from 'better-auth/api';
 import Database from 'better-sqlite3';
 import { getAuthSecret } from './secret.js';
 import { getSystemSettingsService } from '$lib/server/settings/SystemSettingsService.js';
+import { ac, admin as adminRole, user as userRole } from '$lib/auth/access-control.js';
 
 /**
  * Extract IP from hostname (e.g., "192.168.1.100:5173" → "192.168.1.100")
@@ -281,6 +283,13 @@ export const auth = betterAuth({
 			},
 			enableMetadata: true
 		}),
+		admin({
+			ac,
+			roles: {
+				admin: adminRole,
+				user: userRole
+			}
+		}),
 		sveltekitCookies(getRequestEvent) // Must be last plugin for proper cookie handling
 	],
 
@@ -301,6 +310,36 @@ export const auth = betterAuth({
 		window: 900, // 15 minutes
 		max: 5, // 5 attempts
 		storage: 'database'
+	},
+
+	// Database hooks for user management
+	databaseHooks: {
+		user: {
+			create: {
+				before: async (user) => {
+					// Check if any user already exists
+					// Only allow first user (admin) to be created
+					const existingUser = authDb.prepare('SELECT 1 FROM "user" LIMIT 1').get();
+					if (existingUser) {
+						throw new APIError('FORBIDDEN', {
+							message: 'User registration is disabled. Only one admin account is allowed.'
+						});
+					}
+					return { data: user };
+				}
+			},
+			update: {
+				before: async (data, ctx) => {
+					// Prevent changing admin role to user
+					if (data.role === 'user' && ctx?.context?.session?.user?.role === 'admin') {
+						throw new APIError('FORBIDDEN', {
+							message: 'Cannot change admin role. Single admin system.'
+						});
+					}
+					return { data };
+				}
+			}
+		}
 	},
 
 	// Advanced security settings
