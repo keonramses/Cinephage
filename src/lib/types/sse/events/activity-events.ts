@@ -9,12 +9,12 @@ import type { UnifiedActivity } from '$lib/types/activity';
 /**
  * activity:new event - New activity item
  */
-export interface ActivityNewEvent extends UnifiedActivity {}
+export type ActivityNewEvent = UnifiedActivity;
 
 /**
  * activity:updated event - Activity item updated
  */
-export interface ActivityUpdatedEvent extends UnifiedActivity {}
+export type ActivityUpdatedEvent = UnifiedActivity;
 
 /**
  * activity:progress event - Progress update

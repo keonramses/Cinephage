@@ -2,11 +2,16 @@
 	import { goto } from '$app/navigation';
 	import { Shield, User, Lock, CheckCircle, AlertCircle } from 'lucide-svelte';
 	import { authClient } from '$lib/auth/client.js';
+	import {
+		isHardReservedUsername,
+		USERNAME_MAX_LENGTH,
+		USERNAME_MIN_LENGTH,
+		USERNAME_PATTERN
+	} from '$lib/auth/username-policy.js';
 
 	let currentStep = $state(1);
 	let isLoading = $state(false);
 	let error = $state('');
-	let success = $state(false);
 
 	// Form data
 	let username = $state('');
@@ -26,29 +31,26 @@
 	});
 	let confirmError = $state('');
 
-	// Password strength
-	let passwordStrength = $state(0);
-
 	function validateUsername(): boolean {
-		if (username.length < 3) {
-			usernameError = 'Username must be at least 3 characters';
+		usernameError = '';
+
+		if (username.length < USERNAME_MIN_LENGTH) {
+			usernameError = `Username must be at least ${USERNAME_MIN_LENGTH} characters`;
 			return false;
 		}
-		if (username.length > 32) {
-			usernameError = 'Username must be no more than 32 characters';
+		if (username.length > USERNAME_MAX_LENGTH) {
+			usernameError = `Username must be no more than ${USERNAME_MAX_LENGTH} characters`;
 			return false;
 		}
-		if (!/^[a-zA-Z0-9_]+$/.test(username)) {
+		if (!USERNAME_PATTERN.test(username)) {
 			usernameError = 'Username can only contain letters, numbers, and underscores';
 			return false;
 		}
-		// Check reserved names
-		const reserved = ['admin', 'administrator', 'root', 'system', 'user', 'test'];
-		if (reserved.includes(username.toLowerCase())) {
-			usernameError = 'This username is reserved';
+		if (isHardReservedUsername(username)) {
+			usernameError = 'This name cannot be used as a username. Choose a different username';
 			return false;
 		}
-		usernameError = '';
+
 		return true;
 	}
 
@@ -73,13 +75,12 @@
 			uppercase: /[A-Z]/.test(password),
 			lowercase: /[a-z]/.test(password),
 			number: /[0-9]/.test(password),
-			special: /[!@#$%^&*()_+\-=\[\]{};':"\\|,.<>?]/.test(password)
+			special: /[^A-Za-z0-9\s]/.test(password)
 		};
 		passwordErrors = errors;
 
 		// Calculate strength
 		const passed = Object.values(errors).filter(Boolean).length;
-		passwordStrength = passed;
 
 		return passed === 5;
 	}
@@ -146,7 +147,6 @@
 				console.warn('Error marking setup complete:', setupError);
 			}
 
-			success = true;
 			currentStep = 3;
 
 			// Redirect to dashboard after 2 seconds
@@ -225,8 +225,8 @@
 								placeholder="admin_user"
 								bind:value={username}
 								oninput={validateUsername}
-								minlength="3"
-								maxlength="32"
+								minlength={USERNAME_MIN_LENGTH}
+								maxlength={USERNAME_MAX_LENGTH}
 								required
 							/>
 							{#if usernameError}

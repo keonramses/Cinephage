@@ -8,13 +8,9 @@ import { svelteKitHandler } from 'better-auth/svelte-kit';
 import { logger } from '$lib/logging';
 import { getLibraryScheduler, librarySchedulerService } from '$lib/server/library/index.js';
 import { isFFprobeAvailable, getFFprobeVersion } from '$lib/server/library/ffprobe.js';
-import { getDownloadMonitor, downloadMonitor } from '$lib/server/downloadClients/monitoring';
+import { getDownloadMonitor } from '$lib/server/downloadClients/monitoring';
 import { importService } from '$lib/server/downloadClients/import';
-import {
-	getMonitoringScheduler,
-	monitoringScheduler
-} from '$lib/server/monitoring/MonitoringScheduler.js';
-import { taskHistoryService } from '$lib/server/tasks/TaskHistoryService.js';
+import { getMonitoringScheduler } from '$lib/server/monitoring/MonitoringScheduler.js';
 import { getExternalIdService } from '$lib/server/services/ExternalIdService.js';
 import { getDataRepairService } from '$lib/server/services/DataRepairService.js';
 import { qualityFilter } from '$lib/server/quality';
@@ -32,7 +28,7 @@ import { getLiveTvChannelService } from '$lib/server/livetv/LiveTvChannelService
 import { getLiveTvStreamService } from '$lib/server/livetv/streaming/LiveTvStreamService';
 import { getStalkerPortalManager } from '$lib/server/livetv/stalker/StalkerPortalManager';
 import { initializeProviderFactory } from '$lib/server/subtitles/providers/SubtitleProviderFactory.js';
-import { auth, isSetupComplete } from '$lib/server/auth/index.js';
+import { auth, isSetupComplete, repairCurrentUserAdminRole } from '$lib/server/auth/index.js';
 import { checkApiRateLimit, applyRateLimitHeaders } from '$lib/server/rate-limit.js';
 
 /**
@@ -254,6 +250,20 @@ const customHandler: Handle = async ({ event, resolve }) => {
 	}
 
 	if (session) {
+		if (
+			session.user?.id &&
+			session.user.role !== 'admin' &&
+			repairCurrentUserAdminRole(session.user.id)
+		) {
+			session = {
+				...session,
+				user: {
+					...session.user,
+					role: 'admin'
+				}
+			};
+		}
+
 		event.locals.user = session.user;
 		event.locals.session = session.session;
 		event.locals.apiKey = apiKey;

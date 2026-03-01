@@ -29,9 +29,7 @@
 	import type {
 		ChannelLineupItemWithDetails,
 		ChannelCategory,
-		UpdateChannelRequest,
-		EpgProgram,
-		EpgProgramWithProgress
+		UpdateChannelRequest
 	} from '$lib/types/livetv';
 	import { onMount } from 'svelte';
 	import { createSSE } from '$lib/sse';

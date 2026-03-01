@@ -11,7 +11,7 @@ describe('createSSEStream', () => {
 	});
 
 	it('should return Response with correct headers', async () => {
-		const response = createSSEStream((send) => {
+		const response = createSSEStream((_send) => {
 			return () => {};
 		});
 
@@ -22,7 +22,7 @@ describe('createSSEStream', () => {
 	});
 
 	it('should send initial connected event', async () => {
-		const response = createSSEStream((send) => {
+		const response = createSSEStream((_send) => {
 			return () => {};
 		});
 
@@ -108,7 +108,7 @@ describe('createSSEStream', () => {
 
 	it('should call cleanup on cancel', async () => {
 		const cleanup = vi.fn();
-		const setup = vi.fn((send) => {
+		const setup = vi.fn((_send) => {
 			return cleanup;
 		});
 
@@ -153,7 +153,7 @@ describe('createSSEStream', () => {
 
 	it('should send heartbeat events', async () => {
 		const response = createSSEStream(
-			(send) => {
+			(_send) => {
 				return () => {};
 			},
 			{ heartbeatInterval: 1000 }
@@ -189,7 +189,7 @@ describe('createSSEStream', () => {
 
 describe('createSSEHandler', () => {
 	it('should return a RequestHandler', async () => {
-		const handler = createSSEHandler((send) => {
+		const handler = createSSEHandler((_send) => {
 			return () => {};
 		});
 
@@ -197,7 +197,7 @@ describe('createSSEHandler', () => {
 	});
 
 	it('should return Response when called', async () => {
-		const handler = createSSEHandler((send) => {
+		const handler = createSSEHandler((_send) => {
 			return () => {};
 		});
 
@@ -209,7 +209,7 @@ describe('createSSEHandler', () => {
 
 	it('should pass options to createSSEStream', async () => {
 		const handler = createSSEHandler(
-			(send) => {
+			(_send) => {
 				return () => {};
 			},
 			{ heartbeatInterval: 5000 }

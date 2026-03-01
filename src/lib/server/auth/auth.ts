@@ -4,9 +4,11 @@ import { sveltekitCookies } from 'better-auth/svelte-kit';
 import { getRequestEvent } from '$app/server';
 import { APIError } from 'better-auth/api';
 import Database from 'better-sqlite3';
-import { getAuthSecret } from './secret.js';
+import { getAuthSecret, getBaseURL } from './secret.js';
 import { getSystemSettingsService } from '$lib/server/settings/SystemSettingsService.js';
 import { ac, admin as adminRole, user as userRole } from '$lib/auth/access-control.js';
+import { isHardReservedUsername, isValidUsernameFormat } from '$lib/auth/username-policy.js';
+import { ensureSoleUserIsAdmin } from './admin-bootstrap.js';
 
 /**
  * Extract IP from hostname (e.g., "192.168.1.100:5173" → "192.168.1.100")
@@ -87,91 +89,14 @@ function isLocalNetworkOrigin(origin: string): boolean {
 }
 
 /**
- * Reserved usernames that cannot be registered
- */
-const RESERVED_USERNAMES = [
-	// System/admin accounts
-	'admin',
-	'administrator',
-	'root',
-	'system',
-	'sys',
-	// Auth-related
-	'auth',
-	'login',
-	'logout',
-	'signin',
-	'signout',
-	'signup',
-	'register',
-	// API/technical
-	'api',
-	'app',
-	'application',
-	'backend',
-	'frontend',
-	'server',
-	// Common service names
-	'www',
-	'web',
-	'mail',
-	'email',
-	'support',
-	'help',
-	'info',
-	'contact',
-	'service',
-	'services',
-	'bot',
-	'bots',
-	// Brand-related
-	'cinephage',
-	'owner',
-	'master',
-	'superuser',
-	'su',
-	// Potentially confusing
-	'user',
-	'users',
-	'guest',
-	'anonymous',
-	'test',
-	'testing',
-	'demo',
-	'null',
-	'undefined',
-	'nil',
-	'none',
-	// Single characters
-	'a',
-	'b',
-	'c',
-	'x',
-	'y',
-	'z',
-	// Variants
-	'admin1',
-	'admin2',
-	'root1',
-	'root2'
-];
-
-/**
- * Username validator - checks format and reserved names
+ * Username validator - checks shared format rules and hard-reserved namespaces
  */
 function validateUsername(username: string): boolean {
-	// Check length
-	if (username.length < 3 || username.length > 32) {
+	if (!isValidUsernameFormat(username)) {
 		return false;
 	}
 
-	// Check pattern - alphanumeric and underscore only
-	if (!/^[a-zA-Z0-9_]+$/.test(username)) {
-		return false;
-	}
-
-	// Check reserved names (case-insensitive)
-	if (RESERVED_USERNAMES.includes(username.toLowerCase())) {
+	if (isHardReservedUsername(username)) {
 		return false;
 	}
 
@@ -200,8 +125,13 @@ const authDb = new Database(DB_PATH);
  */
 export const auth = betterAuth({
 	// Get or auto-generate secret (works for Docker and bare-metal)
-	// Note: baseURL is auto-detected from request to avoid origin mismatch issues
+	// Better Auth requires a stable base URL for redirects/callbacks.
+	// We prefer env, then saved external URL, then localhost for dev/LAN bootstrap.
 	secret: getAuthSecret(),
+	baseURL: getBaseURL(),
+
+	// Allow Better Auth to infer the effective host when deployed behind a reverse proxy.
+	trustedProxyHeaders: true,
 
 	// Trust origins from environment, database, or common local development URLs
 	// Also automatically trust any local network origin (RFC1918 private IPs)
@@ -325,7 +255,13 @@ export const auth = betterAuth({
 							message: 'User registration is disabled. Only one admin account is allowed.'
 						});
 					}
-					return { data: user };
+
+					return {
+						data: {
+							...user,
+							role: 'admin'
+						}
+					};
 				}
 			},
 			update: {
@@ -349,10 +285,6 @@ export const auth = betterAuth({
 		// __Secure- prefix requires HTTPS and breaks HTTP access
 		cookiePrefix: 'cinephage',
 
-		// Trust proxy headers to detect HTTPS through reverse proxy
-		// This allows proper origin detection when behind nginx/traefik/caddy
-		trustedProxyHeaders: true,
-
 		// Disable secure cookies by default for HTTP compatibility
 		// HTTPS deployments should set BETTER_AUTH_URL=https://domain.com
 		useSecureCookies: false,
@@ -366,8 +298,12 @@ export const auth = betterAuth({
 	}
 });
 
+export function repairCurrentUserAdminRole(userId: string): boolean {
+	return ensureSoleUserIsAdmin(authDb, userId);
+}
+
 // Export helper functions
-export { validateUsername, generateDisplayUsername, RESERVED_USERNAMES };
+export { validateUsername, generateDisplayUsername };
 
 // Export types
 type AuthType = typeof auth;

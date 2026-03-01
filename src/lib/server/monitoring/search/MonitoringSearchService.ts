@@ -16,21 +16,13 @@ import {
 	episodes,
 	episodeFiles,
 	scoringProfiles,
-	downloadQueue,
-	downloadHistory
+	downloadQueue
 } from '$lib/server/db/schema.js';
 import { eq, and, lte, gte, inArray } from 'drizzle-orm';
 import { getIndexerManager } from '$lib/server/indexers/IndexerManager.js';
 import { getReleaseGrabService } from '$lib/server/downloads/ReleaseGrabService.js';
 import { ReleaseParser } from '$lib/server/indexers/parser/ReleaseParser.js';
-import { strmService, StrmService, getStreamingBaseUrl } from '$lib/server/streaming/index.js';
-import { fileExists } from '$lib/server/downloadClients/import/index.js';
-import { mediaInfoService } from '$lib/server/library/media-info.js';
 import { logger } from '$lib/logging/index.js';
-import { randomUUID } from 'node:crypto';
-import { statSync } from 'node:fs';
-import { unlink } from 'node:fs/promises';
-import { relative, join } from 'node:path';
 import type { SearchCriteria, EnhancedReleaseResult } from '$lib/server/indexers/types';
 import { scoreRelease, isUpgrade } from '$lib/server/scoring/scorer.js';
 import type { ScoringProfile } from '$lib/server/scoring/types.js';
@@ -64,39 +56,6 @@ import {
 } from '../specifications/index.js';
 
 const parser = new ReleaseParser();
-
-type EpisodeFileUpsertInput = Omit<typeof episodeFiles.$inferInsert, 'id'> & { id?: string };
-type EpisodeFileWriteExecutor = Pick<typeof db, 'select' | 'update' | 'insert'>;
-
-/**
- * Upsert episode file by (seriesId, relativePath) and return canonical row id.
- */
-async function upsertEpisodeFileByPath(
-	executor: EpisodeFileWriteExecutor,
-	record: EpisodeFileUpsertInput
-): Promise<string> {
-	const { id: requestedId, ...values } = record;
-
-	const existing = await executor
-		.select({ id: episodeFiles.id })
-		.from(episodeFiles)
-		.where(
-			and(
-				eq(episodeFiles.seriesId, record.seriesId),
-				eq(episodeFiles.relativePath, record.relativePath)
-			)
-		)
-		.limit(1);
-
-	if (existing.length > 0) {
-		await executor.update(episodeFiles).set(values).where(eq(episodeFiles.id, existing[0].id));
-		return existing[0].id;
-	}
-
-	const id = requestedId ?? randomUUID();
-	await executor.insert(episodeFiles).values({ id, ...values });
-	return id;
-}
 
 /**
  * Search result for individual item

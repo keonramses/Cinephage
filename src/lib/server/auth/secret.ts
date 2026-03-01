@@ -1,9 +1,51 @@
 import { randomBytes } from 'node:crypto';
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
+import Database from 'better-sqlite3';
 
 const DATA_DIR = process.env.DATA_DIR || 'data';
 const SECRET_FILE = join(DATA_DIR, '.auth-secret');
+const DEFAULT_BASE_URL = 'http://localhost:5173';
+
+function normalizeUrl(url: string): string {
+	return url.trim().replace(/\/+$/, '');
+}
+
+function getConfiguredExternalUrl(): string | null {
+	const dbPath =
+		process.env.AUTH_DATABASE_URL || process.env.DATABASE_URL || join(DATA_DIR, 'cinephage.db');
+
+	if (!existsSync(dbPath)) {
+		return null;
+	}
+
+	let sqlite: Database.Database | null = null;
+
+	try {
+		sqlite = new Database(dbPath, { readonly: true });
+		const settingsTable = sqlite
+			.prepare(`SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'settings'`)
+			.get();
+
+		if (!settingsTable) {
+			return null;
+		}
+
+		const row = sqlite
+			.prepare(`SELECT "value" FROM "settings" WHERE "key" = 'external_url' LIMIT 1`)
+			.get() as { value?: string } | undefined;
+
+		if (!row?.value) {
+			return null;
+		}
+
+		return normalizeUrl(row.value);
+	} catch {
+		return null;
+	} finally {
+		sqlite?.close();
+	}
+}
 
 /**
  * Get or generate the Better Auth secret
@@ -32,15 +74,26 @@ export function getAuthSecret(): string {
 	mkdirSync(DATA_DIR, { recursive: true });
 	writeFileSync(SECRET_FILE, secret, { mode: 0o600 });
 
-	// eslint-disable-next-line no-console
 	console.log(`[Auth] Generated new auth secret at: ${SECRET_FILE}`);
 	return secret;
 }
 
 /**
  * Get the base URL for Better Auth
- * Falls back to localhost in development
+ * Priority:
+ * 1. BETTER_AUTH_URL environment variable
+ * 2. Saved external URL from system settings
+ * 3. Local development fallback
  */
 export function getBaseURL(): string {
-	return process.env.BETTER_AUTH_URL || 'http://localhost:5173';
+	if (process.env.BETTER_AUTH_URL?.trim()) {
+		return normalizeUrl(process.env.BETTER_AUTH_URL);
+	}
+
+	const externalUrl = getConfiguredExternalUrl();
+	if (externalUrl) {
+		return externalUrl;
+	}
+
+	return DEFAULT_BASE_URL;
 }

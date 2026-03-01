@@ -204,8 +204,6 @@ export function checkApiRateLimit(event: RequestEvent): Response | null {
 		);
 	}
 
-	// Add rate limit headers to successful requests
-	const info = getRateLimitInfo(key, config);
 	return null;
 }
 

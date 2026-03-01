@@ -27,7 +27,6 @@
 	import { resolvePath } from '$lib/utils/routing';
 	import type { UnifiedActivity } from '$lib/types/activity';
 	import { createSSE } from '$lib/sse';
-	import { browser } from '$app/environment';
 
 	let { data } = $props();
 

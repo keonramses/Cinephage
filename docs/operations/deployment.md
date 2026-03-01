@@ -32,7 +32,8 @@ services:
       - PUID=1000 # Your user ID (run: id -u)
       - PGID=1000 # Your group ID (run: id -g)
       - TZ=UTC # Your timezone
-      - ORIGIN=http://localhost:3000 # Your access URL (required if using IP/FQDN)
+      - ORIGIN=http://localhost:3000 # Trusted app origin / CSRF origin
+      - BETTER_AUTH_URL=http://localhost:3000 # Auth callback/redirect base URL
     volumes:
       - ./config:/config
       - /path/to/media:/media # REQUIRED: Your media library
@@ -195,6 +196,7 @@ Set:
 HOST=127.0.0.1
 PORT=3000
 ORIGIN=https://cinephage.yourdomain.com
+BETTER_AUTH_URL=https://cinephage.yourdomain.com
 ```
 
 5. **Start service**

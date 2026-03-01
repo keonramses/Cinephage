@@ -125,7 +125,8 @@ services:
       - PUID=1000 # Your user ID (run: id -u)
       - PGID=1000 # Your group ID (run: id -g)
       - TZ=UTC
-      - ORIGIN=http://localhost:3000
+      - ORIGIN=http://localhost:3000 # Trusted app origin / CSRF origin
+      - BETTER_AUTH_URL=http://localhost:3000 # Auth callback/redirect base URL
     volumes:
       - ./config:/config
       - /path/to/media:/media # CHANGE THIS
@@ -139,6 +140,10 @@ docker compose up -d
 ```
 
 **That's it.** Open http://localhost:3000 and follow the setup wizard.
+
+If you later access Cinephage through a hostname or reverse proxy, update
+`BETTER_AUTH_URL` to that public URL. You can also set the External URL in the UI under
+`Settings > System`.
 
 > **Note:** Your data, config, and logs are stored in `./config` (automatically created). Never mount `/app` as it contains application code.
 >

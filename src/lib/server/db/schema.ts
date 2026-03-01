@@ -28,6 +28,9 @@ export const user = sqliteTable(
 		username: text('username').unique(),
 		displayUsername: text('displayUsername'),
 		role: text('role').default('admin').notNull(),
+		banned: integer('banned').default(0),
+		banReason: text('banReason'),
+		banExpires: text('banExpires'),
 		createdAt: text('createdAt').notNull(),
 		updatedAt: text('updatedAt').notNull()
 	},
@@ -51,6 +54,7 @@ export const session = sqliteTable(
 		expiresAt: text('expiresAt').notNull(),
 		ipAddress: text('ipAddress'),
 		userAgent: text('userAgent'),
+		impersonatedBy: text('impersonatedBy'),
 		createdAt: text('createdAt').notNull(),
 		updatedAt: text('updatedAt').notNull()
 	},
@@ -97,6 +101,42 @@ export type AccountRecord = typeof account.$inferSelect;
 export type NewAccountRecord = typeof account.$inferInsert;
 export type VerificationRecord = typeof verification.$inferSelect;
 export type NewVerificationRecord = typeof verification.$inferInsert;
+
+export const authApiKeys = sqliteTable(
+	'apikey',
+	{
+		id: text('id').primaryKey(),
+		name: text('name'),
+		start: text('start'),
+		prefix: text('prefix'),
+		key: text('key').notNull(),
+		userId: text('userId')
+			.notNull()
+			.references(() => user.id, { onDelete: 'cascade' }),
+		refillInterval: integer('refillInterval'),
+		refillAmount: integer('refillAmount'),
+		lastRefillAt: text('lastRefillAt'),
+		enabled: integer('enabled').default(1),
+		rateLimitEnabled: integer('rateLimitEnabled').default(1),
+		rateLimitTimeWindow: integer('rateLimitTimeWindow'),
+		rateLimitMax: integer('rateLimitMax'),
+		requestCount: integer('requestCount').default(0),
+		remaining: integer('remaining'),
+		lastRequest: text('lastRequest'),
+		expiresAt: text('expiresAt'),
+		createdAt: text('createdAt').notNull(),
+		updatedAt: text('updatedAt').notNull(),
+		permissions: text('permissions'),
+		metadata: text('metadata')
+	},
+	(table) => [index('idx_apikey_user').on(table.userId), index('idx_apikey_key').on(table.key)]
+);
+
+export const authRateLimits = sqliteTable('rateLimit', {
+	key: text('key').primaryKey(),
+	count: integer('count').notNull(),
+	lastRequest: integer('lastRequest').notNull()
+});
 
 export const settings = sqliteTable('settings', {
 	key: text('key').primaryKey(),

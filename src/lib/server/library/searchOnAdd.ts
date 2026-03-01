@@ -18,7 +18,6 @@ import { getIndexerManager } from '$lib/server/indexers/IndexerManager.js';
 import {
 	releaseDecisionService,
 	getReleaseGrabService,
-	getCascadingSearchStrategy,
 	type EpisodeToSearch,
 	type SeriesData as _SeriesData
 } from '$lib/server/downloads/index.js';

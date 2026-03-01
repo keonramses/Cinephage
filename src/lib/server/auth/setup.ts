@@ -26,7 +26,7 @@ export async function isSetupComplete(): Promise<boolean> {
  * Require setup to be incomplete (redirect to dashboard if setup is complete)
  * Use on setup/login pages
  */
-export async function requireSetup(event: RequestEvent): Promise<void> {
+export async function requireSetup(_event: RequestEvent): Promise<void> {
 	const complete = await isSetupComplete();
 
 	if (complete) {

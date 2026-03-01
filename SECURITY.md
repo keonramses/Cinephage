@@ -55,6 +55,7 @@ Cinephage is designed for use on trusted local networks. When exposing the appli
 2. **Configure CSRF Protection**
    - Set the `ORIGIN` environment variable to your access URL
    - Example: `ORIGIN=https://cinephage.example.com`
+   - Set `BETTER_AUTH_URL` to the same public URL for auth callbacks and redirects
 
 3. **Authentication**
    - Cinephage does not currently include built-in authentication

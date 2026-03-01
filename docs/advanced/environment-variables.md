@@ -6,13 +6,14 @@ Complete reference for all environment variables supported by Cinephage.
 
 ## Docker-Specific Variables
 
-| Variable | Description                   | Default               | Required |
-| -------- | ----------------------------- | --------------------- | -------- |
-| `PORT`   | HTTP port to listen on        | 3000                  | No       |
-| `PUID`   | User ID for file permissions  | 1000                  | No       |
-| `PGID`   | Group ID for file permissions | 1000                  | No       |
-| `ORIGIN` | External URL (with protocol)  | http://localhost:3000 | No       |
-| `TZ`     | Timezone                      | UTC                   | No       |
+| Variable          | Description                            | Default                                       | Required |
+| ----------------- | -------------------------------------- | --------------------------------------------- | -------- |
+| `PORT`            | HTTP port to listen on                 | 3000                                          | No       |
+| `PUID`            | User ID for file permissions           | 1000                                          | No       |
+| `PGID`            | Group ID for file permissions          | 1000                                          | No       |
+| `ORIGIN`          | Trusted app origin / CSRF origin       | http://localhost:3000                         | No       |
+| `BETTER_AUTH_URL` | Better Auth callback/redirect base URL | Saved External URL or `http://localhost:5173` | No       |
+| `TZ`              | Timezone                               | UTC                                           | No       |
 
 ### Example Docker Compose
 
@@ -22,6 +23,7 @@ environment:
   PUID: 1000
   PGID: 1000
   ORIGIN: http://192.168.1.100:3000
+  BETTER_AUTH_URL: http://192.168.1.100:3000
   TZ: America/New_York
 ```
 
@@ -29,14 +31,16 @@ environment:
 
 ## Server Configuration (Manual Install)
 
-| Variable   | Description                | Default               |
-| ---------- | -------------------------- | --------------------- |
-| `HOST`     | Bind address               | 0.0.0.0               |
-| `PORT`     | HTTP port                  | 3000                  |
-| `ORIGIN`   | External URL for callbacks | http://localhost:3000 |
-| `TZ`       | Timezone                   | UTC                   |
-| `DATA_DIR` | Database and data location | data                  |
-| `LOG_DIR`  | Log file directory         | logs                  |
+| Variable          | Description                                | Default                                       |
+| ----------------- | ------------------------------------------ | --------------------------------------------- |
+| `HOST`            | Bind address                               | 0.0.0.0                                       |
+| `PORT`            | HTTP port                                  | 3000                                          |
+| `ORIGIN`          | Trusted app origin / CSRF origin           | http://localhost:3000                         |
+| `BETTER_AUTH_URL` | Better Auth callback/redirect base URL     | Saved External URL or `http://localhost:5173` |
+| `PUBLIC_BASE_URL` | Public-facing base URL for generated links | -                                             |
+| `TZ`              | Timezone                                   | UTC                                           |
+| `DATA_DIR`        | Database and data location                 | data                                          |
+| `LOG_DIR`         | Log file directory                         | logs                                          |
 
 Docker image defaults:
 
@@ -44,25 +48,40 @@ Docker image defaults:
 - `LOG_DIR=/config/logs`
 - `INDEXER_DEFINITIONS_PATH=/config/data/indexers/definitions`
 
-### Important: ORIGIN Variable
+### URL Variables
 
-The `ORIGIN` variable is critical for:
+Use the URL variables for different purposes:
 
-- **Streaming** — Generated `.strm` files use this URL
-- **Webhooks** — External services callback to this URL
-- **CSRF protection** — Validates request origins
+- `ORIGIN` — trusted request origin / CSRF protection
+- `BETTER_AUTH_URL` — auth callbacks, redirects, and Better Auth generated links
+- `PUBLIC_BASE_URL` — public-facing links outside auth where supported
 
-**Must include protocol and port:**
+For most deployments, set `ORIGIN` and `BETTER_AUTH_URL` to the same external URL.
+If `BETTER_AUTH_URL` is unset, Cinephage falls back to the saved External URL from
+`Settings > System` when available, then localhost for local bootstrap.
+
+**Values must include protocol and port when needed:**
 
 ```bash
 # Good
 ORIGIN=http://192.168.1.100:3000
 ORIGIN=https://cinephage.example.com
+BETTER_AUTH_URL=http://192.168.1.100:3000
+BETTER_AUTH_URL=https://cinephage.example.com
 
 # Bad
 ORIGIN=192.168.1.100:3000      # Missing protocol
 ORIGIN=http://localhost         # Won't work externally
+BETTER_AUTH_URL=cinephage.example.com  # Missing protocol
 ```
+
+### Better Auth Variables
+
+| Variable                      | Description                                          | Default                                       |
+| ----------------------------- | ---------------------------------------------------- | --------------------------------------------- |
+| `BETTER_AUTH_URL`             | Explicit Better Auth base URL                        | Saved External URL or `http://localhost:5173` |
+| `BETTER_AUTH_TRUSTED_ORIGINS` | Comma-separated extra origins trusted by Better Auth | -                                             |
+| `BETTER_AUTH_SECRET`          | Auth secret (auto-generated and persisted if unset)  | Auto-generated                                |
 
 ---
 
@@ -245,6 +264,7 @@ SHUTDOWN_TIMEOUT=120
 # Server
 PORT=3000
 ORIGIN=http://192.168.1.100:3000
+BETTER_AUTH_URL=http://192.168.1.100:3000
 TZ=America/New_York
 
 # Paths
@@ -304,6 +324,7 @@ services:
     environment:
       # Server
       ORIGIN: http://192.168.1.100:3000
+      BETTER_AUTH_URL: http://192.168.1.100:3000
       TZ: America/New_York
       # Workers (tuned for 4GB RAM)
       WORKER_MAX_STREAMS: 5
