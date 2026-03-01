@@ -5,7 +5,6 @@ import { auth } from '$lib/server/auth/index.js';
 import { encryptApiKey } from '$lib/server/crypto/apiKeyCrypto.js';
 import { db } from '$lib/server/db';
 import { userApiKeySecrets } from '$lib/server/db/schema.js';
-import { eq } from 'drizzle-orm';
 
 // POST /api/settings/system/api-keys - Auto-generate Main and Media Streaming API keys
 export const POST: RequestHandler = async (event) => {

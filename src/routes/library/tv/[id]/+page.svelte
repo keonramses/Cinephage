@@ -305,11 +305,15 @@
 		string,
 		{ found: boolean; grabbed: boolean; releaseName?: string; error?: string }
 	>();
-	let searchingMissing = $state(data.isSearching);
+	let searchingMissing = $state(false);
 	let missingSearchProgress = $state<{ current: number; total: number } | null>(null);
 	let missingSearchResult = $state<{ searched: number; found: number; grabbed: number } | null>(
 		null
 	);
+
+	$effect(() => {
+		searchingMissing = data.isSearching;
+	});
 
 	// Subtitle search state
 	let isSubtitleSearchModalOpen = $state(false);

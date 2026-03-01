@@ -1,4 +1,18 @@
-export { auth, validateUsername, generateDisplayUsername, RESERVED_USERNAMES } from './auth.js';
+export {
+	auth,
+	validateUsername,
+	generateDisplayUsername,
+	repairCurrentUserAdminRole
+} from './auth.js';
+export {
+	HARD_RESERVED_USERNAMES,
+	HARD_RESERVED_USERNAMES as RESERVED_USERNAMES,
+	isHardReservedUsername,
+	isValidUsernameFormat,
+	USERNAME_MAX_LENGTH,
+	USERNAME_MIN_LENGTH,
+	USERNAME_PATTERN
+} from '$lib/auth/username-policy.js';
 export { isSetupComplete, requireSetup, requireAuth } from './setup.js';
 export {
 	checkApiKeyPermission,

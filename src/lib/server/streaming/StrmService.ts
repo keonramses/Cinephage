@@ -10,7 +10,6 @@ import { existsSync, mkdirSync, writeFileSync, unlinkSync, readFileSync } from '
 import { join, dirname, resolve, relative } from 'path';
 import { createChildLogger } from '$lib/logging';
 import { db } from '$lib/server/db';
-import { auth } from '$lib/server/auth/index.js';
 import {
 	movies,
 	series,

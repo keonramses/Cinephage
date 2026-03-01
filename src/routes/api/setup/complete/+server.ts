@@ -3,7 +3,6 @@ import type { RequestHandler } from './$types';
 import { requireAdmin } from '$lib/server/auth/authorization.js';
 import { db } from '$lib/server/db';
 import { settings } from '$lib/server/db/schema';
-import { eq } from 'drizzle-orm';
 
 export const POST: RequestHandler = async (event) => {
 	// Require admin authentication

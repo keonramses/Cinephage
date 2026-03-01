@@ -10,18 +10,22 @@ If deploying without Docker, or if you want to pass the environment variables to
 
 ### Server Configuration
 
-| Variable | Default   | Description                                                 |
-| -------- | --------- | ----------------------------------------------------------- |
-| `HOST`   | `0.0.0.0` | Host address to bind                                        |
-| `PORT`   | `3000`    | Port to listen on                                           |
-| `ORIGIN` | -         | Trusted origin for CSRF (e.g., `http://192.168.1.100:3000`) |
-| `PUID`   | `1000`    | User ID for file permissions (Docker Only)                  |
-| `PGID`   | `1000`    | Group ID for file permissions (Docker Only)                 |
+| Variable          | Default   | Description                                                 |
+| ----------------- | --------- | ----------------------------------------------------------- |
+| `HOST`            | `0.0.0.0` | Host address to bind                                        |
+| `PORT`            | `3000`    | Port to listen on                                           |
+| `ORIGIN`          | -         | Trusted origin for CSRF (e.g., `http://192.168.1.100:3000`) |
+| `BETTER_AUTH_URL` | -         | Explicit auth callback/redirect base URL                    |
+| `PUBLIC_BASE_URL` | -         | Public-facing base URL for generated links                  |
+| `PUID`            | `1000`    | User ID for file permissions (Docker Only)                  |
+| `PGID`            | `1000`    | Group ID for file permissions (Docker Only)                 |
 
 **Notes:**
 
 - Set `HOST` to `127.0.0.1` when behind a reverse proxy on the same machine
-- `ORIGIN` is required for external access
+- `ORIGIN` controls trusted request origin checking
+- `BETTER_AUTH_URL` is recommended for reverse proxy, hostname, or public-domain deployments
+- If `BETTER_AUTH_URL` is unset, Cinephage falls back to the saved External URL from `Settings > System` when available
 
 ### Logging
 

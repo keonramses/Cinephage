@@ -169,7 +169,7 @@ async function getCompletedHistoryEntry(taskType: string): Promise<TaskHistoryEn
  */
 async function getFailedHistoryEntry(
 	taskType: string,
-	error: unknown
+	_error: unknown
 ): Promise<TaskHistoryEntry | undefined> {
 	try {
 		const lastRun = await taskHistoryService.getLastRunForTask(taskType);

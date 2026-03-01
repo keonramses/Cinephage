@@ -22,11 +22,8 @@ import { logger } from '$lib/logging/index.js';
 import { db } from '$lib/server/db/index.js';
 import { episodes } from '$lib/server/db/schema.js';
 import { eq, and, inArray } from 'drizzle-orm';
-import type { SearchCriteria, EnhancedReleaseResult } from '$lib/server/indexers/types';
+import type { SearchCriteria } from '$lib/server/indexers/types';
 import { isSeasonPack } from '$lib/server/indexers/types/release.js';
-import type { ScoringProfile } from '$lib/server/scoring/types.js';
-import { qualityFilter } from '$lib/server/quality/index.js';
-import { scoreRelease } from '$lib/server/scoring/scorer.js';
 
 // Re-export types from CascadingSearchStrategy for consistency
 export interface EpisodeToSearch {
@@ -192,12 +189,6 @@ export class MultiSeasonSearchStrategy {
 		const multiSeasonPacks: MultiSeasonPackGrab[] = [];
 		const grabbedEpisodeIds = new Set<string>();
 
-		// Load scoring profile
-		let profile: ScoringProfile | undefined;
-		if (scoringProfileId) {
-			profile = (await qualityFilter.getProfile(scoringProfileId)) ?? undefined;
-		}
-
 		// Phase 1: Try complete series packs
 		if (seriesMissingPercent >= completeSeriesThreshold) {
 			this.reportProgress(onProgress, {
@@ -212,7 +203,6 @@ export class MultiSeasonSearchStrategy {
 				totalEpisodesInSeries,
 				seasonNumbers,
 				scoringProfileId,
-				profile,
 				searchSource,
 				minScore,
 				onProgress
@@ -310,7 +300,6 @@ export class MultiSeasonSearchStrategy {
 				endSeason: range.endSeason,
 				episodes: rangeEpisodes,
 				scoringProfileId,
-				profile,
 				searchSource,
 				minScore,
 				onProgress
@@ -404,7 +393,6 @@ export class MultiSeasonSearchStrategy {
 				episodes: remainingEpisodes,
 				totalEpisodes: totalInSeason,
 				scoringProfileId,
-				profile,
 				searchSource,
 				minScore,
 				onProgress
@@ -563,7 +551,6 @@ export class MultiSeasonSearchStrategy {
 		totalEpisodesInSeries: number;
 		seasonNumbers: number[];
 		scoringProfileId?: string;
-		profile?: ScoringProfile;
 		searchSource: 'interactive' | 'automatic';
 		minScore: number;
 		onProgress?: (update: SearchProgressUpdate) => void;
@@ -573,8 +560,7 @@ export class MultiSeasonSearchStrategy {
 		queueItemId?: string;
 		episodesCovered: string[];
 	}> {
-		const { seriesData, allEpisodes, seasonNumbers, profile, searchSource, minScore, onProgress } =
-			options;
+		const { seriesData, allEpisodes, seasonNumbers, searchSource, minScore, onProgress } = options;
 		const episodeIds = allEpisodes.map((e) => e.id);
 
 		try {
@@ -718,7 +704,6 @@ export class MultiSeasonSearchStrategy {
 		endSeason: number;
 		episodes: EpisodeToSearch[];
 		scoringProfileId?: string;
-		profile?: ScoringProfile;
 		searchSource: 'interactive' | 'automatic';
 		minScore: number;
 		onProgress?: (update: SearchProgressUpdate) => void;
@@ -728,16 +713,8 @@ export class MultiSeasonSearchStrategy {
 		queueItemId?: string;
 		episodesCovered: string[];
 	}> {
-		const {
-			seriesData,
-			startSeason,
-			endSeason,
-			episodes,
-			profile,
-			searchSource,
-			minScore,
-			onProgress
-		} = options;
+		const { seriesData, startSeason, endSeason, episodes, searchSource, minScore, onProgress } =
+			options;
 		const episodeIds = episodes.map((e) => e.id);
 
 		try {
@@ -852,7 +829,6 @@ export class MultiSeasonSearchStrategy {
 		episodes: EpisodeToSearch[];
 		totalEpisodes: number;
 		scoringProfileId?: string;
-		profile?: ScoringProfile;
 		searchSource: 'interactive' | 'automatic';
 		minScore: number;
 		onProgress?: (update: SearchProgressUpdate) => void;
@@ -862,16 +838,7 @@ export class MultiSeasonSearchStrategy {
 		queueItemId?: string;
 		episodesCovered: string[];
 	}> {
-		const {
-			seriesData,
-			seasonNumber,
-			episodes,
-			totalEpisodes,
-			profile,
-			searchSource,
-			minScore,
-			onProgress
-		} = options;
+		const { seriesData, seasonNumber, episodes, totalEpisodes, searchSource, minScore } = options;
 		const episodeIds = episodes.map((e) => e.id);
 
 		try {

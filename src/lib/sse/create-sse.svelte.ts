@@ -27,7 +27,6 @@ import type {
 } from './types.js';
 import { DEFAULT_SSE_OPTIONS } from './types.js';
 import {
-	getSharedConnection,
 	registerConnection,
 	acquireConnection,
 	releaseConnection,

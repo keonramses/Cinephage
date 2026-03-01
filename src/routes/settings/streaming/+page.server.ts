@@ -1,4 +1,4 @@
-import type { PageServerLoad, Actions } from './$types';
+import type { PageServerLoad } from './$types';
 import { getExtractionCacheManager } from '$lib/server/streaming/nzb/extraction/ExtractionCacheManager';
 
 export const load: PageServerLoad = async () => {
@@ -16,17 +16,4 @@ export const load: PageServerLoad = async () => {
 			maxCacheSizeGB: 0
 		}
 	};
-};
-
-export const actions: Actions = {
-	cleanup: async () => {
-		const cacheManager = getExtractionCacheManager();
-		const result = await cacheManager.runCleanup();
-
-		return {
-			success: true,
-			cleaned: result.cleaned,
-			freedMB: Math.round(result.freedBytes / 1024 / 1024)
-		};
-	}
 };

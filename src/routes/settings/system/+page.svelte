@@ -24,10 +24,14 @@
 	let copiedStreaming = $state(false);
 
 	// External URL form state
-	let externalUrl = $state(data.externalUrl || '');
+	let externalUrl = $state('');
 	let isSavingUrl = $state(false);
 	let saveUrlSuccess = $state(false);
 	let saveUrlError = $state('');
+
+	$effect(() => {
+		externalUrl = data.externalUrl || '';
+	});
 
 	async function copyToClipboard(text: string, type: 'main' | 'streaming') {
 		try {
@@ -250,11 +254,12 @@
 				</div>
 
 				<div class="mt-4">
-					<label class="label">
+					<label class="label" for="system-main-api-key">
 						<span class="label-text">API Key</span>
 					</label>
 					<div class="join w-full">
 						<input
+							id="system-main-api-key"
 							type="text"
 							class="input-bordered input join-item w-full font-mono"
 							value={showMainKey ? data.mainApiKey?.key : maskKey(data.mainApiKey?.key || '')}
@@ -329,11 +334,12 @@
 				</p>
 
 				<div class="mt-4">
-					<label class="label">
+					<label class="label" for="system-streaming-api-key">
 						<span class="label-text">API Key</span>
 					</label>
 					<div class="join w-full">
 						<input
+							id="system-streaming-api-key"
 							type="text"
 							class="input-bordered input join-item w-full font-mono"
 							value={showStreamingKey

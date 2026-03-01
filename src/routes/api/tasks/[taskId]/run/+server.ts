@@ -21,7 +21,7 @@ import { monitoringScheduler } from '$lib/server/monitoring/MonitoringScheduler'
 import { createChildLogger } from '$lib/logging';
 import { db } from '$lib/server/db';
 import { userApiKeySecrets } from '$lib/server/db/schema.js';
-import { eq, and } from 'drizzle-orm';
+import { eq } from 'drizzle-orm';
 import { decryptApiKey } from '$lib/server/crypto/apiKeyCrypto.js';
 import { requireAdmin } from '$lib/server/auth/authorization.js';
 

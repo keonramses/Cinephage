@@ -10,8 +10,6 @@
 	import type {
 		ChannelLineupItemWithDetails,
 		EpgStatus,
-		EpgProgram,
-		EpgProgramWithProgress,
 		UpdateChannelRequest
 	} from '$lib/types/livetv';
 	import { createSSE } from '$lib/sse';

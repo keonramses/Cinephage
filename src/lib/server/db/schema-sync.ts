@@ -13,6 +13,7 @@
 import Database from 'better-sqlite3';
 import { createHash } from 'crypto';
 import { logger } from '$lib/logging';
+import { ensureSoleUserIsAdmin } from '$lib/server/auth/admin-bootstrap.js';
 
 /**
  * Migration definition with metadata for tracking
@@ -80,12 +81,125 @@ interface MigrationDefinition {
  * Version 53: Add iptv_org_config column to livetv_accounts for IPTV-Org provider support
  * Version 54: Add cookies and cookies_expiration_date columns to indexer_status for persistent session storage
  * Version 55: Add health tracking columns to download_clients
- * Version 56: Add Better Auth username-based authentication support
- * Version 57: Add email columns for Better Auth
+ * Version 56: Reserved - retired during Better Auth schema refactor
+ * Version 57: Reserved - retired during Better Auth schema refactor
+ * Version 58: Reserved - retired during Better Auth schema refactor
+ * Version 59: Reserved - retired during Better Auth schema refactor
  * Version 60: Add user_api_key_secrets table for encrypted API key storage
+ * Version 61: Rename Live TV API Key to Media Streaming API Key
  * Version 62: Add role column to user table for RBAC
+ * Version 63: Repair Better Auth schema drift and add missing plugin tables
+ * Version 64: Promote the sole bootstrap user to admin if older auth code created it as user
  */
-export const CURRENT_SCHEMA_VERSION = 62;
+export const CURRENT_SCHEMA_VERSION = 64;
+
+const BETTER_AUTH_TABLE_DEFINITIONS = [
+	{
+		name: 'user',
+		sql: `CREATE TABLE IF NOT EXISTS "user" (
+			"id" text PRIMARY KEY NOT NULL,
+			"name" text,
+			"email" text NOT NULL,
+			"emailVerified" integer DEFAULT 0,
+			"image" text,
+			"username" text UNIQUE,
+			"displayUsername" text,
+			"role" text DEFAULT 'admin' NOT NULL,
+			"banned" integer DEFAULT 0,
+			"banReason" text,
+			"banExpires" date,
+			"createdAt" date NOT NULL,
+			"updatedAt" date NOT NULL
+		)`
+	},
+	{
+		name: 'session',
+		sql: `CREATE TABLE IF NOT EXISTS "session" (
+			"id" text PRIMARY KEY NOT NULL,
+			"userId" text NOT NULL REFERENCES "user"("id") ON DELETE CASCADE,
+			"token" text NOT NULL UNIQUE,
+			"expiresAt" date NOT NULL,
+			"ipAddress" text,
+			"userAgent" text,
+			"impersonatedBy" text,
+			"createdAt" date NOT NULL,
+			"updatedAt" date NOT NULL
+		)`
+	},
+	{
+		name: 'account',
+		sql: `CREATE TABLE IF NOT EXISTS "account" (
+			"id" text PRIMARY KEY NOT NULL,
+			"userId" text NOT NULL REFERENCES "user"("id") ON DELETE CASCADE,
+			"accountId" text NOT NULL,
+			"providerId" text NOT NULL,
+			"accessToken" text,
+			"refreshToken" text,
+			"accessTokenExpiresAt" date,
+			"refreshTokenExpiresAt" date,
+			"scope" text,
+			"idToken" text,
+			"password" text,
+			"createdAt" date NOT NULL,
+			"updatedAt" date NOT NULL
+		)`
+	},
+	{
+		name: 'verification',
+		sql: `CREATE TABLE IF NOT EXISTS "verification" (
+			"id" text PRIMARY KEY NOT NULL,
+			"identifier" text NOT NULL,
+			"value" text NOT NULL,
+			"expiresAt" date NOT NULL,
+			"createdAt" date,
+			"updatedAt" date
+		)`
+	},
+	{
+		name: 'apikey',
+		sql: `CREATE TABLE IF NOT EXISTS "apikey" (
+			"id" text PRIMARY KEY NOT NULL,
+			"name" text,
+			"start" text,
+			"prefix" text,
+			"key" text NOT NULL,
+			"userId" text NOT NULL REFERENCES "user"("id") ON DELETE CASCADE,
+			"refillInterval" integer,
+			"refillAmount" integer,
+			"lastRefillAt" date,
+			"enabled" integer DEFAULT 1,
+			"rateLimitEnabled" integer DEFAULT 1,
+			"rateLimitTimeWindow" integer,
+			"rateLimitMax" integer,
+			"requestCount" integer DEFAULT 0,
+			"remaining" integer,
+			"lastRequest" date,
+			"expiresAt" date,
+			"createdAt" date NOT NULL,
+			"updatedAt" date NOT NULL,
+			"permissions" text,
+			"metadata" text
+		)`
+	},
+	{
+		name: 'rateLimit',
+		sql: `CREATE TABLE IF NOT EXISTS "rateLimit" (
+			"key" text PRIMARY KEY NOT NULL,
+			"count" integer NOT NULL,
+			"lastRequest" integer NOT NULL
+		)`
+	}
+] as const;
+
+const BETTER_AUTH_INDEX_DEFINITIONS = [
+	`CREATE INDEX IF NOT EXISTS "idx_session_user" ON "session" ("userId")`,
+	`CREATE INDEX IF NOT EXISTS "idx_account_user" ON "account" ("userId")`,
+	`CREATE UNIQUE INDEX IF NOT EXISTS "idx_account_provider" ON "account" ("providerId", "accountId")`,
+	`CREATE UNIQUE INDEX IF NOT EXISTS "idx_user_email" ON "user" ("email")`,
+	`CREATE UNIQUE INDEX IF NOT EXISTS "idx_user_username" ON "user" ("username")`,
+	`CREATE INDEX IF NOT EXISTS "idx_apikey_user" ON "apikey" ("userId")`,
+	`CREATE INDEX IF NOT EXISTS "idx_apikey_key" ON "apikey" ("key")`
+] as const;
 
 /**
  * All table definitions with CREATE TABLE IF NOT EXISTS
@@ -96,54 +210,7 @@ const TABLE_DEFINITIONS: string[] = [
 
 	// Better Auth tables - we manage these to have full control over schema
 	// Better Auth expects camelCase column names
-	`CREATE TABLE IF NOT EXISTS "user" (
-		"id" text PRIMARY KEY NOT NULL,
-		"name" text,
-		"email" text NOT NULL,
-		"emailVerified" integer DEFAULT 0,
-		"image" text,
-		"username" text UNIQUE,
-		"displayUsername" text,
-		"role" text DEFAULT 'admin' NOT NULL,
-		"createdAt" date NOT NULL,
-		"updatedAt" date NOT NULL
-	)`,
-
-	`CREATE TABLE IF NOT EXISTS "session" (
-		"id" text PRIMARY KEY NOT NULL,
-		"userId" text NOT NULL REFERENCES "user"("id") ON DELETE CASCADE,
-		"token" text NOT NULL UNIQUE,
-		"expiresAt" date NOT NULL,
-		"ipAddress" text,
-		"userAgent" text,
-		"createdAt" date NOT NULL,
-		"updatedAt" date NOT NULL
-	)`,
-
-	`CREATE TABLE IF NOT EXISTS "account" (
-		"id" text PRIMARY KEY NOT NULL,
-		"userId" text NOT NULL REFERENCES "user"("id") ON DELETE CASCADE,
-		"accountId" text NOT NULL,
-		"providerId" text NOT NULL,
-		"accessToken" text,
-		"refreshToken" text,
-		"accessTokenExpiresAt" date,
-		"refreshTokenExpiresAt" date,
-		"scope" text,
-		"idToken" text,
-		"password" text,
-		"createdAt" date NOT NULL,
-		"updatedAt" date NOT NULL
-	)`,
-
-	`CREATE TABLE IF NOT EXISTS "verification" (
-		"id" text PRIMARY KEY NOT NULL,
-		"identifier" text NOT NULL,
-		"value" text NOT NULL,
-		"expiresAt" date NOT NULL,
-		"createdAt" date,
-		"updatedAt" date
-	)`,
+	...BETTER_AUTH_TABLE_DEFINITIONS.map(({ sql }) => sql),
 
 	`CREATE TABLE IF NOT EXISTS "settings" (
 		"key" text PRIMARY KEY NOT NULL,
@@ -159,9 +226,6 @@ const TABLE_DEFINITIONS: string[] = [
 		"execution_time_ms" integer,
 		"success" integer DEFAULT 1
 	)`,
-
-	// NOTE: Auth tables (user, session, account, verification) are managed by Better Auth
-	// Do not define them here - Better Auth creates them automatically,
 
 	`CREATE TABLE IF NOT EXISTS "indexer_definitions" (
 		"id" text PRIMARY KEY NOT NULL,
@@ -1155,13 +1219,6 @@ const TABLE_DEFINITIONS: string[] = [
  * Index definitions for performance
  */
 const INDEX_DEFINITIONS: string[] = [
-	// Better Auth indexes
-	`CREATE INDEX IF NOT EXISTS "idx_session_user" ON "session" ("userId")`,
-	`CREATE INDEX IF NOT EXISTS "idx_account_user" ON "account" ("userId")`,
-	`CREATE UNIQUE INDEX IF NOT EXISTS "idx_account_provider" ON "account" ("providerId", "accountId")`,
-	`CREATE INDEX IF NOT EXISTS "idx_user_email" ON "user" ("email")`,
-	`CREATE UNIQUE INDEX IF NOT EXISTS "idx_user_username" ON "user" ("username")`,
-
 	`CREATE INDEX IF NOT EXISTS "idx_indexer_definitions_protocol" ON "indexer_definitions" ("protocol")`,
 	`CREATE INDEX IF NOT EXISTS "idx_indexer_definitions_type" ON "indexer_definitions" ("type")`,
 	`CREATE INDEX IF NOT EXISTS "idx_indexers_definition" ON "indexers" ("definition_id")`,
@@ -1262,14 +1319,7 @@ const INDEX_DEFINITIONS: string[] = [
 	`CREATE INDEX IF NOT EXISTS "idx_alternate_titles_source" ON "alternate_titles" ("source")`,
 	// Activity details indexes
 	`CREATE INDEX IF NOT EXISTS "idx_activity_details_activity" ON "activity_details" ("activity_id")`,
-	`CREATE INDEX IF NOT EXISTS "idx_activity_details_replaced_movie" ON "activity_details" ("replaced_movie_file_id")`,
-	// Better Auth indexes
-	`CREATE INDEX IF NOT EXISTS "idx_session_user" ON "session" ("user_id")`,
-	`CREATE INDEX IF NOT EXISTS "idx_account_user" ON "account" ("user_id")`,
-	`CREATE UNIQUE INDEX IF NOT EXISTS "idx_account_provider" ON "account" ("provider_id", "account_id")`,
-	`CREATE INDEX IF NOT EXISTS "idx_user_settings_user" ON "user_settings" ("user_id")`,
-	`CREATE UNIQUE INDEX IF NOT EXISTS "idx_user_email" ON "user" ("email")`,
-	`CREATE UNIQUE INDEX IF NOT EXISTS "idx_user_username" ON "user" ("username")`
+	`CREATE INDEX IF NOT EXISTS "idx_activity_details_replaced_movie" ON "activity_details" ("replaced_movie_file_id")`
 ];
 
 /**
@@ -4175,6 +4225,30 @@ const MIGRATIONS: MigrationDefinition[] = [
 		}
 	},
 
+	// Versions 56-59 were used during the initial Better Auth rollout and later retired
+	// when auth schema ownership moved into the embedded table definitions above.
+	// Keep them as explicit no-ops so the migration ledger remains contiguous.
+	{
+		version: 56,
+		name: 'reserved_better_auth_refactor_v56',
+		apply: () => {}
+	},
+	{
+		version: 57,
+		name: 'reserved_better_auth_refactor_v57',
+		apply: () => {}
+	},
+	{
+		version: 58,
+		name: 'reserved_better_auth_refactor_v58',
+		apply: () => {}
+	},
+	{
+		version: 59,
+		name: 'reserved_better_auth_refactor_v59',
+		apply: () => {}
+	},
+
 	// Migration 60: Add user_api_key_secrets table for encrypted API key storage
 	{
 		version: 60,
@@ -4319,6 +4393,120 @@ const MIGRATIONS: MigrationDefinition[] = [
 				logger.info('[SchemaSync] user table not found, skipping migration');
 			}
 		}
+	},
+
+	// Version 63: Repair Better Auth schema drift and add missing plugin tables
+	{
+		version: 63,
+		name: 'repair_better_auth_schema',
+		apply: (sqlite) => {
+			const authTables = ['user', 'session', 'account', 'verification', 'apikey', 'rateLimit'];
+			const authHasData = authTables.some((tableName) => getTableRowCount(sqlite, tableName) > 0);
+
+			const userColumns = [
+				'email',
+				'emailVerified',
+				'image',
+				'username',
+				'displayUsername',
+				'role',
+				'banned',
+				'banReason',
+				'banExpires',
+				'createdAt',
+				'updatedAt'
+			];
+			const userNeedsRepair =
+				tableExists(sqlite, 'user') &&
+				userColumns.some((columnName) => !columnExists(sqlite, 'user', columnName));
+
+			const sessionNeedsRepair =
+				tableExists(sqlite, 'session') && !columnExists(sqlite, 'session', 'impersonatedBy');
+			const apikeyMissing = !tableExists(sqlite, 'apikey');
+			const rateLimitMissing = !tableExists(sqlite, 'rateLimit');
+
+			if (
+				!authHasData &&
+				(userNeedsRepair || sessionNeedsRepair || apikeyMissing || rateLimitMissing)
+			) {
+				logger.info(
+					'[SchemaSync] Recreating empty Better Auth schema with complete table definitions'
+				);
+				recreateBetterAuthSchema(sqlite);
+				return;
+			}
+
+			createBetterAuthTables(sqlite);
+
+			ensureColumn(sqlite, 'user', 'name', '"name" text');
+			ensureColumn(sqlite, 'user', 'email', '"email" text');
+			ensureColumn(sqlite, 'user', 'emailVerified', '"emailVerified" integer DEFAULT 0');
+			ensureColumn(sqlite, 'user', 'image', '"image" text');
+			ensureColumn(sqlite, 'user', 'username', '"username" text');
+			ensureColumn(sqlite, 'user', 'displayUsername', '"displayUsername" text');
+			ensureColumn(sqlite, 'user', 'role', '"role" text DEFAULT \'admin\' NOT NULL');
+			ensureColumn(sqlite, 'user', 'banned', '"banned" integer DEFAULT 0');
+			ensureColumn(sqlite, 'user', 'banReason', '"banReason" text');
+			ensureColumn(sqlite, 'user', 'banExpires', '"banExpires" date');
+			ensureColumn(sqlite, 'user', 'createdAt', '"createdAt" date');
+			ensureColumn(sqlite, 'user', 'updatedAt', '"updatedAt" date');
+
+			ensureColumn(sqlite, 'session', 'impersonatedBy', '"impersonatedBy" text');
+
+			ensureColumn(sqlite, 'apikey', 'name', '"name" text');
+			ensureColumn(sqlite, 'apikey', 'start', '"start" text');
+			ensureColumn(sqlite, 'apikey', 'prefix', '"prefix" text');
+			ensureColumn(sqlite, 'apikey', 'key', '"key" text');
+			ensureColumn(sqlite, 'apikey', 'userId', '"userId" text');
+			ensureColumn(sqlite, 'apikey', 'refillInterval', '"refillInterval" integer');
+			ensureColumn(sqlite, 'apikey', 'refillAmount', '"refillAmount" integer');
+			ensureColumn(sqlite, 'apikey', 'lastRefillAt', '"lastRefillAt" date');
+			ensureColumn(sqlite, 'apikey', 'enabled', '"enabled" integer DEFAULT 1');
+			ensureColumn(sqlite, 'apikey', 'rateLimitEnabled', '"rateLimitEnabled" integer DEFAULT 1');
+			ensureColumn(sqlite, 'apikey', 'rateLimitTimeWindow', '"rateLimitTimeWindow" integer');
+			ensureColumn(sqlite, 'apikey', 'rateLimitMax', '"rateLimitMax" integer');
+			ensureColumn(sqlite, 'apikey', 'requestCount', '"requestCount" integer DEFAULT 0');
+			ensureColumn(sqlite, 'apikey', 'remaining', '"remaining" integer');
+			ensureColumn(sqlite, 'apikey', 'lastRequest', '"lastRequest" date');
+			ensureColumn(sqlite, 'apikey', 'expiresAt', '"expiresAt" date');
+			ensureColumn(sqlite, 'apikey', 'createdAt', '"createdAt" date');
+			ensureColumn(sqlite, 'apikey', 'updatedAt', '"updatedAt" date');
+			ensureColumn(sqlite, 'apikey', 'permissions', '"permissions" text');
+			ensureColumn(sqlite, 'apikey', 'metadata', '"metadata" text');
+
+			ensureColumn(sqlite, 'rateLimit', 'count', '"count" integer NOT NULL DEFAULT 0');
+			ensureColumn(sqlite, 'rateLimit', 'lastRequest', '"lastRequest" integer NOT NULL DEFAULT 0');
+
+			if (tableExists(sqlite, 'user')) {
+				sqlite
+					.prepare(`UPDATE "user" SET "role" = 'admin' WHERE "role" IS NULL OR "role" = ''`)
+					.run();
+				sqlite.prepare(`UPDATE "user" SET "emailVerified" = 0 WHERE "emailVerified" IS NULL`).run();
+				sqlite.prepare(`UPDATE "user" SET "banned" = 0 WHERE "banned" IS NULL`).run();
+			}
+
+			if (tableExists(sqlite, 'apikey')) {
+				sqlite.prepare(`UPDATE "apikey" SET "enabled" = 1 WHERE "enabled" IS NULL`).run();
+				sqlite
+					.prepare(`UPDATE "apikey" SET "rateLimitEnabled" = 1 WHERE "rateLimitEnabled" IS NULL`)
+					.run();
+				sqlite.prepare(`UPDATE "apikey" SET "requestCount" = 0 WHERE "requestCount" IS NULL`).run();
+			}
+
+			createBetterAuthIndexes(sqlite);
+			logger.info('[SchemaSync] Better Auth schema repair complete');
+		}
+	},
+
+	// Version 64: Promote the sole bootstrap user to admin if older auth code created it as user
+	{
+		version: 64,
+		name: 'ensure_bootstrap_user_is_admin',
+		apply: (sqlite) => {
+			if (ensureSoleUserIsAdmin(sqlite)) {
+				logger.info('[SchemaSync] Ensured the sole bootstrap user has admin role');
+			}
+		}
 	}
 ];
 
@@ -4362,6 +4550,56 @@ function tableExists(sqlite: Database.Database, tableName: string): boolean {
 function columnExists(sqlite: Database.Database, tableName: string, columnName: string): boolean {
 	const result = sqlite.prepare(`PRAGMA table_info(${tableName})`).all() as { name: string }[];
 	return result.some((col) => col.name === columnName);
+}
+
+function ensureColumn(
+	sqlite: Database.Database,
+	tableName: string,
+	columnName: string,
+	columnDefinition: string
+): void {
+	if (!tableExists(sqlite, tableName) || columnExists(sqlite, tableName, columnName)) {
+		return;
+	}
+
+	sqlite.prepare(`ALTER TABLE "${tableName}" ADD COLUMN ${columnDefinition}`).run();
+	logger.info(`[SchemaSync] Added ${tableName}.${columnName}`);
+}
+
+function getTableRowCount(sqlite: Database.Database, tableName: string): number {
+	if (!tableExists(sqlite, tableName)) {
+		return 0;
+	}
+
+	const result = sqlite.prepare(`SELECT COUNT(*) as count FROM "${tableName}"`).get() as {
+		count: number;
+	};
+	return result.count;
+}
+
+function createBetterAuthTables(sqlite: Database.Database): void {
+	for (const { sql } of BETTER_AUTH_TABLE_DEFINITIONS) {
+		sqlite.prepare(sql).run();
+	}
+}
+
+function createBetterAuthIndexes(sqlite: Database.Database): void {
+	for (const sql of BETTER_AUTH_INDEX_DEFINITIONS) {
+		sqlite.prepare(sql).run();
+	}
+}
+
+function recreateBetterAuthSchema(sqlite: Database.Database): void {
+	const dropOrder = ['apikey', 'account', 'session', 'verification', 'rateLimit', 'user'];
+
+	for (const tableName of dropOrder) {
+		if (tableExists(sqlite, tableName)) {
+			sqlite.prepare(`DROP TABLE "${tableName}"`).run();
+		}
+	}
+
+	createBetterAuthTables(sqlite);
+	createBetterAuthIndexes(sqlite);
 }
 
 /**
@@ -4461,7 +4699,15 @@ function cleanupLiveTvTables(sqlite: Database.Database): void {
  * Critical columns that must exist for the app to function.
  * Used to verify schema integrity after migrations.
  */
+const CRITICAL_TABLES = ['user', 'session', 'account', 'verification', 'apikey', 'rateLimit'];
+
 const CRITICAL_COLUMNS: Record<string, string[]> = {
+	user: ['id', 'email', 'username', 'displayUsername', 'role', 'banned', 'createdAt', 'updatedAt'],
+	session: ['id', 'userId', 'token', 'expiresAt', 'impersonatedBy', 'createdAt', 'updatedAt'],
+	account: ['id', 'userId', 'accountId', 'providerId', 'createdAt', 'updatedAt'],
+	verification: ['id', 'identifier', 'value', 'expiresAt'],
+	apikey: ['id', 'key', 'userId', 'createdAt', 'updatedAt'],
+	rateLimit: ['key', 'count', 'lastRequest'],
 	download_clients: [
 		'id',
 		'name',
@@ -4557,6 +4803,14 @@ const MIGRATION_COLUMN_MAP: Record<number, Array<{ table: string; column: string
 		{ table: 'download_clients', column: 'last_failure' },
 		{ table: 'download_clients', column: 'last_failure_message' },
 		{ table: 'download_clients', column: 'last_checked_at' }
+	],
+	63: [
+		{ table: 'user', column: 'email' },
+		{ table: 'user', column: 'displayUsername' },
+		{ table: 'user', column: 'banned' },
+		{ table: 'session', column: 'impersonatedBy' },
+		{ table: 'apikey', column: 'key' },
+		{ table: 'rateLimit', column: 'lastRequest' }
 	]
 };
 
@@ -4594,10 +4848,14 @@ function detectAndFixSchemaDrift(sqlite: Database.Database): void {
 function verifySchemaIntegrity(sqlite: Database.Database): void {
 	const issues: string[] = [];
 
+	for (const table of CRITICAL_TABLES) {
+		if (!tableExists(sqlite, table)) {
+			issues.push(`Missing table: ${table}`);
+		}
+	}
+
 	for (const [table, columns] of Object.entries(CRITICAL_COLUMNS)) {
 		if (!tableExists(sqlite, table)) {
-			// Some tables may not exist yet (e.g., if no movies added)
-			// Only flag as issue if other parts of the table exist
 			continue;
 		}
 
@@ -4741,10 +4999,13 @@ export function syncSchema(sqlite: Database.Database): void {
 		}
 	}
 
-	// 8. Verify schema integrity
+	// 8. Ensure Better Auth indexes exist after any auth schema repair
+	createBetterAuthIndexes(sqlite);
+
+	// 9. Verify schema integrity
 	verifySchemaIntegrity(sqlite);
 
-	// 9. Update legacy schema_version for backward compatibility
+	// 10. Update legacy schema_version for backward compatibility
 	setSchemaVersion(sqlite, CURRENT_SCHEMA_VERSION);
 
 	logger.info('[SchemaSync] Schema synchronization complete', {

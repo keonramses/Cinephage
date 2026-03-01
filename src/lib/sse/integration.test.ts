@@ -5,7 +5,7 @@
  * Run these tests with: npm run test:unit src/lib/sse/integration.test.ts
  */
 
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect } from 'vitest';
 import type { TaskStreamEvents } from '$lib/types/sse/events/task-events.js';
 import type { AccountStreamEvents } from '$lib/types/sse/events/livetv-account-events.js';
 import type { ChannelStreamEvents } from '$lib/types/sse/events/livetv-channel-events.js';

@@ -28,9 +28,6 @@
 		Radio,
 		Calendar,
 		Activity,
-		Loader2,
-		Wifi,
-		WifiOff,
 		FileQuestion,
 		LogOut,
 		Server,
@@ -40,6 +37,15 @@
 	let { children } = $props();
 	let isMobileDrawerOpen = $state(false);
 	let isLoggingOut = $state(false);
+
+	function usesFocusedLayout(pathname: string): boolean {
+		return (
+			pathname === '/setup' ||
+			pathname.startsWith('/setup/') ||
+			pathname === '/login' ||
+			pathname.startsWith('/login/')
+		);
+	}
 
 	function closeMobileDrawer(): void {
 		isMobileDrawerOpen = false;
@@ -114,179 +120,196 @@
 	];
 
 	const appVersion = env.PUBLIC_APP_VERSION?.trim();
+
+	const useFocusedLayout = $derived(usesFocusedLayout($page.url.pathname));
+
+	$effect(() => {
+		if (useFocusedLayout) {
+			closeMobileDrawer();
+		}
+	});
 </script>
 
 <svelte:head>
 	<link rel="icon" type="image/png" href="/logo.png" />
 </svelte:head>
 
-<div class="drawer lg:drawer-open">
-	<input id="main-drawer" type="checkbox" class="drawer-toggle" bind:checked={isMobileDrawerOpen} />
-	<div class="drawer-content flex min-h-screen flex-col bg-base-100 text-base-content">
-		<!-- Mobile Header -->
-		<header class="navbar sticky top-0 z-50 bg-base-200 shadow-sm lg:hidden">
-			<div class="flex-none">
-				<label for="main-drawer" aria-label="open sidebar" class="btn btn-square btn-ghost">
-					<Menu class="h-6 w-6" />
-				</label>
-			</div>
-			<div class="mx-2 flex min-w-0 flex-1 items-center gap-2 px-2">
-				<img src="/logo.png" alt="" class="h-7 w-7" />
-				<div class="relative min-w-0">
-					<span class="block truncate pr-10 text-xl leading-tight font-bold">Cinephage</span>
-					<span
-						class="absolute -top-1 right-0 badge h-4 min-h-4 px-1 badge-xs font-semibold badge-warning"
-					>
-						Alpha
-					</span>
+{#if useFocusedLayout}
+	{@render children()}
+{:else}
+	<div class="drawer lg:drawer-open">
+		<input
+			id="main-drawer"
+			type="checkbox"
+			class="drawer-toggle"
+			bind:checked={isMobileDrawerOpen}
+		/>
+		<div class="drawer-content flex min-h-screen flex-col bg-base-100 text-base-content">
+			<!-- Mobile Header -->
+			<header class="navbar sticky top-0 z-50 bg-base-200 shadow-sm lg:hidden">
+				<div class="flex-none">
+					<label for="main-drawer" aria-label="open sidebar" class="btn btn-square btn-ghost">
+						<Menu class="h-6 w-6" />
+					</label>
 				</div>
-			</div>
-			<div class="flex flex-none items-center gap-2">
-				<ThemeSelector showLabel={false} />
-			</div>
-		</header>
-
-		<!-- Page Content -->
-		<main class="w-full grow p-4">
-			{@render children()}
-		</main>
-	</div>
-
-	<!-- Sidebar -->
-	<div class="drawer-side z-40">
-		<label for="main-drawer" aria-label="close sidebar" class="drawer-overlay"></label>
-		<aside
-			class="flex min-h-full flex-col overflow-x-hidden bg-base-200 transition-[width] duration-300 ease-in-out
-	            {layoutState.isSidebarExpanded ? 'w-64' : 'w-20'}"
-		>
-			<!-- Sidebar Header -->
-			<div
-				class="relative flex h-16 items-center border-b border-base-300"
-				class:px-4={layoutState.isSidebarExpanded}
-				class:px-2={!layoutState.isSidebarExpanded}
-				class:justify-between={layoutState.isSidebarExpanded}
-				class:justify-center={!layoutState.isSidebarExpanded}
-			>
-				{#if layoutState.isSidebarExpanded}
-					<div class="flex min-w-0 items-center gap-2">
-						<img src="/logo.png" alt="" class="h-7 w-7" />
-						<div class="relative min-w-0">
-							<span class="block truncate pr-10 text-xl leading-tight font-bold">Cinephage</span>
-							<span
-								class="absolute -top-1 right-0 badge h-4 min-h-4 px-1 badge-xs font-semibold badge-warning"
-							>
-								Alpha
-							</span>
-						</div>
-					</div>
-				{:else}
-					<div class="relative">
-						<img src="/logo.png" alt="Cinephage" class="h-8 w-8" />
+				<div class="mx-2 flex min-w-0 flex-1 items-center gap-2 px-2">
+					<img src="/logo.png" alt="" class="h-7 w-7" />
+					<div class="relative min-w-0">
+						<span class="block truncate pr-10 text-xl leading-tight font-bold">Cinephage</span>
 						<span
-							class="absolute right-0 bottom-0 badge h-4 min-h-4 px-1 badge-xs font-semibold badge-warning"
+							class="absolute -top-1 right-0 badge h-4 min-h-4 px-1 badge-xs font-semibold badge-warning"
 						>
-							A
+							Alpha
 						</span>
 					</div>
-				{/if}
-				<button
-					class="btn hidden btn-square btn-ghost btn-sm lg:flex"
-					class:absolute={!layoutState.isSidebarExpanded}
-					class:right-1={!layoutState.isSidebarExpanded}
-					onclick={() => layoutState.toggleSidebar()}
-					aria-label="Toggle Sidebar"
+				</div>
+				<div class="flex flex-none items-center gap-2">
+					<ThemeSelector showLabel={false} />
+				</div>
+			</header>
+
+			<!-- Page Content -->
+			<main class="w-full grow p-4">
+				{@render children()}
+			</main>
+		</div>
+
+		<!-- Sidebar -->
+		<div class="drawer-side z-40">
+			<label for="main-drawer" aria-label="close sidebar" class="drawer-overlay"></label>
+			<aside
+				class="flex min-h-full flex-col overflow-x-hidden bg-base-200 transition-[width] duration-300 ease-in-out
+		            {layoutState.isSidebarExpanded ? 'w-64' : 'w-20'}"
+			>
+				<!-- Sidebar Header -->
+				<div
+					class="relative flex h-16 items-center border-b border-base-300"
+					class:px-4={layoutState.isSidebarExpanded}
+					class:px-2={!layoutState.isSidebarExpanded}
+					class:justify-between={layoutState.isSidebarExpanded}
+					class:justify-center={!layoutState.isSidebarExpanded}
 				>
 					{#if layoutState.isSidebarExpanded}
-						<ChevronLeft class="h-5 w-5" />
+						<div class="flex min-w-0 items-center gap-2">
+							<img src="/logo.png" alt="" class="h-7 w-7" />
+							<div class="relative min-w-0">
+								<span class="block truncate pr-10 text-xl leading-tight font-bold">Cinephage</span>
+								<span
+									class="absolute -top-1 right-0 badge h-4 min-h-4 px-1 badge-xs font-semibold badge-warning"
+								>
+									Alpha
+								</span>
+							</div>
+						</div>
 					{:else}
-						<ChevronRight class="h-5 w-5" />
+						<div class="relative">
+							<img src="/logo.png" alt="Cinephage" class="h-8 w-8" />
+							<span
+								class="absolute right-0 bottom-0 badge h-4 min-h-4 px-1 badge-xs font-semibold badge-warning"
+							>
+								A
+							</span>
+						</div>
 					{/if}
-				</button>
-			</div>
+					<button
+						class="btn hidden btn-square btn-ghost btn-sm lg:flex"
+						class:absolute={!layoutState.isSidebarExpanded}
+						class:right-1={!layoutState.isSidebarExpanded}
+						onclick={() => layoutState.toggleSidebar()}
+						aria-label="Toggle Sidebar"
+					>
+						{#if layoutState.isSidebarExpanded}
+							<ChevronLeft class="h-5 w-5" />
+						{:else}
+							<ChevronRight class="h-5 w-5" />
+						{/if}
+					</button>
+				</div>
 
-			<!-- Navigation -->
-			<ul class="menu grow flex-nowrap gap-2 p-2">
-				{#each menuItems as item (item.label)}
-					<li>
-						{#if item.children}
-							{#if layoutState.isSidebarExpanded}
-								<details>
-									<summary class="flex items-center gap-4 px-4 py-3">
+				<!-- Navigation -->
+				<ul class="menu grow flex-nowrap gap-2 p-2">
+					{#each menuItems as item (item.label)}
+						<li>
+							{#if item.children}
+								{#if layoutState.isSidebarExpanded}
+									<details>
+										<summary class="flex items-center gap-4 px-4 py-3">
+											<item.icon class="h-5 w-5 shrink-0" />
+											<span class="truncate">{item.label}</span>
+										</summary>
+										<ul>
+											{#each item.children as child (child.href)}
+												<li>
+													<a
+														href={buildNavHref(child.href)}
+														class="flex items-center gap-4 px-4 py-2"
+														class:active={$page.url.pathname === child.href}
+														onclick={(event) => handleNavClick(event, child.href)}
+													>
+														{#if child.icon}<child.icon class="h-4 w-4 shrink-0" />{/if}
+														<span class="truncate">{child.label}</span>
+													</a>
+												</li>
+											{/each}
+										</ul>
+									</details>
+								{:else}
+									<button
+										class="flex items-center gap-4 px-4 py-3"
+										onclick={() => layoutState.toggleSidebar()}
+										title={item.label}
+									>
 										<item.icon class="h-5 w-5 shrink-0" />
-										<span class="truncate">{item.label}</span>
-									</summary>
-									<ul>
-										{#each item.children as child (child.href)}
-											<li>
-												<a
-													href={buildNavHref(child.href)}
-													class="flex items-center gap-4 px-4 py-2"
-													class:active={$page.url.pathname === child.href}
-													onclick={(event) => handleNavClick(event, child.href)}
-												>
-													{#if child.icon}<child.icon class="h-4 w-4 shrink-0" />{/if}
-													<span class="truncate">{child.label}</span>
-												</a>
-											</li>
-										{/each}
-									</ul>
-								</details>
+									</button>
+								{/if}
 							{:else}
-								<button
+								<a
+									href={buildNavHref(item.href)}
 									class="flex items-center gap-4 px-4 py-3"
-									onclick={() => layoutState.toggleSidebar()}
-									title={item.label}
+									class:active={$page.url.pathname === item.href}
+									title={!layoutState.isSidebarExpanded ? item.label : ''}
+									onclick={(event) => handleNavClick(event, item.href)}
 								>
 									<item.icon class="h-5 w-5 shrink-0" />
-								</button>
+									{#if layoutState.isSidebarExpanded}
+										<span class="truncate">{item.label}</span>
+									{/if}
+								</a>
 							{/if}
-						{:else}
-							<a
-								href={buildNavHref(item.href)}
-								class="flex items-center gap-4 px-4 py-3"
-								class:active={$page.url.pathname === item.href}
-								title={!layoutState.isSidebarExpanded ? item.label : ''}
-								onclick={(event) => handleNavClick(event, item.href)}
-							>
-								<item.icon class="h-5 w-5 shrink-0" />
-								{#if layoutState.isSidebarExpanded}
-									<span class="truncate">{item.label}</span>
-								{/if}
-							</a>
-						{/if}
-					</li>
-				{/each}
-			</ul>
+						</li>
+					{/each}
+				</ul>
 
-			<!-- Sidebar Footer -->
-			<div class="flex flex-col items-center border-t border-base-300 p-2">
-				{#if appVersion}
-					<div class="mb-2 text-xs text-base-content/50">{appVersion}</div>
-				{/if}
-				<button
-					class="btn mb-2 w-full btn-ghost btn-sm"
-					class:justify-center={!layoutState.isSidebarExpanded}
-					onclick={handleLogout}
-					disabled={isLoggingOut}
-					title="Logout"
-				>
-					{#if isLoggingOut}
-						<span class="loading loading-xs loading-spinner"></span>
-					{:else}
-						<LogOut class="h-4 w-4" />
+				<!-- Sidebar Footer -->
+				<div class="flex flex-col items-center border-t border-base-300 p-2">
+					{#if appVersion}
+						<div class="mb-2 text-xs text-base-content/50">{appVersion}</div>
 					{/if}
-					{#if layoutState.isSidebarExpanded}
-						<span class="ml-2">Logout</span>
-					{/if}
-				</button>
-				<ThemeSelector
-					class={layoutState.isSidebarExpanded ? 'dropdown-top' : 'dropdown-right'}
-					showLabel={layoutState.isSidebarExpanded}
-				/>
-			</div>
-		</aside>
+					<button
+						class="btn mb-2 w-full btn-ghost btn-sm"
+						class:justify-center={!layoutState.isSidebarExpanded}
+						onclick={handleLogout}
+						disabled={isLoggingOut}
+						title="Logout"
+					>
+						{#if isLoggingOut}
+							<span class="loading loading-xs loading-spinner"></span>
+						{:else}
+							<LogOut class="h-4 w-4" />
+						{/if}
+						{#if layoutState.isSidebarExpanded}
+							<span class="ml-2">Logout</span>
+						{/if}
+					</button>
+					<ThemeSelector
+						class={layoutState.isSidebarExpanded ? 'dropdown-top' : 'dropdown-right'}
+						showLabel={layoutState.isSidebarExpanded}
+					/>
+				</div>
+			</aside>
+		</div>
 	</div>
-</div>
+{/if}
 
 <!-- Global Toast Notifications -->
 <Toasts />

@@ -42,7 +42,7 @@
 	let scanSuccess = $state<{ message: string; unmatchedCount: number } | null>(null);
 
 	// SSE Connection for library scan progress
-	const sse = createSSE<{
+	createSSE<{
 		progress: ScanProgress;
 		scanComplete: { results?: Array<{ unmatchedFiles?: number }> };
 		scanError: { error?: { message?: string } };

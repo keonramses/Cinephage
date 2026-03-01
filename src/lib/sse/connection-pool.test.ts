@@ -14,7 +14,6 @@ import {
 	getActiveConnections,
 	closeAllConnections
 } from './connection-pool.js';
-import type { SSEConnection, SSEStatus, SSEErrorType } from './types.js';
 
 // Mock $app/environment
 vi.mock('$app/environment', () => ({

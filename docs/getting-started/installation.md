@@ -54,7 +54,8 @@ services:
       - PUID=1000 # Your user ID (run: id -u)
       - PGID=1000 # Your group ID (run: id -g)
       - TZ=UTC # Your timezone
-      - ORIGIN=http://localhost:3000 # Your access URL (required if using IP/FQDN)
+      - ORIGIN=http://localhost:3000 # Trusted app origin / CSRF origin
+      - BETTER_AUTH_URL=http://localhost:3000 # Auth callback/redirect base URL
     volumes:
       - ./config:/config
       - /path/to/media:/media # REQUIRED: Your media library
@@ -73,13 +74,15 @@ Open http://localhost:3000 and follow the setup wizard.
 
 All configuration is done via environment variables in `docker-compose.yaml`:
 
-| Variable | Required | Default               | Description                                 |
-| -------- | -------- | --------------------- | ------------------------------------------- |
-| `PORT`   | No       | 3000                  | Port to expose/listen on                    |
-| `PUID`   | No       | 1000                  | User ID for file permissions                |
-| `PGID`   | No       | 1000                  | Group ID for file permissions               |
-| `TZ`     | No       | UTC                   | Timezone (e.g., America/New_York)           |
-| `ORIGIN` | No       | http://localhost:3000 | Your access URL (required if using IP/FQDN) |
+| Variable          | Required | Default                                     | Description                                         |
+| ----------------- | -------- | ------------------------------------------- | --------------------------------------------------- |
+| `PORT`            | No       | 3000                                        | Port to expose/listen on                            |
+| `PUID`            | No       | 1000                                        | User ID for file permissions                        |
+| `PGID`            | No       | 1000                                        | Group ID for file permissions                       |
+| `TZ`              | No       | UTC                                         | Timezone (e.g., America/New_York)                   |
+| `ORIGIN`          | No       | http://localhost:3000                       | Trusted app origin / CSRF origin                    |
+| `BETTER_AUTH_URL` | No       | Saved External URL or http://localhost:5173 | Auth callback/redirect base URL                     |
+| `PUBLIC_BASE_URL` | No       | -                                           | Public-facing base URL for generated external links |
 
 **Volume Mounts:**
 
@@ -119,11 +122,12 @@ docker run -d \
   -e PUID=1000 \
   -e PGID=1000 \
   -e ORIGIN=http://localhost:3000 \
+  -e BETTER_AUTH_URL=http://localhost:3000 \
   -e TZ=UTC \
   ghcr.io/moldytaint/cinephage:latest
 ```
 
-> **Note:** When using `docker run`, pass the actual application variables (`ORIGIN`, `TZ`, `PUID`, `PGID`) directly.
+> **Note:** When using `docker run`, pass the actual application variables (`ORIGIN`, `BETTER_AUTH_URL`, `TZ`, `PUID`, `PGID`) directly.
 >
 > The container starts as root, then the entrypoint automatically drops privileges to `PUID:PGID` (default: 1000:1000) and fixes ownership of `/config` and cache directories.
 

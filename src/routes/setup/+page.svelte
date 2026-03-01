@@ -2,11 +2,16 @@
 	import { goto } from '$app/navigation';
 	import { Shield, User, Lock, CheckCircle, AlertCircle } from 'lucide-svelte';
 	import { authClient } from '$lib/auth/client.js';
+	import {
+		isHardReservedUsername,
+		USERNAME_MAX_LENGTH,
+		USERNAME_MIN_LENGTH,
+		USERNAME_PATTERN
+	} from '$lib/auth/username-policy.js';
 
 	let currentStep = $state(1);
 	let isLoading = $state(false);
 	let error = $state('');
-	let success = $state(false);
 
 	// Form data
 	let username = $state('');
@@ -26,29 +31,26 @@
 	});
 	let confirmError = $state('');
 
-	// Password strength
-	let passwordStrength = $state(0);
-
 	function validateUsername(): boolean {
-		if (username.length < 3) {
-			usernameError = 'Username must be at least 3 characters';
+		usernameError = '';
+
+		if (username.length < USERNAME_MIN_LENGTH) {
+			usernameError = `Username must be at least ${USERNAME_MIN_LENGTH} characters`;
 			return false;
 		}
-		if (username.length > 32) {
-			usernameError = 'Username must be no more than 32 characters';
+		if (username.length > USERNAME_MAX_LENGTH) {
+			usernameError = `Username must be no more than ${USERNAME_MAX_LENGTH} characters`;
 			return false;
 		}
-		if (!/^[a-zA-Z0-9_]+$/.test(username)) {
+		if (!USERNAME_PATTERN.test(username)) {
 			usernameError = 'Username can only contain letters, numbers, and underscores';
 			return false;
 		}
-		// Check reserved names
-		const reserved = ['admin', 'administrator', 'root', 'system', 'user', 'test'];
-		if (reserved.includes(username.toLowerCase())) {
-			usernameError = 'This username is reserved';
+		if (isHardReservedUsername(username)) {
+			usernameError = 'This name cannot be used as a username. Choose a different username';
 			return false;
 		}
-		usernameError = '';
+
 		return true;
 	}
 
@@ -73,13 +75,12 @@
 			uppercase: /[A-Z]/.test(password),
 			lowercase: /[a-z]/.test(password),
 			number: /[0-9]/.test(password),
-			special: /[!@#$%^&*()_+\-=\[\]{};':"\\|,.<>?]/.test(password)
+			special: /[^A-Za-z0-9\s]/.test(password)
 		};
 		passwordErrors = errors;
 
 		// Calculate strength
 		const passed = Object.values(errors).filter(Boolean).length;
-		passwordStrength = passed;
 
 		return passed === 5;
 	}
@@ -146,7 +147,6 @@
 				console.warn('Error marking setup complete:', setupError);
 			}
 
-			success = true;
 			currentStep = 3;
 
 			// Redirect to dashboard after 2 seconds
@@ -212,37 +212,44 @@
 					>
 						<!-- Username -->
 						<div class="form-control">
-							<label class="label">
+							<label class="label" for="setup-username">
 								<span class="label-text flex items-center gap-2">
 									<User class="h-4 w-4" />
 									Username
 								</span>
 							</label>
 							<input
+								id="setup-username"
 								type="text"
 								class="input-bordered input w-full"
 								class:input-error={usernameError}
 								placeholder="admin_user"
 								bind:value={username}
 								oninput={validateUsername}
-								minlength="3"
-								maxlength="32"
+								minlength={USERNAME_MIN_LENGTH}
+								maxlength={USERNAME_MAX_LENGTH}
+								aria-invalid={Boolean(usernameError)}
+								aria-describedby="setup-username-help"
 								required
 							/>
 							{#if usernameError}
-								<label class="label">
-									<span class="label-text-alt text-error">{usernameError}</span>
-								</label>
+								<div class="label">
+									<span id="setup-username-help" class="label-text-alt text-error"
+										>{usernameError}</span
+									>
+								</div>
 							{:else}
-								<label class="label">
-									<span class="label-text-alt">3-32 characters, letters, numbers, underscores</span>
-								</label>
+								<div class="label">
+									<span id="setup-username-help" class="label-text-alt"
+										>3-32 characters, letters, numbers, underscores</span
+									>
+								</div>
 							{/if}
 						</div>
 
 						<!-- Email -->
 						<div class="form-control">
-							<label class="label">
+							<label class="label" for="setup-email">
 								<span class="label-text flex items-center gap-2">
 									<svg
 										xmlns="http://www.w3.org/2000/svg"
@@ -262,30 +269,34 @@
 								</span>
 							</label>
 							<input
+								id="setup-email"
 								type="email"
 								class="input-bordered input w-full"
 								class:input-error={emailError}
 								placeholder="admin@example.com"
 								bind:value={email}
 								oninput={validateEmail}
+								aria-invalid={Boolean(emailError)}
+								aria-describedby={emailError ? 'setup-email-help' : undefined}
 								required
 							/>
 							{#if emailError}
-								<label class="label">
-									<span class="label-text-alt text-error">{emailError}</span>
-								</label>
+								<div class="label">
+									<span id="setup-email-help" class="label-text-alt text-error">{emailError}</span>
+								</div>
 							{/if}
 						</div>
 
 						<!-- Password -->
 						<div class="form-control">
-							<label class="label">
+							<label class="label" for="setup-password">
 								<span class="label-text flex items-center gap-2">
 									<Lock class="h-4 w-4" />
 									Password
 								</span>
 							</label>
 							<input
+								id="setup-password"
 								type="password"
 								class="input-bordered input w-full"
 								placeholder="••••••••"
@@ -317,10 +328,11 @@
 
 						<!-- Confirm Password -->
 						<div class="form-control">
-							<label class="label">
+							<label class="label" for="setup-confirm-password">
 								<span class="label-text">Confirm Password</span>
 							</label>
 							<input
+								id="setup-confirm-password"
 								type="password"
 								class="input-bordered input w-full"
 								class:input-error={confirmError}
@@ -328,12 +340,16 @@
 								bind:value={confirmPassword}
 								oninput={validateConfirm}
 								minlength="8"
+								aria-invalid={Boolean(confirmError)}
+								aria-describedby={confirmError ? 'setup-confirm-password-help' : undefined}
 								required
 							/>
 							{#if confirmError}
-								<label class="label">
-									<span class="label-text-alt text-error">{confirmError}</span>
-								</label>
+								<div class="label">
+									<span id="setup-confirm-password-help" class="label-text-alt text-error"
+										>{confirmError}</span
+									>
+								</div>
 							{/if}
 						</div>
 
