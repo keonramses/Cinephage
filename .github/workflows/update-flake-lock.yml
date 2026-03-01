@@ -1,0 +1,36 @@
+---
+name: Update Nix Flake Lock
+
+on:
+  schedule:
+    - cron: '0 0 */3 * *' # Every 3 days at midnight UTC
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  update-flake:
+    name: Update Flake Lock
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install Nix
+        uses: DeterminateSystems/nix-installer-action@main
+
+      - name: Update flake.lock
+        uses: DeterminateSystems/update-flake-lock@main
+        with:
+          pr-title: 'chore: update flake.lock'
+          pr-labels: |
+            dependencies
+            nix
+            automated
+          pr-body: |
+            Automated update of Nix flake dependencies.
+
+            This PR was created automatically by the update-flake-lock workflow.
+          token: ${{ secrets.GITHUB_TOKEN }}
