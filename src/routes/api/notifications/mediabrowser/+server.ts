@@ -7,6 +7,7 @@ import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
 import { getMediaBrowserManager } from '$lib/server/notifications/mediabrowser';
 import { mediaBrowserServerCreateSchema } from '$lib/validation/schemas';
+import { requireAdmin } from '$lib/server/auth/authorization.js';
 
 /**
  * GET /api/notifications/mediabrowser
@@ -22,7 +23,11 @@ export const GET: RequestHandler = async () => {
  * POST /api/notifications/mediabrowser
  * Create a new MediaBrowser server.
  */
-export const POST: RequestHandler = async ({ request }) => {
+export const POST: RequestHandler = async (event) => {
+	const authError = requireAdmin(event);
+	if (authError) return authError;
+
+	const { request } = event;
 	let data: unknown;
 	try {
 		data = await request.json();

@@ -200,10 +200,10 @@ export const POST: RequestHandler = async (event) => {
 			: undefined;
 		const folderName = generateSeriesFolderName(tvDetails.name, year, tvdbId ?? undefined);
 
-		// Calculate total episode count (excluding specials/season 0)
+		// Calculate total episode count (including specials if monitorSpecials is enabled)
 		const totalEpisodes =
 			tvDetails.seasons
-				?.filter((s) => s.season_number !== 0)
+				?.filter((s) => s.season_number !== 0 || monitorSpecials)
 				.reduce((sum, s) => sum + (s.episode_count ?? 0), 0) ?? 0;
 
 		// Get the effective scoring profile (shared logic)

@@ -7,12 +7,17 @@ import type { RequestHandler } from './$types';
 import { nntpServerTestSchema } from '$lib/validation/schemas';
 import { testNntpConnection } from '$lib/server/streaming/nzb/NntpTestUtils';
 import { logger } from '$lib/logging';
+import { requireAdmin } from '$lib/server/auth/authorization.js';
 
 /**
  * POST /api/usenet/servers/test
  * Test NNTP connection with provided credentials (without saving).
  */
-export const POST: RequestHandler = async ({ request }) => {
+export const POST: RequestHandler = async (event) => {
+	const authError = requireAdmin(event);
+	if (authError) return authError;
+
+	const { request } = event;
 	let data: unknown;
 	try {
 		data = await request.json();

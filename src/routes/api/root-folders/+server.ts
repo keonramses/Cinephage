@@ -3,6 +3,7 @@ import type { RequestHandler } from './$types';
 import { getRootFolderService } from '$lib/server/downloadClients/RootFolderService';
 import { isAppError } from '$lib/errors';
 import { rootFolderCreateSchema } from '$lib/validation/schemas';
+import { requireAdmin } from '$lib/server/auth/authorization.js';
 
 /**
  * GET /api/root-folders
@@ -18,7 +19,11 @@ export const GET: RequestHandler = async () => {
  * POST /api/root-folders
  * Create a new root folder.
  */
-export const POST: RequestHandler = async ({ request }) => {
+export const POST: RequestHandler = async (event) => {
+	const authError = requireAdmin(event);
+	if (authError) return authError;
+
+	const { request } = event;
 	let data: unknown;
 	try {
 		data = await request.json();

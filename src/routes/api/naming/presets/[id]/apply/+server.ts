@@ -5,12 +5,17 @@ import { namingPresets } from '$lib/server/db/schema';
 import { getBuiltInPreset, type NamingPreset } from '$lib/server/library/naming/presets';
 import { namingSettingsService } from '$lib/server/library/naming/NamingSettingsService';
 import { eq } from 'drizzle-orm';
+import { requireAdmin } from '$lib/server/auth/authorization.js';
 
 /**
  * POST /api/naming/presets/[id]/apply
  * Apply a preset's config to the current naming settings
  */
-export const POST: RequestHandler = async ({ params }) => {
+export const POST: RequestHandler = async (event) => {
+	const authError = requireAdmin(event);
+	if (authError) return authError;
+
+	const { params } = event;
 	try {
 		const { id } = params;
 		let presetConfig: NamingPreset['config'];

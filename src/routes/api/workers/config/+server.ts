@@ -8,12 +8,20 @@
 import { json, error } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
 import { workerManager, type WorkerManagerConfig, type WorkerType } from '$lib/server/workers';
+import { requireAdmin } from '$lib/server/auth/authorization.js';
 
-export const GET: RequestHandler = async () => {
+export const GET: RequestHandler = async (event) => {
+	const authError = requireAdmin(event);
+	if (authError) return authError;
+
 	return json(workerManager.getConfig());
 };
 
-export const PUT: RequestHandler = async ({ request }) => {
+export const PUT: RequestHandler = async (event) => {
+	const authError = requireAdmin(event);
+	if (authError) return authError;
+
+	const { request } = event;
 	try {
 		const body = await request.json();
 		const updates: Partial<WorkerManagerConfig> = {};

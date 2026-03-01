@@ -7,6 +7,7 @@ import {
 } from '$lib/server/library/naming/NamingService';
 import { namingSettingsService } from '$lib/server/library/naming/NamingSettingsService';
 import { logger } from '$lib/logging';
+import { requireAdmin } from '$lib/server/auth/authorization.js';
 
 /**
  * Sample data for previews
@@ -101,7 +102,11 @@ const SAMPLE_DAILY: MediaNamingInfo = {
  * POST /api/naming/preview
  * Generate preview filenames based on provided config
  */
-export const POST: RequestHandler = async ({ request }) => {
+export const POST: RequestHandler = async (event) => {
+	const authError = requireAdmin(event);
+	if (authError) return authError;
+
+	const { request } = event;
 	try {
 		const body = await request.json();
 		const { config: customConfig } = body;

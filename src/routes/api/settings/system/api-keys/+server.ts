@@ -1,5 +1,6 @@
 import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
+import { requireAdmin } from '$lib/server/auth/authorization.js';
 import { auth } from '$lib/server/auth/index.js';
 import { encryptApiKey } from '$lib/server/crypto/apiKeyCrypto.js';
 import { db } from '$lib/server/db';
@@ -7,11 +8,15 @@ import { userApiKeySecrets } from '$lib/server/db/schema.js';
 import { eq } from 'drizzle-orm';
 
 // POST /api/settings/system/api-keys - Auto-generate Main and Media Streaming API keys
-export const POST: RequestHandler = async ({ request, locals }) => {
-	// Require authentication
-	if (!locals.user) {
-		return json({ error: 'Unauthorized' }, { status: 401 });
-	}
+export const POST: RequestHandler = async (event) => {
+	// Require admin authentication
+	const authError = requireAdmin(event);
+	if (authError) return authError;
+
+	const { request, locals } = event;
+
+	// After requireAdmin check, user is guaranteed to exist
+	const user = locals.user!;
 
 	try {
 		// Check if user already has API keys
@@ -31,7 +36,7 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 		if (!hasMainKey) {
 			const mainKey = await auth.api.createApiKey({
 				body: {
-					userId: locals.user.id,
+					userId: user.id,
 					name: 'Main API Key',
 					metadata: {
 						type: 'main',
@@ -50,7 +55,7 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 			const encryptedKey = encryptApiKey(mainKey.key);
 			await db.insert(userApiKeySecrets).values({
 				id: mainKey.id,
-				userId: locals.user.id,
+				userId: user.id,
 				encryptedKey,
 				createdAt: new Date().toISOString()
 			});
@@ -60,7 +65,7 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 		if (!hasStreamingKey) {
 			const streamingKey = await auth.api.createApiKey({
 				body: {
-					userId: locals.user.id,
+					userId: user.id,
 					name: 'Media Streaming API Key',
 					metadata: {
 						type: 'streaming',
@@ -81,7 +86,7 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 			const encryptedKey = encryptApiKey(streamingKey.key);
 			await db.insert(userApiKeySecrets).values({
 				id: streamingKey.id,
-				userId: locals.user.id,
+				userId: user.id,
 				encryptedKey,
 				createdAt: new Date().toISOString()
 			});
@@ -98,11 +103,12 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 };
 
 // GET /api/settings/system/api-keys - List user's API keys
-export const GET: RequestHandler = async ({ request, locals }) => {
-	// Require authentication
-	if (!locals.user) {
-		return json({ error: 'Unauthorized' }, { status: 401 });
-	}
+export const GET: RequestHandler = async (event) => {
+	// Require admin authentication
+	const authError = requireAdmin(event);
+	if (authError) return authError;
+
+	const { request } = event;
 
 	try {
 		const apiKeys = await auth.api.listApiKeys({

@@ -1,5 +1,6 @@
 import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
+import { requireAdmin } from '$lib/server/auth/authorization.js';
 import { db } from '$lib/server/db';
 import { settings } from '$lib/server/db/schema';
 import { globalTmdbFiltersSchema } from '$lib/validation/schemas';
@@ -16,7 +17,11 @@ const DEFAULT_FILTERS: GlobalTmdbFilters = {
 	excluded_genre_ids: []
 };
 
-export const GET: RequestHandler = async () => {
+export const GET: RequestHandler = async (event) => {
+	// Require admin authentication
+	const authError = requireAdmin(event);
+	if (authError) return authError;
+
 	const settingsData = await db.query.settings.findFirst({
 		where: eq(settings.key, 'global_filters')
 	});
@@ -40,7 +45,12 @@ export const GET: RequestHandler = async () => {
 	}
 };
 
-export const PUT: RequestHandler = async ({ request }) => {
+export const PUT: RequestHandler = async (event) => {
+	// Require admin authentication
+	const authError = requireAdmin(event);
+	if (authError) return authError;
+
+	const { request } = event;
 	let data: unknown;
 	try {
 		data = await request.json();

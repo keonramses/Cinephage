@@ -7,6 +7,7 @@ import { z } from 'zod';
 import { DEFAULT_PROFILES, getProfile, isBuiltInProfile } from '$lib/server/scoring';
 import { qualityFilter } from '$lib/server/quality';
 import { logger } from '$lib/logging';
+import { requireAdmin } from '$lib/server/auth/authorization.js';
 
 /**
  * Schema for creating scoring profiles (name required)
@@ -135,7 +136,11 @@ export const GET: RequestHandler = async () => {
  * - Copying from built-in profile (copyFromId = 'quality', 'balanced', 'compact', 'streamer')
  * - Copying from another custom profile (copyFromId = custom profile ID)
  */
-export const POST: RequestHandler = async ({ request }) => {
+export const POST: RequestHandler = async (event) => {
+	const authError = requireAdmin(event);
+	if (authError) return authError;
+
+	const { request } = event;
 	try {
 		const body = await request.json();
 		const validation = scoringProfileSchema.safeParse(body);
@@ -247,7 +252,11 @@ export const POST: RequestHandler = async ({ request }) => {
  * For built-in profiles: only size limits can be changed, stored in profileSizeLimits table.
  * For custom profiles: full update via scoringProfiles table.
  */
-export const PUT: RequestHandler = async ({ request }) => {
+export const PUT: RequestHandler = async (event) => {
+	const authError = requireAdmin(event);
+	if (authError) return authError;
+
+	const { request } = event;
 	try {
 		const body = await request.json();
 		const { id, ...updateData } = body;
@@ -403,7 +412,11 @@ export const PUT: RequestHandler = async ({ request }) => {
  * DELETE /api/scoring-profiles
  * Delete a custom scoring profile
  */
-export const DELETE: RequestHandler = async ({ request }) => {
+export const DELETE: RequestHandler = async (event) => {
+	const authError = requireAdmin(event);
+	if (authError) return authError;
+
+	const { request } = event;
 	try {
 		const { id } = await request.json();
 

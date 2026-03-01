@@ -8,6 +8,7 @@ import type { RequestHandler } from './$types';
 import { getNntpServerService } from '$lib/server/streaming/nzb/NntpServerService';
 import { getNntpManager } from '$lib/server/streaming/usenet/NntpManager';
 import { nntpServerCreateSchema } from '$lib/validation/schemas';
+import { requireAdmin } from '$lib/server/auth/authorization.js';
 
 /**
  * GET /api/usenet/servers
@@ -24,7 +25,11 @@ export const GET: RequestHandler = async () => {
  * POST /api/usenet/servers
  * Create a new NNTP server.
  */
-export const POST: RequestHandler = async ({ request }) => {
+export const POST: RequestHandler = async (event) => {
+	const authError = requireAdmin(event);
+	if (authError) return authError;
+
+	const { request } = event;
 	let data: unknown;
 	try {
 		data = await request.json();

@@ -3,6 +3,7 @@ import type { RequestHandler } from './$types';
 import { getIndexerManager } from '$lib/server/indexers/IndexerManager';
 import { indexerCreateSchema } from '$lib/validation/schemas';
 import { redactIndexer } from '$lib/server/utils/redaction.js';
+import { requireAdmin } from '$lib/server/auth/authorization.js';
 
 /**
  * GET /api/indexers
@@ -19,7 +20,11 @@ export const GET: RequestHandler = async () => {
 	return json(redactedIndexers);
 };
 
-export const POST: RequestHandler = async ({ request }) => {
+export const POST: RequestHandler = async (event) => {
+	const authError = requireAdmin(event);
+	if (authError) return authError;
+
+	const { request } = event;
 	let data: unknown;
 	try {
 		data = await request.json();

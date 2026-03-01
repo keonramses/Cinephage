@@ -6,6 +6,7 @@ import { eq } from 'drizzle-orm';
 import { z } from 'zod';
 import { ALL_FORMATS } from '$lib/server/scoring';
 import { logger } from '$lib/logging';
+import { requireAdmin } from '$lib/server/auth/authorization.js';
 
 /**
  * Condition schema - supports all condition types
@@ -141,7 +142,11 @@ export const GET: RequestHandler = async ({ url }) => {
  * POST /api/custom-formats
  * Create a new custom format
  */
-export const POST: RequestHandler = async ({ request }) => {
+export const POST: RequestHandler = async (event) => {
+	const authError = requireAdmin(event);
+	if (authError) return authError;
+
+	const { request } = event;
 	try {
 		const body = await request.json();
 		const validation = customFormatSchema.safeParse(body);
@@ -194,7 +199,11 @@ export const POST: RequestHandler = async ({ request }) => {
  * PUT /api/custom-formats
  * Update an existing custom format
  */
-export const PUT: RequestHandler = async ({ request }) => {
+export const PUT: RequestHandler = async (event) => {
+	const authError = requireAdmin(event);
+	if (authError) return authError;
+
+	const { request } = event;
 	try {
 		const body = await request.json();
 		const { id, ...updateData } = body;
@@ -251,7 +260,11 @@ export const PUT: RequestHandler = async ({ request }) => {
  * DELETE /api/custom-formats
  * Delete a custom format
  */
-export const DELETE: RequestHandler = async ({ request }) => {
+export const DELETE: RequestHandler = async (event) => {
+	const authError = requireAdmin(event);
+	if (authError) return authError;
+
+	const { request } = event;
 	try {
 		const { id } = await request.json();
 

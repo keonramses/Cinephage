@@ -23,6 +23,7 @@ import { db } from '$lib/server/db';
 import { userApiKeySecrets } from '$lib/server/db/schema.js';
 import { eq, and } from 'drizzle-orm';
 import { decryptApiKey } from '$lib/server/crypto/apiKeyCrypto.js';
+import { requireAdmin } from '$lib/server/auth/authorization.js';
 
 const logger = createChildLogger({ module: 'TaskRunAPI' });
 
@@ -115,7 +116,11 @@ function buildResultSummary(result: Record<string, unknown>): Record<string, unk
 	return summary;
 }
 
-export const POST: RequestHandler = async ({ params, fetch, request, locals }) => {
+export const POST: RequestHandler = async (event) => {
+	const authError = requireAdmin(event);
+	if (authError) return authError;
+
+	const { params, fetch, request, locals } = event;
 	const { taskId } = params;
 
 	// Validate task exists in registry

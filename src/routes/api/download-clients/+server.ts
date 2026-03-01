@@ -2,6 +2,7 @@ import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
 import { getDownloadClientManager } from '$lib/server/downloadClients/DownloadClientManager';
 import { downloadClientCreateSchema } from '$lib/validation/schemas';
+import { requireAdmin } from '$lib/server/auth/authorization.js';
 
 /**
  * GET /api/download-clients
@@ -20,7 +21,11 @@ export const GET: RequestHandler = async () => {
  * POST /api/download-clients
  * Create a new download client.
  */
-export const POST: RequestHandler = async ({ request }) => {
+export const POST: RequestHandler = async (event) => {
+	const authError = requireAdmin(event);
+	if (authError) return authError;
+
+	const { request } = event;
 	let data: unknown;
 	try {
 		data = await request.json();

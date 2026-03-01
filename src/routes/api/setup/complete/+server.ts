@@ -1,14 +1,14 @@
 import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
+import { requireAdmin } from '$lib/server/auth/authorization.js';
 import { db } from '$lib/server/db';
 import { settings } from '$lib/server/db/schema';
 import { eq } from 'drizzle-orm';
 
-export const POST: RequestHandler = async ({ locals }) => {
-	// Require authentication (only admin can mark setup complete)
-	if (!locals.user) {
-		return json({ error: 'Unauthorized' }, { status: 401 });
-	}
+export const POST: RequestHandler = async (event) => {
+	// Require admin authentication
+	const authError = requireAdmin(event);
+	if (authError) return authError;
 
 	try {
 		// Mark setup as complete in settings table

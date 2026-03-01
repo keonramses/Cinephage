@@ -1,5 +1,6 @@
 import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
+import { requireAdmin } from '$lib/server/auth/authorization.js';
 import { getSystemSettingsService } from '$lib/server/settings/SystemSettingsService.js';
 import { z } from 'zod';
 
@@ -7,11 +8,12 @@ const externalUrlSchema = z.object({
 	url: z.string().url().nullable().or(z.literal(''))
 });
 
-export const POST: RequestHandler = async ({ request, locals }) => {
-	// Require authentication
-	if (!locals.user) {
-		return json({ error: 'Unauthorized' }, { status: 401 });
-	}
+export const POST: RequestHandler = async (event) => {
+	// Require admin authentication
+	const authError = requireAdmin(event);
+	if (authError) return authError;
+
+	const { request } = event;
 
 	try {
 		const body = await request.json();
@@ -34,11 +36,10 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 	}
 };
 
-export const GET: RequestHandler = async ({ locals }) => {
-	// Require authentication
-	if (!locals.user) {
-		return json({ error: 'Unauthorized' }, { status: 401 });
-	}
+export const GET: RequestHandler = async (event) => {
+	// Require admin authentication
+	const authError = requireAdmin(event);
+	if (authError) return authError;
 
 	try {
 		const settingsService = getSystemSettingsService();

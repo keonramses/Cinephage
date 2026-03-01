@@ -255,11 +255,14 @@ export const POST: RequestHandler = async ({ params, request }) => {
 					}
 				}
 
-				// Update series episode counts (excluding specials/season 0)
+				// Update series episode counts (include specials if monitorSpecials is enabled)
 				const allEpisodes = await db.select().from(episodes).where(eq(episodes.seriesId, id));
-				const regularEpisodes = allEpisodes.filter((e) => e.seasonNumber !== 0);
-				const episodeCount = regularEpisodes.length;
-				const episodeFileCount = regularEpisodes.filter((e) => e.hasFile).length;
+				const monitorSpecials = seriesData.monitorSpecials ?? false;
+				const episodesForStats = monitorSpecials
+					? allEpisodes
+					: allEpisodes.filter((e) => e.seasonNumber !== 0);
+				const episodeCount = episodesForStats.length;
+				const episodeFileCount = episodesForStats.filter((e) => e.hasFile).length;
 
 				await db.update(series).set({ episodeCount, episodeFileCount }).where(eq(series.id, id));
 

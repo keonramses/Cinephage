@@ -7,17 +7,26 @@ import { createChildLogger } from '$lib/logging';
 import { assertFound, parseBody } from '$lib/server/api/validate';
 import { NotFoundError } from '$lib/errors';
 import { redactIndexer } from '$lib/server/utils/redaction.js';
+import { requireAdmin } from '$lib/server/auth/authorization.js';
 
 const logger = createChildLogger({ module: 'IndexerAPI' });
 
-export const GET: RequestHandler = async ({ params }) => {
+export const GET: RequestHandler = async (event) => {
+	const authError = requireAdmin(event);
+	if (authError) return authError;
+
+	const { params } = event;
 	const manager = await getIndexerManager();
 	const indexer = assertFound(await manager.getIndexer(params.id), 'Indexer', params.id);
 
 	return json(redactIndexer(indexer));
 };
 
-export const DELETE: RequestHandler = async ({ params }) => {
+export const DELETE: RequestHandler = async (event) => {
+	const authError = requireAdmin(event);
+	if (authError) return authError;
+
+	const { params } = event;
 	const manager = await getIndexerManager();
 
 	try {
@@ -31,7 +40,11 @@ export const DELETE: RequestHandler = async ({ params }) => {
 	}
 };
 
-export const PUT: RequestHandler = async ({ params, request }) => {
+export const PUT: RequestHandler = async (event) => {
+	const authError = requireAdmin(event);
+	if (authError) return authError;
+
+	const { params, request } = event;
 	const validated = await parseBody(request, indexerUpdateSchema);
 	const manager = await getIndexerManager();
 

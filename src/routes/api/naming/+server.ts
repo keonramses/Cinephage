@@ -4,6 +4,7 @@ import { namingSettingsService } from '$lib/server/library/naming/NamingSettings
 import { DEFAULT_NAMING_CONFIG } from '$lib/server/library/naming/NamingService';
 import { namingConfigUpdateSchema } from '$lib/validation/schemas';
 import { logger } from '$lib/logging';
+import { requireAdmin } from '$lib/server/auth/authorization.js';
 
 /**
  * GET /api/naming
@@ -27,7 +28,11 @@ export const GET: RequestHandler = async () => {
  * PUT /api/naming
  * Update naming configuration
  */
-export const PUT: RequestHandler = async ({ request }) => {
+export const PUT: RequestHandler = async (event) => {
+	const authError = requireAdmin(event);
+	if (authError) return authError;
+
+	const { request } = event;
 	try {
 		const body = await request.json();
 		const validation = namingConfigUpdateSchema.safeParse(body);
@@ -55,7 +60,10 @@ export const PUT: RequestHandler = async ({ request }) => {
  * DELETE /api/naming
  * Reset naming configuration to defaults
  */
-export const DELETE: RequestHandler = async () => {
+export const DELETE: RequestHandler = async (event) => {
+	const authError = requireAdmin(event);
+	if (authError) return authError;
+
 	try {
 		const defaultConfig = await namingSettingsService.resetToDefaults();
 

@@ -1,5 +1,6 @@
 import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
+import { requireAdmin } from '$lib/server/auth/authorization.js';
 import { db } from '$lib/server/db';
 import { settings } from '$lib/server/db/schema';
 import { eq } from 'drizzle-orm';
@@ -10,7 +11,11 @@ const tmdbSettingsSchema = z.object({
 	apiKey: z.string().optional().default('')
 });
 
-export const GET: RequestHandler = async () => {
+export const GET: RequestHandler = async (event) => {
+	// Require admin authentication
+	const authError = requireAdmin(event);
+	if (authError) return authError;
+
 	const apiKeySetting = await db.query.settings.findFirst({
 		where: eq(settings.key, 'tmdb_api_key')
 	});
@@ -21,7 +26,12 @@ export const GET: RequestHandler = async () => {
 	});
 };
 
-export const PUT: RequestHandler = async ({ request }) => {
+export const PUT: RequestHandler = async (event) => {
+	// Require admin authentication
+	const authError = requireAdmin(event);
+	if (authError) return authError;
+
+	const { request } = event;
 	let body: unknown;
 	try {
 		body = await request.json();

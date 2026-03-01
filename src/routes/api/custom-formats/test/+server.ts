@@ -4,6 +4,7 @@ import { parseRelease, evaluateCondition } from '$lib/server/scoring';
 import type { FormatCondition } from '$lib/server/scoring';
 import { z } from 'zod';
 import { logger } from '$lib/logging';
+import { requireAdmin } from '$lib/server/auth/authorization.js';
 
 /**
  * Condition schema for testing
@@ -42,7 +43,11 @@ const testSchema = z.object({
  * POST /api/custom-formats/test
  * Test format conditions against a release name
  */
-export const POST: RequestHandler = async ({ request }) => {
+export const POST: RequestHandler = async (event) => {
+	const authError = requireAdmin(event);
+	if (authError) return authError;
+
+	const { request } = event;
 	try {
 		const body = await request.json();
 		const validation = testSchema.safeParse(body);

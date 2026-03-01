@@ -4,6 +4,7 @@ import { db } from '$lib/server/db';
 import { namingPresets } from '$lib/server/db/schema';
 import { BUILT_IN_PRESETS, type NamingPreset } from '$lib/server/library/naming/presets';
 import { eq } from 'drizzle-orm';
+import { requireAdmin } from '$lib/server/auth/authorization.js';
 
 /**
  * GET /api/naming/presets
@@ -40,7 +41,11 @@ export const GET: RequestHandler = async () => {
  * POST /api/naming/presets
  * Create a new custom preset
  */
-export const POST: RequestHandler = async ({ request }) => {
+export const POST: RequestHandler = async (event) => {
+	const authError = requireAdmin(event);
+	if (authError) return authError;
+
+	const { request } = event;
 	try {
 		const body = await request.json();
 		const { name, description, config } = body as {

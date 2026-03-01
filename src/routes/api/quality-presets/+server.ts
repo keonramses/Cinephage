@@ -1,6 +1,7 @@
 import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
 import { logger } from '$lib/logging';
+import { requireAdmin } from '$lib/server/auth/authorization.js';
 
 /**
  * @deprecated These endpoints are REMOVED. Use /api/scoring-profiles instead.
@@ -39,7 +40,10 @@ export const GET: RequestHandler = async () => {
 	);
 };
 
-export const POST: RequestHandler = async () => {
+export const POST: RequestHandler = async (event) => {
+	const authError = requireAdmin(event);
+	if (authError) return authError;
+
 	logDeprecation('POST');
 	return json(
 		{
@@ -55,7 +59,10 @@ export const POST: RequestHandler = async () => {
 	);
 };
 
-export const PUT: RequestHandler = async () => {
+export const PUT: RequestHandler = async (event) => {
+	const authError = requireAdmin(event);
+	if (authError) return authError;
+
 	logDeprecation('PUT');
 	return json(
 		{
@@ -71,7 +78,10 @@ export const PUT: RequestHandler = async () => {
 	);
 };
 
-export const DELETE: RequestHandler = async () => {
+export const DELETE: RequestHandler = async (event) => {
+	const authError = requireAdmin(event);
+	if (authError) return authError;
+
 	logDeprecation('DELETE');
 	return json(
 		{

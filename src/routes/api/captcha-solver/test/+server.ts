@@ -3,6 +3,7 @@ import type { RequestHandler } from './$types';
 import { getCaptchaSolver } from '$lib/server/captcha';
 import { z } from 'zod';
 import { logger } from '$lib/logging';
+import { requireAdmin } from '$lib/server/auth/authorization.js';
 
 /**
  * Schema for test request
@@ -15,7 +16,11 @@ const testRequestSchema = z.object({
  * POST /api/captcha-solver/test
  * Test captcha solving for a URL
  */
-export const POST: RequestHandler = async ({ request }) => {
+export const POST: RequestHandler = async (event) => {
+	const authError = requireAdmin(event);
+	if (authError) return authError;
+
+	const { request } = event;
 	try {
 		const body = await request.json();
 		const validation = testRequestSchema.safeParse(body);

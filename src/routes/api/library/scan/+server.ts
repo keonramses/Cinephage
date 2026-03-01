@@ -5,6 +5,7 @@ import { libraryScanHistory, rootFolders } from '$lib/server/db/schema.js';
 import { eq, desc } from 'drizzle-orm';
 import { librarySchedulerService } from '$lib/server/library/index.js';
 import { logger } from '$lib/logging';
+import { requireAdmin } from '$lib/server/auth/authorization.js';
 
 /**
  * GET /api/library/scan
@@ -60,7 +61,11 @@ export const GET: RequestHandler = async ({ url }) => {
  * POST /api/library/scan
  * Trigger a manual scan
  */
-export const POST: RequestHandler = async ({ request }) => {
+export const POST: RequestHandler = async (event) => {
+	const authError = requireAdmin(event);
+	if (authError) return authError;
+
+	const { request } = event;
 	try {
 		let body: { rootFolderId?: string; fullScan?: boolean } = {};
 		try {

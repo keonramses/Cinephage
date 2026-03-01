@@ -5,6 +5,7 @@
 import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
 import { getMediaBrowserManager } from '$lib/server/notifications/mediabrowser';
+import { requireAdmin } from '$lib/server/auth/authorization.js';
 
 /**
  * POST /api/notifications/mediabrowser/:id/test
@@ -12,7 +13,11 @@ import { getMediaBrowserManager } from '$lib/server/notifications/mediabrowser';
  * Accepts optional JSON overrides (host/apiKey/serverType).
  * Persists health status by default unless `persist: false` is provided.
  */
-export const POST: RequestHandler = async ({ params, request }) => {
+export const POST: RequestHandler = async (event) => {
+	const authError = requireAdmin(event);
+	if (authError) return authError;
+
+	const { params, request } = event;
 	const manager = getMediaBrowserManager();
 	let overrides:
 		| {
