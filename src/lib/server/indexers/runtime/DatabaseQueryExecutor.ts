@@ -303,11 +303,11 @@ export class DatabaseQueryExecutor {
 		const releaseResults: ReleaseResult[] = [];
 
 		for (const show of seriesResults) {
-			// Get all episodes for this series (excluding specials - season 0)
+			// Get all episodes for this series (including specials if monitorSpecials is enabled)
 			const allEpisodes = await db
 				.select()
 				.from(episodes)
-				.where(and(eq(episodes.seriesId, show.id), sql`${episodes.seasonNumber} > 0`))
+				.where(and(eq(episodes.seriesId, show.id)))
 				.orderBy(episodes.seasonNumber, episodes.episodeNumber);
 
 			if (allEpisodes.length === 0) {

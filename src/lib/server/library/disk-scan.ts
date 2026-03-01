@@ -937,16 +937,25 @@ export class DiskScanService extends EventEmitter {
 	private async updateSeriesAndSeasonStats(seriesId: string): Promise<void> {
 		const allEpisodes = await db.select().from(episodes).where(eq(episodes.seriesId, seriesId));
 
-		// Exclude specials (season 0) from series-level counts
-		const regularEpisodes = allEpisodes.filter((ep) => ep.seasonNumber !== 0);
-		const regularEpisodesWithFiles = regularEpisodes.filter((ep) => ep.hasFile);
+		// Check if monitorSpecials is enabled for this series
+		const [seriesData] = await db
+			.select({ monitorSpecials: series.monitorSpecials })
+			.from(series)
+			.where(eq(series.id, seriesId));
+		const monitorSpecials = seriesData?.monitorSpecials ?? false;
+
+		// Include specials in counts if monitorSpecials is enabled
+		const episodesForStats = monitorSpecials
+			? allEpisodes
+			: allEpisodes.filter((ep) => ep.seasonNumber !== 0);
+		const episodesWithFiles = episodesForStats.filter((ep) => ep.hasFile);
 
 		// Update series
 		await db
 			.update(series)
 			.set({
-				episodeFileCount: regularEpisodesWithFiles.length,
-				episodeCount: regularEpisodes.length
+				episodeFileCount: episodesWithFiles.length,
+				episodeCount: episodesForStats.length
 			})
 			.where(eq(series.id, seriesId));
 

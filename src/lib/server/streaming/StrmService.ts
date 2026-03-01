@@ -896,8 +896,7 @@ export class StrmService {
 			const episodesBySeason = new Map<number, EpisodeData[]>();
 
 			for (const ep of allEpisodes) {
-				// Skip Season 0 (Specials) and unaired episodes
-				if (ep.seasonNumber === 0) continue;
+				// Skip unaired episodes (but allow specials/season 0)
 				if (ep.airDate && ep.airDate > today) continue;
 
 				const seasonEps = episodesBySeason.get(ep.seasonNumber) || [];
