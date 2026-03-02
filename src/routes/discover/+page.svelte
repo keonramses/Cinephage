@@ -84,7 +84,7 @@
 		clearTimeout(debounceTimer);
 		debounceTimer = setTimeout(() => {
 			handleSearch(searchQuery);
-		}, 300);
+		}, 600);
 	}
 
 	function clearSearch() {

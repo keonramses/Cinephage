@@ -23,7 +23,7 @@
 		clearTimeout(debounceTimer);
 		debounceTimer = setTimeout(() => {
 			onSearch(value);
-		}, 300);
+		}, 600);
 	}
 
 	function clearSearch() {
