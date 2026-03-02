@@ -12,6 +12,8 @@
 		AlertCircle
 	} from 'lucide-svelte';
 	import type { PageData } from './$types';
+	import { copyToClipboard as copyTextToClipboard } from '$lib/utils/clipboard.js';
+	import { toasts } from '$lib/stores/toast.svelte';
 
 	let { data }: { data: PageData } = $props();
 
@@ -34,17 +36,18 @@
 	});
 
 	async function copyToClipboard(text: string, type: 'main' | 'streaming') {
-		try {
-			await navigator.clipboard.writeText(text);
-			if (type === 'main') {
-				copiedMain = true;
-				setTimeout(() => (copiedMain = false), 2000);
-			} else {
-				copiedStreaming = true;
-				setTimeout(() => (copiedStreaming = false), 2000);
-			}
-		} catch {
-			// Clipboard API not available
+		const copied = await copyTextToClipboard(text);
+		if (!copied) {
+			toasts.error('Failed to copy API key');
+			return;
+		}
+
+		if (type === 'main') {
+			copiedMain = true;
+			setTimeout(() => (copiedMain = false), 2000);
+		} else {
+			copiedStreaming = true;
+			setTimeout(() => (copiedStreaming = false), 2000);
 		}
 	}
 
@@ -283,7 +286,7 @@
 							disabled={!data.mainApiKey?.key}
 						>
 							{#if copiedMain}
-								<span class="text-xs text-success">Copied!</span>
+								<Check class="h-4 w-4 text-success" />
 							{:else}
 								<Copy class="h-4 w-4" />
 							{/if}
@@ -366,7 +369,7 @@
 							disabled={!data.streamingApiKey?.key}
 						>
 							{#if copiedStreaming}
-								<span class="text-xs text-success">Copied!</span>
+								<Check class="h-4 w-4 text-success" />
 							{:else}
 								<Copy class="h-4 w-4" />
 							{/if}

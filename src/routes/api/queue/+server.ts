@@ -89,14 +89,16 @@ export const GET: RequestHandler = async ({ url }) => {
 						.from(series)
 						.where(inArray(series.id, seriesIds))
 				: [],
-			db
-				.select({
-					id: downloadClients.id,
-					name: downloadClients.name,
-					implementation: downloadClients.implementation
-				})
-				.from(downloadClients)
-				.where(inArray(downloadClients.id, clientIds))
+			clientIds.length
+				? db
+						.select({
+							id: downloadClients.id,
+							name: downloadClients.name,
+							implementation: downloadClients.implementation
+						})
+						.from(downloadClients)
+						.where(inArray(downloadClients.id, clientIds))
+				: []
 		]);
 
 		// Build lookup maps for O(1) access

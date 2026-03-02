@@ -339,6 +339,7 @@ const customHandler: Handle = async ({ event, resolve }) => {
 
 	// Attach to locals for use in routes
 	event.locals.correlationId = correlationId;
+	const pathname = event.url.pathname;
 
 	// Fetch session from Better Auth - check API key first, then cookie
 	let session = null;
@@ -387,7 +388,6 @@ const customHandler: Handle = async ({ event, resolve }) => {
 
 	// Check if setup is complete
 	const setupComplete = await isSetupComplete();
-	const pathname = event.url.pathname;
 
 	// Auth routes are already handled by authHandler
 	if (pathname.startsWith(AUTH_BASE_PATH)) {

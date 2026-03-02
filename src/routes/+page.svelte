@@ -548,7 +548,7 @@
 						<div
 							class="grid grid-cols-3 gap-2 sm:grid-cols-3 sm:gap-3 md:grid-cols-4 lg:grid-cols-6"
 						>
-							{#each Array(6) as _}
+							{#each Array.from({ length: 6 }, (_, index) => index) as index (index)}
 								<div class="aspect-2/3 overflow-hidden rounded-lg">
 									<Skeleton class="h-full w-full" />
 								</div>
@@ -569,7 +569,7 @@
 						<div
 							class="grid grid-cols-3 gap-2 sm:grid-cols-3 sm:gap-3 md:grid-cols-4 lg:grid-cols-6"
 						>
-							{#each recentlyAdded.movies as movie, index (movie.id)}
+							{#each recentlyAdded.movies as movie (movie.id)}
 								{@const typedMovie = movie as RecentlyAddedMovie}
 								<a
 									href={resolve(`/library/movie/${typedMovie.id}`)}
@@ -621,7 +621,7 @@
 						<div
 							class="grid grid-cols-3 gap-2 sm:grid-cols-3 sm:gap-3 md:grid-cols-4 lg:grid-cols-6"
 						>
-							{#each Array(6) as _}
+							{#each Array.from({ length: 6 }, (_, index) => index) as index (index)}
 								<div class="aspect-2/3 overflow-hidden rounded-lg">
 									<Skeleton class="h-full w-full" />
 								</div>
@@ -643,13 +643,14 @@
 							class="grid grid-cols-3 gap-2 sm:grid-cols-3 sm:gap-3 md:grid-cols-4 lg:grid-cols-6"
 						>
 							{#each recentlyAdded.series as show (show.id)}
+								{@const typedShow = show as RecentlyAddedSeries}
 								<a
-									href={resolve(`/library/tv/${show.id}`)}
+									href={resolve(`/library/tv/${typedShow.id}`)}
 									class="group relative aspect-2/3 overflow-hidden rounded-lg"
 								>
 									<TmdbImage
-										path={show.posterPath}
-										alt={show.title}
+										path={typedShow.posterPath}
+										alt={typedShow.title}
 										size="w185"
 										class="h-full w-full object-cover transition-transform group-hover:scale-105"
 									/>
@@ -657,16 +658,16 @@
 										class="absolute inset-0 bg-linear-to-t from-black/80 via-transparent to-transparent opacity-0 transition-opacity group-hover:opacity-100"
 									>
 										<div class="absolute right-0 bottom-0 left-0 p-2">
-											<p class="truncate text-xs font-medium text-white">{show.title}</p>
+											<p class="truncate text-xs font-medium text-white">{typedShow.title}</p>
 											<p class="text-xs text-white/70">
-												{show.episodeFileCount ?? 0}/{show.episodeCount ?? 0} episodes
+												{typedShow.episodeFileCount ?? 0}/{typedShow.episodeCount ?? 0} episodes
 											</p>
 										</div>
 									</div>
-									{#if (show.airedMissingCount ?? 0) > 0}
+									{#if (typedShow.airedMissingCount ?? 0) > 0}
 										<div class="absolute top-1 right-1">
 											<span class="badge badge-xs badge-warning">
-												{show.airedMissingCount} missing
+												{typedShow.airedMissingCount} missing
 											</span>
 										</div>
 									{/if}
@@ -686,7 +687,7 @@
 							Missing Episodes
 						</h2>
 						<div class="divide-y divide-base-300">
-							{#each Array(5) as _}
+							{#each Array.from({ length: 5 }, (_, index) => index) as index (index)}
 								<div class="flex items-center gap-3 py-2">
 									<Skeleton variant="rect" class="h-12 w-8 shrink-0" />
 									<div class="min-w-0 flex-1">
@@ -708,12 +709,13 @@
 						</h2>
 						<div class="divide-y divide-base-300">
 							{#each missingEpisodes.slice(0, 5) as episode (episode.id)}
+								{@const typedEpisode = episode as MissingEpisode}
 								<div class="flex items-center gap-3 py-2">
-									{#if episode.series?.posterPath}
+									{#if typedEpisode.series?.posterPath}
 										<div class="h-12 w-8 shrink-0 overflow-hidden rounded">
 											<TmdbImage
-												path={episode.series.posterPath}
-												alt={episode.series.title || ''}
+												path={typedEpisode.series.posterPath}
+												alt={typedEpisode.series.title || ''}
 												size="w92"
 												class="h-full w-full object-cover"
 											/>
@@ -721,17 +723,17 @@
 									{/if}
 									<div class="min-w-0 flex-1">
 										<p class="font-medium wrap-break-word whitespace-normal">
-											{episode.series?.title || 'Unknown Series'}
+											{typedEpisode.series?.title || 'Unknown Series'}
 										</p>
 										<p class="wrap-break-words text-sm whitespace-normal text-base-content/70">
-											S{String(episode.seasonNumber).padStart(2, '0')}E{String(
-												episode.episodeNumber
+											S{String(typedEpisode.seasonNumber).padStart(2, '0')}E{String(
+												typedEpisode.episodeNumber
 											).padStart(2, '0')}
-											{episode.title ? ` - ${episode.title}` : ''}
+											{typedEpisode.title ? ` - ${typedEpisode.title}` : ''}
 										</p>
 									</div>
 									<div class="text-right text-sm text-base-content/50">
-										{formatDate(episode.airDate)}
+										{formatDate(typedEpisode.airDate)}
 									</div>
 								</div>
 							{/each}
@@ -785,7 +787,7 @@
 								</tr>
 							</thead>
 							<tbody>
-								{#each Array(6) as _}
+								{#each Array.from({ length: 6 }, (_, index) => index) as index (index)}
 									<tr>
 										<td><Skeleton variant="text" class="w-16" /></td>
 										<td><Skeleton variant="text" class="w-24" /></td>
