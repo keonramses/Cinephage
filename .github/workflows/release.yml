@@ -1,10 +1,10 @@
-# Create versioned releases with Docker image tagging and changelog generation
+# Create versioned releases by promoting existing CI Docker images
 #
 # Triggers:
-# - Manual workflow_dispatch from main branch only
+# - Manual workflow_dispatch from main or dev branches
 #
 # This workflow:
-# 1. Builds and tags Docker image with version and latest tags
+# 1. Promotes existing CI architecture tags into release tags
 # 2. Generates changelog from commits since last release
 # 3. Creates GitHub release with changelog and custom notes
 # 4. Cleans up old untagged images from GHCR
@@ -15,9 +15,25 @@ on:
   workflow_dispatch:
     branches:
       - main
+      - dev
     inputs:
+      release_type:
+        description: 'Version bump type'
+        required: true
+        type: choice
+        default: patch
+        options:
+          - patch
+          - minor
+          - major
+          - custom
       version:
-        description: 'Version tag (e.g., v1.0.0)'
+        description: 'Custom version tag (required for release_type=custom, e.g., v1.0.0)'
+        required: false
+        type: string
+        default: ''
+      source_tag:
+        description: 'CI candidate tag to promote (without -amd64/-arm64), e.g. edge-20260306-123'
         required: true
         type: string
       release_notes:
@@ -38,24 +54,128 @@ jobs:
   validate:
     name: Validate Release
     runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.resolve-version.outputs.version }}
+      is_prerelease: ${{ steps.release-mode.outputs.is_prerelease }}
+      source_tag: ${{ steps.validate-source-tag.outputs.source_tag }}
+
     steps:
       - name: Checkout repository
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
         with:
           fetch-depth: 0
 
+      - name: Resolve release version
+        id: resolve-version
+        env:
+          RELEASE_TYPE: ${{ github.event.inputs.release_type }}
+          INPUT_VERSION: ${{ github.event.inputs.version }}
+        run: |
+          set -euo pipefail
+
+          normalize_version() {
+            local v="$1"
+            if [[ "$v" != v* ]]; then
+              v="v${v}"
+            fi
+            echo "$v"
+          }
+
+          case "$RELEASE_TYPE" in
+            custom)
+              if [ -z "$INPUT_VERSION" ]; then
+                echo "❌ release_type=custom requires version input"
+                exit 1
+              fi
+              VERSION="$(normalize_version "$INPUT_VERSION")"
+              ;;
+            patch|minor|major)
+              if [ -n "$INPUT_VERSION" ]; then
+                echo "ℹ️ Ignoring version input because release_type=${RELEASE_TYPE}"
+              fi
+
+              LAST_TAG=$(git tag -l 'v[0-9]*.[0-9]*.[0-9]*' --sort=-v:refname | head -n 1)
+              if [ -z "$LAST_TAG" ]; then
+                LAST_TAG='v0.0.0'
+              fi
+              if [[ ! "$LAST_TAG" =~ ^v([0-9]+)\.([0-9]+)\.([0-9]+)$ ]]; then
+                echo "❌ Latest release tag must be plain semver (vX.Y.Z) for auto-bump."
+                echo "Found: ${LAST_TAG}"
+                echo "Use release_type=custom with an explicit version if needed."
+                exit 1
+              fi
+
+              MAJOR="${BASH_REMATCH[1]}"
+              MINOR="${BASH_REMATCH[2]}"
+              PATCH="${BASH_REMATCH[3]}"
+
+              case "$RELEASE_TYPE" in
+                patch)
+                  PATCH=$((PATCH + 1))
+                  ;;
+                minor)
+                  MINOR=$((MINOR + 1))
+                  PATCH=0
+                  ;;
+                major)
+                  MAJOR=$((MAJOR + 1))
+                  MINOR=0
+                  PATCH=0
+                  ;;
+              esac
+
+              VERSION="v${MAJOR}.${MINOR}.${PATCH}"
+              ;;
+            *)
+              echo "❌ Unsupported release_type: ${RELEASE_TYPE}"
+              exit 1
+              ;;
+          esac
+
+          echo "Resolved release version: ${VERSION}"
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+
       - name: Validate version format
         env:
-          VERSION: ${{ github.event.inputs.version }}
+          VERSION: ${{ steps.resolve-version.outputs.version }}
         run: |
-          if [[ ! "$VERSION" =~ ^v?[0-9]+\.[0-9]+\.[0-9]+(-[a-zA-Z0-9]+)?$ ]]; then
-            echo "⚠️  Warning: Version format doesn't match semantic versioning (e.g., v1.0.0 or 1.0.0)"
-            echo "Continuing anyway..."
+          if [[ ! "$VERSION" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$ ]]; then
+            echo "❌ Version must be semantic and v-prefixed (e.g., v1.0.0 or v1.0.0-rc.1)"
+            exit 1
           fi
+
+      - name: Determine prerelease mode
+        id: release-mode
+        env:
+          VERSION: ${{ steps.resolve-version.outputs.version }}
+          REF_NAME: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+
+          if [ "$REF_NAME" != 'main' ] && [ "$REF_NAME" != 'dev' ]; then
+            echo "❌ Releases are only allowed from main or dev. Got: ${REF_NAME}"
+            exit 1
+          fi
+
+          IS_PRERELEASE='false'
+          REASON='stable-main'
+
+          # All dev-branch releases are prereleases.
+          if [ "$REF_NAME" = 'dev' ]; then
+            IS_PRERELEASE='true'
+            REASON='dev-branch'
+          # Main-branch prerelease tags (rc/beta/alpha/pre/preview) are also prereleases.
+          elif [[ "$VERSION" =~ -([Rr][Cc]|[Bb]eta|[Aa]lpha|[Pp]re|[Pp]review)([.-]?[0-9A-Za-z]*)?$ ]]; then
+            IS_PRERELEASE='true'
+            REASON='version-suffix'
+          fi
+
+          echo "is_prerelease=${IS_PRERELEASE}" >> "$GITHUB_OUTPUT"
+          echo "Detected prerelease mode: ${IS_PRERELEASE} (${REASON})"
 
       - name: Check if tag already exists
         env:
-          VERSION: ${{ github.event.inputs.version }}
+          VERSION: ${{ steps.resolve-version.outputs.version }}
         run: |
           if git rev-parse "$VERSION" >/dev/null 2>&1; then
             echo "❌ Tag $VERSION already exists!"
@@ -63,118 +183,40 @@ jobs:
           fi
           echo "✅ Tag $VERSION is available"
 
-  build-amd64:
-    name: Build amd64
-    runs-on: ubuntu-latest
-    needs: [validate]
-    if: always() && (needs.validate.result == 'skipped' || needs.validate.result == 'success')
-    permissions:
-      contents: read
-      packages: write
-
-    outputs:
-      digest: ${{ steps.build-push.outputs.digest }}
-
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
-        with:
-          fetch-depth: 0 # Full history for changelog generation
-
-      - name: Set lowercase image name
-        run: echo "IMAGE_NAME_LC=${GITHUB_REPOSITORY,,}" >> "$GITHUB_ENV"
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
-
-      - name: Log in to Container Registry
-        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
-        with:
-          registry: ${{ env.REGISTRY }}
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Build test image
-        run: docker buildx build --load -t cinephage:test --build-arg APP_VERSION=${{ github.event.inputs.version }} .
-
-      - name: Test Docker image
+      - name: Validate source candidate tag
+        id: validate-source-tag
+        env:
+          SOURCE_TAG_INPUT: ${{ github.event.inputs.source_tag }}
+          REF_NAME: ${{ github.ref_name }}
         run: |
-          docker run -d --name cinephage-test \
-            -p 3000:3000 \
-            -e ORIGIN=http://localhost:3000 \
-            cinephage:test
+          set -euo pipefail
 
-          for i in {1..12}; do
-            if curl -sf http://localhost:3000/api/health; then
-              echo "Health check passed"
-              exit 0
-            fi
-            echo "Waiting for container... ($i/12)"
-            sleep 5
-          done
+          SOURCE_TAG="$(echo "$SOURCE_TAG_INPUT" | xargs)"
 
-          echo "Health check failed"
-          docker logs cinephage-test
-          exit 1
+          if [ -z "$SOURCE_TAG" ]; then
+            echo "❌ source_tag is required"
+            exit 1
+          fi
 
-      - name: Cleanup test container
-        if: always()
-        run: docker rm -f cinephage-test || true
+          if [[ "$SOURCE_TAG" == *-amd64 || "$SOURCE_TAG" == *-arm64 ]]; then
+            echo "❌ source_tag must not include architecture suffix (-amd64/-arm64)"
+            exit 1
+          fi
 
-      - name: Build and push Docker image
-        id: build-push
-        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
-        with:
-          context: .
-          platforms: linux/amd64
-          push: true
-          tags: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME_LC }}:amd64
-          build-args: |
-            APP_VERSION=${{ github.event.inputs.version }}
-          cache-from: type=gha,scope=amd64
-          cache-to: type=gha,mode=max,scope=amd64
+          if [ "$REF_NAME" = 'main' ] && [[ ! "$SOURCE_TAG" =~ ^edge-[0-9]{8}-[0-9]+$ ]]; then
+            echo "❌ main releases must promote an immutable edge tag (edge-YYYYMMDD-RUN)."
+            echo "Got: ${SOURCE_TAG}"
+            exit 1
+          fi
 
-  build-arm64:
-    name: Build arm64
-    runs-on: ubuntu-24.04-arm
-    needs: [validate]
-    if: always() && (needs.validate.result == 'skipped' || needs.validate.result == 'success')
-    permissions:
-      contents: read
-      packages: write
+          if [ "$REF_NAME" = 'dev' ] && [[ ! "$SOURCE_TAG" =~ ^dev-[0-9]{8}-[0-9]+$ ]]; then
+            echo "❌ dev releases must promote an immutable dev tag (dev-YYYYMMDD-RUN)."
+            echo "Got: ${SOURCE_TAG}"
+            exit 1
+          fi
 
-    outputs:
-      digest: ${{ steps.build-push.outputs.digest }}
-
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
-
-      - name: Set lowercase image name
-        run: echo "IMAGE_NAME_LC=${GITHUB_REPOSITORY,,}" >> "$GITHUB_ENV"
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
-
-      - name: Log in to Container Registry
-        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
-        with:
-          registry: ${{ env.REGISTRY }}
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Build and push Docker image
-        id: build-push
-        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
-        with:
-          context: .
-          platforms: linux/arm64
-          push: true
-          tags: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME_LC }}:arm64
-          build-args: |
-            APP_VERSION=${{ github.event.inputs.version }}
-          cache-from: type=gha,scope=arm64
-          cache-to: type=gha,mode=max,scope=arm64
+          echo "source_tag=${SOURCE_TAG}" >> "$GITHUB_OUTPUT"
+          echo "✅ Source candidate tag: ${SOURCE_TAG}"
 
   generate-changelog:
     name: Generate Changelog
@@ -254,7 +296,7 @@ jobs:
   manifest:
     name: Create Multi-Arch Manifest
     runs-on: ubuntu-latest
-    needs: [build-amd64, build-arm64, generate-changelog]
+    needs: [validate, generate-changelog]
     permissions:
       contents: write
       packages: write
@@ -275,24 +317,84 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
 
-      - name: Create and push multi-arch manifest
+      - name: Install crane
         env:
-          VERSION: ${{ github.event.inputs.version }}
-          AMD64_IMAGE: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME_LC }}:amd64
-          ARM64_IMAGE: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME_LC }}:arm64
+          CRANE_VERSION: v0.20.6
         run: |
-          # Tag with version
-          docker buildx imagetools create -t "${{ env.REGISTRY }}/${{ env.IMAGE_NAME_LC }}:${VERSION}" "$AMD64_IMAGE" "$ARM64_IMAGE"
+          set -euo pipefail
 
-          # Tag as latest
-          docker buildx imagetools create -t "${{ env.REGISTRY }}/${{ env.IMAGE_NAME_LC }}:latest" "$AMD64_IMAGE" "$ARM64_IMAGE"
+          curl -fsSL \
+            "https://github.com/google/go-containerregistry/releases/download/${CRANE_VERSION}/go-containerregistry_Linux_x86_64.tar.gz" \
+            -o /tmp/go-containerregistry.tgz
 
-          echo "✅ Tagged image with ${VERSION} and latest"
+          tar -xzf /tmp/go-containerregistry.tgz -C /tmp crane
+          sudo mv /tmp/crane /usr/local/bin/crane
+          crane version
+
+      - name: Verify promoted source images exist
+        env:
+          SOURCE_TAG: ${{ needs.validate.outputs.source_tag }}
+          SOURCE_AMD64_IMAGE: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME_LC }}:${{ needs.validate.outputs.source_tag }}-amd64
+          SOURCE_ARM64_IMAGE: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME_LC }}:${{ needs.validate.outputs.source_tag }}-arm64
+        run: |
+          set -euo pipefail
+
+          echo "Checking source candidate tags for ${SOURCE_TAG}..."
+          docker buildx imagetools inspect "$SOURCE_AMD64_IMAGE" >/dev/null
+          docker buildx imagetools inspect "$SOURCE_ARM64_IMAGE" >/dev/null
+          echo "✅ Found ${SOURCE_AMD64_IMAGE} and ${SOURCE_ARM64_IMAGE}"
+
+      - name: Promote source images to release tags with release metadata
+        env:
+          SOURCE_TAG: ${{ needs.validate.outputs.source_tag }}
+          VERSION: ${{ needs.validate.outputs.version }}
+          IS_PRERELEASE: ${{ needs.validate.outputs.is_prerelease }}
+          SOURCE_AMD64_IMAGE: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME_LC }}:${{ needs.validate.outputs.source_tag }}-amd64
+          SOURCE_ARM64_IMAGE: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME_LC }}:${{ needs.validate.outputs.source_tag }}-arm64
+          RELEASE_AMD64_IMAGE: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME_LC }}:${{ needs.validate.outputs.version }}-amd64
+          RELEASE_ARM64_IMAGE: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME_LC }}:${{ needs.validate.outputs.version }}-arm64
+          RELEASE_MULTIARCH_IMAGE: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME_LC }}:${{ needs.validate.outputs.version }}
+        run: |
+          set -euo pipefail
+
+          # Mutate immutable source architecture images into release tags without rebuild.
+          # This writes release version metadata directly into the image config.
+          crane mutate "$SOURCE_AMD64_IMAGE" \
+            --tag "$RELEASE_AMD64_IMAGE" \
+            --env "PUBLIC_APP_VERSION=$VERSION" \
+            --label "org.opencontainers.image.version=$VERSION"
+
+          crane mutate "$SOURCE_ARM64_IMAGE" \
+            --tag "$RELEASE_ARM64_IMAGE" \
+            --env "PUBLIC_APP_VERSION=$VERSION" \
+            --label "org.opencontainers.image.version=$VERSION"
+
+          # Confirm the runtime app version env was written to promoted tags.
+          AMD64_VERSION_ENV=$(crane config "$RELEASE_AMD64_IMAGE" | jq -r '.config.Env[]? | select(startswith("PUBLIC_APP_VERSION="))' | tail -n 1)
+          ARM64_VERSION_ENV=$(crane config "$RELEASE_ARM64_IMAGE" | jq -r '.config.Env[]? | select(startswith("PUBLIC_APP_VERSION="))' | tail -n 1)
+          echo "amd64 ${AMD64_VERSION_ENV}"
+          echo "arm64 ${ARM64_VERSION_ENV}"
+
+          if [ "$AMD64_VERSION_ENV" != "PUBLIC_APP_VERSION=$VERSION" ] || [ "$ARM64_VERSION_ENV" != "PUBLIC_APP_VERSION=$VERSION" ]; then
+            echo "❌ Failed to set PUBLIC_APP_VERSION metadata on promoted images"
+            exit 1
+          fi
+
+          # Build release manifest from the release architecture tags.
+          docker buildx imagetools create -t "$RELEASE_MULTIARCH_IMAGE" "$RELEASE_AMD64_IMAGE" "$RELEASE_ARM64_IMAGE"
+
+          # Tag as latest only for stable main releases.
+          if [ "${GITHUB_REF_NAME}" = 'main' ] && [ "$IS_PRERELEASE" != 'true' ]; then
+            docker buildx imagetools create -t "${{ env.REGISTRY }}/${{ env.IMAGE_NAME_LC }}:latest" "$RELEASE_AMD64_IMAGE" "$RELEASE_ARM64_IMAGE"
+            echo "✅ Promoted ${SOURCE_TAG} to ${VERSION} and latest"
+          else
+            echo "✅ Promoted ${SOURCE_TAG} to ${VERSION} (latest skipped for prerelease/non-main)"
+          fi
 
       - name: Get manifest digest
         id: digest
         env:
-          IMAGE: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME_LC }}:${{ github.event.inputs.version }}
+          IMAGE: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME_LC }}:${{ needs.validate.outputs.version }}
         run: |
           digest=$(docker buildx imagetools inspect "$IMAGE" --format '{{json .Manifest.Digest}}' | xargs)
           echo "digest=$digest" >> "$GITHUB_OUTPUT"
@@ -307,7 +409,7 @@ jobs:
   create-release:
     name: Create GitHub Release
     runs-on: ubuntu-latest
-    needs: [manifest, generate-changelog]
+    needs: [validate, manifest, generate-changelog]
     permissions:
       contents: write
 
@@ -320,32 +422,38 @@ jobs:
       - name: Create Git tag
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ needs.validate.outputs.version }}
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
 
           # Create and push tag
-          if git rev-parse "${{ github.event.inputs.version }}" >/dev/null 2>&1; then
+          if git rev-parse "$VERSION" >/dev/null 2>&1; then
             echo "⚠️  Tag already exists, skipping tag creation"
           else
-            git tag -a "${{ github.event.inputs.version }}" -m "Release ${{ github.event.inputs.version }}"
-            git push origin "${{ github.event.inputs.version }}"
-            echo "✅ Created and pushed tag ${{ github.event.inputs.version }}"
+            git tag -a "$VERSION" -m "Release $VERSION"
+            git push origin "$VERSION"
+            echo "✅ Created and pushed tag $VERSION"
           fi
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@c062e08bd532815e2082a07b400541a7f5c7d705 # v2
         with:
-          tag_name: ${{ github.event.inputs.version }}
-          name: Release ${{ github.event.inputs.version }}
+          tag_name: ${{ needs.validate.outputs.version }}
+          name: Release ${{ needs.validate.outputs.version }}
+          generate_release_notes: true
           body: |
             ${{ needs.generate-changelog.outputs.changelog }}
 
             ---
 
+            Promoted from CI candidate: `${{ needs.validate.outputs.source_tag }}`
+
+            ---
+
             ${{ github.event.inputs.release_notes }}
           draft: false
-          prerelease: false
+          prerelease: ${{ needs.validate.outputs.is_prerelease == 'true' }}
 
   cleanup-images:
     name: Cleanup Old Images
