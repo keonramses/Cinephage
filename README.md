@@ -141,6 +141,12 @@ docker compose up -d
 
 **That's it.** Open http://localhost:3000 and follow the setup wizard.
 
+Tag policy:
+
+- `latest` = current stable release
+- `dev` = current preview build
+- `vX.Y.Z` = pinned stable release
+
 If you later access Cinephage through a hostname or reverse proxy, update
 `BETTER_AUTH_URL` to that public URL. You can also set the External URL in the UI under
 `Settings > System`.

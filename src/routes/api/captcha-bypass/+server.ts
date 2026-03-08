@@ -4,6 +4,9 @@ import { z } from 'zod';
 import { captchaSolverSettingsService, getCaptchaSolver } from '$lib/server/captcha';
 import { logger } from '$lib/logging';
 import { requireAdmin } from '$lib/server/auth/authorization.js';
+import { resolveAppVersion } from '$lib/version.js';
+
+const appVersion = resolveAppVersion();
 
 const requestSchema = z
 	.object({
@@ -40,7 +43,7 @@ export const POST: RequestHandler = async (event) => {
 						endTimestamp: Date.now(),
 						durationMs: 0
 					},
-					version: process.env.npm_package_version ?? 'unknown'
+					version: appVersion
 				},
 				{ status: 400 }
 			);
@@ -65,7 +68,7 @@ export const POST: RequestHandler = async (event) => {
 						endTimestamp: Date.now(),
 						durationMs: Date.now() - startTimestamp
 					},
-					version: process.env.npm_package_version ?? 'unknown'
+					version: appVersion
 				},
 				{ status: 403 }
 			);
@@ -83,7 +86,7 @@ export const POST: RequestHandler = async (event) => {
 						endTimestamp: Date.now(),
 						durationMs: Date.now() - startTimestamp
 					},
-					version: process.env.npm_package_version ?? 'unknown'
+					version: appVersion
 				},
 				{ status: 503 }
 			);
@@ -115,7 +118,7 @@ export const POST: RequestHandler = async (event) => {
 				endTimestamp,
 				durationMs: endTimestamp - startTimestamp
 			},
-			version: process.env.npm_package_version ?? 'unknown'
+			version: appVersion
 		});
 	} catch (error) {
 		logger.error('[API] Captcha bypass request failed', error instanceof Error ? error : undefined);
@@ -132,7 +135,7 @@ export const POST: RequestHandler = async (event) => {
 					endTimestamp,
 					durationMs: endTimestamp - startTimestamp
 				},
-				version: process.env.npm_package_version ?? 'unknown'
+				version: appVersion
 			},
 			{ status: 500 }
 		);

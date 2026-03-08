@@ -2,7 +2,7 @@
 # Cinephage Docker Compose
 # =============================================================================
 # Official image: ghcr.io/moldytaint/cinephage:latest
-# Optional: set IMAGE_TAG to pin a specific image tag
+# Optional: set IMAGE_TAG to `dev` for preview or `vX.Y.Z` to pin a stable release
 # To build from source instead of pulling the image:
 #   Uncomment "build: ." and comment out "image:" below
 # =============================================================================

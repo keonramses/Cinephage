@@ -7,6 +7,7 @@ import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
 import { db } from '$lib/server/db';
 import { settings } from '$lib/server/db/schema';
+import { resolveAppVersion } from '$lib/version.js';
 
 export const GET: RequestHandler = async () => {
 	const checks: Record<string, { status: 'healthy' | 'unhealthy'; latencyMs?: number }> = {};
@@ -28,7 +29,7 @@ export const GET: RequestHandler = async () => {
 	return json(
 		{
 			status: overallHealthy ? 'healthy' : 'unhealthy',
-			version: process.env.npm_package_version ?? '0.0.1',
+			version: resolveAppVersion(),
 			uptime: Math.round(process.uptime()),
 			timestamp: new Date().toISOString(),
 			checks

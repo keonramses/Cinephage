@@ -6,7 +6,7 @@
 | ------- | --------- |
 | 0.1.x   | Yes       |
 
-As Cinephage is in active development, security updates are applied to the latest version. Users are encouraged to keep their installations up to date.
+As Cinephage is in active development, security updates are applied to the current stable release. Users are encouraged to keep their installations up to date.
 
 ## Reporting a Vulnerability
 
@@ -65,7 +65,7 @@ Cinephage is designed for use on trusted local networks. When exposing the appli
 ### Application Security
 
 1. **Keep Updated**
-   - Regularly update to the latest version
+   - Regularly update to the current stable release (`latest`) or a newer stable `vX.Y.Z`
    - Monitor the repository for security advisories
 
 2. **Environment Variables**

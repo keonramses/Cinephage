@@ -9,6 +9,7 @@
 	import { resolvePath } from '$lib/utils/routing';
 	import { env } from '$env/dynamic/public';
 	import { authClient } from '$lib/auth/client.js';
+	import { PLACEHOLDER_PACKAGE_VERSION } from '$lib/version.js';
 	import {
 		Menu,
 		Home,
@@ -119,7 +120,13 @@
 		}
 	];
 
-	const appVersion = env.PUBLIC_APP_VERSION?.trim();
+	const appVersion = (() => {
+		const version = env.PUBLIC_APP_VERSION?.trim();
+		if (!version || version === PLACEHOLDER_PACKAGE_VERSION) {
+			return 'dev-local';
+		}
+		return version;
+	})();
 
 	const useFocusedLayout = $derived(usesFocusedLayout($page.url.pathname));
 

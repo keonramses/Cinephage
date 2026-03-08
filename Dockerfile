@@ -35,7 +35,18 @@ FROM node:24-trixie-slim AS runner
 WORKDIR /app
 
 ARG APP_VERSION=dev
+ARG APP_SOURCE=https://github.com/MoldyTaint/Cinephage
+ARG VCS_REF=unknown
+ARG BUILD_CREATED=unknown
+ENV APP_VERSION=${APP_VERSION}
 ENV PUBLIC_APP_VERSION=${APP_VERSION}
+
+LABEL org.opencontainers.image.title='Cinephage' \
+	org.opencontainers.image.description='Self-hosted media management application' \
+	org.opencontainers.image.source="${APP_SOURCE}" \
+	org.opencontainers.image.revision="${VCS_REF}" \
+	org.opencontainers.image.created="${BUILD_CREATED}" \
+	org.opencontainers.image.version="${APP_VERSION}"
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
 	wget \

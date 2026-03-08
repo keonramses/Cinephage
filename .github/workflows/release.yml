@@ -1,7 +1,7 @@
 # Create versioned releases by promoting existing CI Docker images
 #
 # Triggers:
-# - Manual workflow_dispatch from main or dev branches
+# - Manual workflow_dispatch from main only
 #
 # This workflow:
 # 1. Promotes existing CI architecture tags into release tags
@@ -14,10 +14,9 @@ on:
   workflow_dispatch:
     branches:
       - main
-      - dev
     inputs:
       release_type:
-        description: 'Version bump type (dev branch remaps major to minor)'
+        description: 'Version bump type for the next stable release'
         required: true
         type: choice
         default: patch
@@ -32,7 +31,7 @@ on:
         type: string
         default: ''
       source_tag:
-        description: 'CI candidate tag to promote (without -amd64/-arm64), e.g. edge-20260306-123'
+        description: 'CI candidate tag to promote (without -amd64/-arm64), e.g. main-20260306-123'
         required: true
         type: string
       release_notes:
@@ -57,6 +56,7 @@ jobs:
       version: ${{ steps.resolve-version.outputs.version }}
       is_prerelease: ${{ steps.release-mode.outputs.is_prerelease }}
       source_tag: ${{ steps.validate-source-tag.outputs.source_tag }}
+      git_sha: ${{ steps.capture-git-sha.outputs.git_sha }}
 
     steps:
       - name: Checkout repository
@@ -69,7 +69,6 @@ jobs:
         env:
           RELEASE_TYPE: ${{ github.event.inputs.release_type }}
           INPUT_VERSION: ${{ github.event.inputs.version }}
-          REF_NAME: ${{ github.ref_name }}
         run: |
           set -euo pipefail
 
@@ -87,10 +86,6 @@ jobs:
               echo "${BASH_REMATCH[1]} ${BASH_REMATCH[2]} ${BASH_REMATCH[3]}"
               return 0
             fi
-            if [[ "$tag" =~ ^v([0-9]+)\.([0-9]+)\.([0-9]+)-dev([.-][0-9A-Za-z]+)?$ ]]; then
-              echo "${BASH_REMATCH[1]} ${BASH_REMATCH[2]} ${BASH_REMATCH[3]}"
-              return 0
-            fi
             return 1
           }
 
@@ -100,12 +95,6 @@ jobs:
           fi
 
           BASE_TAG="$LAST_STABLE_TAG"
-
-          BUMP_TYPE="$RELEASE_TYPE"
-          if [ "$REF_NAME" = 'dev' ] && [ "$RELEASE_TYPE" = 'major' ]; then
-            echo "ℹ️ Dev branch releases do not support major bumps; treating release_type=major as minor."
-            BUMP_TYPE='minor'
-          fi
 
           case "$RELEASE_TYPE" in
             custom)
@@ -126,7 +115,7 @@ jobs:
                 exit 1
               fi
 
-              case "$BUMP_TYPE" in
+              case "$RELEASE_TYPE" in
                 patch)
                   PATCH=$((PATCH + 1))
                   ;;
@@ -149,35 +138,6 @@ jobs:
               ;;
           esac
 
-          # Dev-branch releases are always tagged as dev variants.
-          # For auto-bumps, skip existing tags while preserving the selected bump semantics.
-          if [ "$REF_NAME" = 'dev' ]; then
-            if [ "$RELEASE_TYPE" = 'custom' ]; then
-              if [[ ! "$VERSION" =~ -dev([.-][0-9A-Za-z]+)?$ ]]; then
-                VERSION="${VERSION}-dev"
-              fi
-            else
-              if ! read -r DEV_MAJOR DEV_MINOR DEV_PATCH < <(parse_core_semver "$VERSION"); then
-                echo "❌ Could not parse dev version base: ${VERSION}"
-                exit 1
-              fi
-
-              while git rev-parse "v${DEV_MAJOR}.${DEV_MINOR}.${DEV_PATCH}-dev" >/dev/null 2>&1; do
-                case "$BUMP_TYPE" in
-                  patch)
-                    DEV_PATCH=$((DEV_PATCH + 1))
-                    ;;
-                  *)
-                    DEV_MINOR=$((DEV_MINOR + 1))
-                    DEV_PATCH=0
-                    ;;
-                esac
-              done
-
-              VERSION="v${DEV_MAJOR}.${DEV_MINOR}.${DEV_PATCH}-dev"
-            fi
-          fi
-
           echo "Resolved release version: ${VERSION}"
           echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
 
@@ -198,26 +158,25 @@ jobs:
         run: |
           set -euo pipefail
 
-          if [ "$REF_NAME" != 'main' ] && [ "$REF_NAME" != 'dev' ]; then
-            echo "❌ Releases are only allowed from main or dev. Got: ${REF_NAME}"
+          if [ "$REF_NAME" != 'main' ]; then
+            echo "❌ Releases are only allowed from main. Got: ${REF_NAME}"
             exit 1
           fi
 
           IS_PRERELEASE='false'
           REASON='stable-main'
 
-          # All dev-branch releases are prereleases.
-          if [ "$REF_NAME" = 'dev' ]; then
-            IS_PRERELEASE='true'
-            REASON='dev-branch'
-          # Main-branch prerelease tags (rc/beta/alpha/pre/preview) are also prereleases.
-          elif [[ "$VERSION" =~ -([Rr][Cc]|[Bb]eta|[Aa]lpha|[Pp]re|[Pp]review)([.-]?[0-9A-Za-z]*)?$ ]]; then
+          if [[ "$VERSION" =~ -([Rr][Cc]|[Bb]eta|[Aa]lpha|[Pp]re|[Pp]review)([.-]?[0-9A-Za-z]*)?$ ]]; then
             IS_PRERELEASE='true'
             REASON='version-suffix'
           fi
 
           echo "is_prerelease=${IS_PRERELEASE}" >> "$GITHUB_OUTPUT"
           echo "Detected prerelease mode: ${IS_PRERELEASE} (${REASON})"
+
+      - name: Capture release commit SHA
+        id: capture-git-sha
+        run: echo "git_sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
 
       - name: Check if tag already exists
         env:
@@ -249,14 +208,8 @@ jobs:
             exit 1
           fi
 
-          if [ "$REF_NAME" = 'main' ] && [[ ! "$SOURCE_TAG" =~ ^edge-[0-9]{8}-[0-9]+$ ]]; then
-            echo "❌ main releases must promote an immutable edge tag (edge-YYYYMMDD-RUN)."
-            echo "Got: ${SOURCE_TAG}"
-            exit 1
-          fi
-
-          if [ "$REF_NAME" = 'dev' ] && [[ ! "$SOURCE_TAG" =~ ^dev-[0-9]{8}-[0-9]+$ ]]; then
-            echo "❌ dev releases must promote an immutable dev tag (dev-YYYYMMDD-RUN)."
+          if [[ ! "$SOURCE_TAG" =~ ^main-[0-9]{8}-[0-9]+$ ]]; then
+            echo "❌ Releases must promote an immutable main tag (main-YYYYMMDD-RUN)."
             echo "Got: ${SOURCE_TAG}"
             exit 1
           fi
@@ -275,6 +228,9 @@ jobs:
       id-token: write
 
     steps:
+      - name: Checkout repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+
       - name: Set lowercase image name
         run: echo "IMAGE_NAME_LC=${GITHUB_REPOSITORY,,}" >> "$GITHUB_ENV"
 
@@ -317,7 +273,6 @@ jobs:
 
       - name: Promote source images to release tags with release metadata
         env:
-          REF_NAME: ${{ github.ref_name }}
           SOURCE_TAG: ${{ needs.validate.outputs.source_tag }}
           VERSION: ${{ needs.validate.outputs.version }}
           IS_PRERELEASE: ${{ needs.validate.outputs.is_prerelease }}
@@ -334,23 +289,29 @@ jobs:
           crane mutate "$SOURCE_AMD64_IMAGE" \
             --platform linux/amd64 \
             --tag "$RELEASE_AMD64_IMAGE" \
+            --env "APP_VERSION=$VERSION" \
             --env "PUBLIC_APP_VERSION=$VERSION" \
             --label "org.opencontainers.image.version=$VERSION"
 
           crane mutate "$SOURCE_ARM64_IMAGE" \
             --platform linux/arm64 \
             --tag "$RELEASE_ARM64_IMAGE" \
+            --env "APP_VERSION=$VERSION" \
             --env "PUBLIC_APP_VERSION=$VERSION" \
             --label "org.opencontainers.image.version=$VERSION"
 
-          # Confirm the runtime app version env was written to promoted tags.
+          # Confirm the runtime app version envs were written to promoted tags.
+          AMD64_APP_VERSION_ENV=$(crane config --platform linux/amd64 "$RELEASE_AMD64_IMAGE" | jq -r '.config.Env[]? | select(startswith("APP_VERSION="))' | tail -n 1)
+          ARM64_APP_VERSION_ENV=$(crane config --platform linux/arm64 "$RELEASE_ARM64_IMAGE" | jq -r '.config.Env[]? | select(startswith("APP_VERSION="))' | tail -n 1)
           AMD64_VERSION_ENV=$(crane config --platform linux/amd64 "$RELEASE_AMD64_IMAGE" | jq -r '.config.Env[]? | select(startswith("PUBLIC_APP_VERSION="))' | tail -n 1)
           ARM64_VERSION_ENV=$(crane config --platform linux/arm64 "$RELEASE_ARM64_IMAGE" | jq -r '.config.Env[]? | select(startswith("PUBLIC_APP_VERSION="))' | tail -n 1)
+          echo "amd64 ${AMD64_APP_VERSION_ENV}"
+          echo "arm64 ${ARM64_APP_VERSION_ENV}"
           echo "amd64 ${AMD64_VERSION_ENV}"
           echo "arm64 ${ARM64_VERSION_ENV}"
 
-          if [ "$AMD64_VERSION_ENV" != "PUBLIC_APP_VERSION=$VERSION" ] || [ "$ARM64_VERSION_ENV" != "PUBLIC_APP_VERSION=$VERSION" ]; then
-            echo "❌ Failed to set PUBLIC_APP_VERSION metadata on promoted images"
+          if [ "$AMD64_APP_VERSION_ENV" != "APP_VERSION=$VERSION" ] || [ "$ARM64_APP_VERSION_ENV" != "APP_VERSION=$VERSION" ] || [ "$AMD64_VERSION_ENV" != "PUBLIC_APP_VERSION=$VERSION" ] || [ "$ARM64_VERSION_ENV" != "PUBLIC_APP_VERSION=$VERSION" ]; then
+            echo "❌ Failed to set runtime version metadata on promoted images"
             exit 1
           fi
 
@@ -363,8 +324,8 @@ jobs:
             exit 1
           fi
 
-          # Tag as latest only for stable main releases.
-          if [ "$REF_NAME" = 'main' ] && [ "$IS_PRERELEASE" != 'true' ]; then
+          # Tag as latest only for stable releases.
+          if [ "$IS_PRERELEASE" != 'true' ]; then
             crane tag "${{ env.REGISTRY }}/${{ env.IMAGE_NAME_LC }}@${RELEASE_DIGEST}" latest
             LATEST_DIGEST="$(docker buildx imagetools inspect "${{ env.REGISTRY }}/${{ env.IMAGE_NAME_LC }}:latest" | awk '/^Digest:/ {print $2; exit}')"
 
@@ -377,7 +338,7 @@ jobs:
 
             echo "✅ Promoted ${SOURCE_TAG} to ${VERSION} and latest"
           else
-            echo "✅ Promoted ${SOURCE_TAG} to ${VERSION} (latest skipped for prerelease/non-main)"
+            echo "✅ Promoted ${SOURCE_TAG} to ${VERSION} (latest skipped for prerelease)"
           fi
 
       - name: Get manifest digest
@@ -413,9 +374,6 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           VERSION: ${{ needs.validate.outputs.version }}
         run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-
           # Create and push tag
           if git rev-parse "$VERSION" >/dev/null 2>&1; then
             echo "⚠️  Tag already exists, skipping tag creation"
@@ -432,11 +390,13 @@ jobs:
           VERSION: ${{ needs.validate.outputs.version }}
           SOURCE_TAG: ${{ needs.validate.outputs.source_tag }}
           EXTRA_NOTES: ${{ github.event.inputs.release_notes }}
+          RELEASE_GIT_SHA: ${{ needs.validate.outputs.git_sha }}
         with:
           script: |
             const version = process.env.VERSION;
             const sourceTag = process.env.SOURCE_TAG;
             const extraNotes = (process.env.EXTRA_NOTES || '').trim();
+            const releaseSha = process.env.RELEASE_GIT_SHA;
             const owner = context.repo.owner;
             const repo = context.repo.repo;
             const imageRef = `ghcr.io/${owner.toLowerCase()}/${repo.toLowerCase()}:${version}`;
@@ -479,6 +439,7 @@ jobs:
             const preface = [];
             preface.push(`Promoted from CI candidate: \`${sourceTag}\``);
             preface.push(`Container image: \`${imageRef}\``);
+            preface.push(`Release commit: \`${releaseSha}\``);
 
             if (isFirstRelease) {
               preface.push('');
@@ -498,13 +459,24 @@ jobs:
             core.setOutput('body', body);
 
       - name: Create GitHub Release
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: ${{ needs.validate.outputs.version }}
-          name: ${{ needs.validate.outputs.version }}
-          body: ${{ steps.notes.outputs.body }}
-          draft: false
-          prerelease: ${{ needs.validate.outputs.is_prerelease == 'true' }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ needs.validate.outputs.version }}
+          BODY: ${{ steps.notes.outputs.body }}
+          IS_PRERELEASE: ${{ needs.validate.outputs.is_prerelease }}
+        run: |
+          set -euo pipefail
+
+          declare -a prerelease_args=()
+          if [ "$IS_PRERELEASE" = 'true' ]; then
+            prerelease_args+=(--prerelease)
+          fi
+
+          gh release create "$VERSION" \
+            --title "$VERSION" \
+            --notes "$BODY" \
+            --verify-tag \
+            "${prerelease_args[@]}"
 
   cleanup-images:
     name: Cleanup Old Images

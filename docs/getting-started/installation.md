@@ -36,6 +36,12 @@ Get Cinephage up and running with Docker (recommended) or manual installation.
 
 Docker provides the simplest setup and automatic updates.
 
+Tag policy:
+
+- `latest` = current stable release
+- `dev` = current preview build from the `dev` branch
+- `vX.Y.Z` = pinned stable release
+
 ### Quick Start
 
 Create a `docker-compose.yaml` file:
@@ -130,6 +136,8 @@ docker run -d \
 > **Note:** When using `docker run`, pass the actual application variables (`ORIGIN`, `BETTER_AUTH_URL`, `TZ`, `PUID`, `PGID`) directly.
 >
 > The container starts as root, then the entrypoint automatically drops privileges to `PUID:PGID` (default: 1000:1000) and fixes ownership of `/config` and cache directories.
+
+If you want preview builds instead of stable releases, change the image tag to `ghcr.io/moldytaint/cinephage:dev`.
 
 ### Running Bundled Scripts in Docker
 

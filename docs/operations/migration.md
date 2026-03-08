@@ -4,6 +4,12 @@
 
 This guide covers upgrading from older Cinephage versions with breaking changes.
 
+Current deployment tags:
+
+- `latest` = stable
+- `dev` = preview
+- `vX.Y.Z` = pinned stable release
+
 ---
 
 ## Volume Mount Migration (/app/data → /config)
@@ -338,7 +344,7 @@ docker compose up -d
 
 ### What Changed
 
-- Base image: `node:22-alpine` → `node:22-slim` (Debian)
+- Base image: `node:22-alpine` -> `node:24-trixie-slim` (Debian)
 - Image size: ~180MB → ~220MB
 - New feature: Camoufox browser support for Cloudflare bypass
 
@@ -427,8 +433,8 @@ tar -czf cinephage-backup-$(date +%Y%m%d).tar.gz ./config
 **Step 3:** Update `docker-compose.yaml` to use old image:
 
 ```yaml
-# Find old image tags at: https://github.com/MoldyTaint/cinephage/pkgs/container/cinephage
-image: ghcr.io/moldytaint/cinephage:sha-2cd78ce
+# Find stable image tags at: https://github.com/MoldyTaint/cinephage/pkgs/container/cinephage
+image: ghcr.io/moldytaint/cinephage:v1.2.3
 ```
 
 **Step 4:** If rolling back to pre-/config version, restore old volume mounts:

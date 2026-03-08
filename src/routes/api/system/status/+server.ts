@@ -8,6 +8,7 @@
 import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types.js';
 import { serviceManager } from '$lib/server/services/index.js';
+import { resolveAppVersion } from '$lib/version.js';
 
 export const GET: RequestHandler = async () => {
 	const services = serviceManager.getStatus();
@@ -16,6 +17,7 @@ export const GET: RequestHandler = async () => {
 	return json({
 		success: true,
 		ready: allReady,
+		version: resolveAppVersion(),
 		services
 	});
 };

@@ -338,6 +338,8 @@ services:
       - /path/to/downloads:/downloads
 ```
 
+Use `:latest` for the current stable release, `:dev` for preview builds, or `:vX.Y.Z` to pin a specific stable version.
+
 ---
 
 ## Environment Variable Precedence

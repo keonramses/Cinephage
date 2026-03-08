@@ -1,6 +1,7 @@
 import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
 import { getIndexerManager } from '$lib/server/indexers/IndexerManager';
+import { resolveAppVersion } from '$lib/version.js';
 
 export const GET: RequestHandler = async () => {
 	// Get indexer manager to check definition status
@@ -25,6 +26,7 @@ export const GET: RequestHandler = async () => {
 
 	return json({
 		status: 'ok',
+		version: resolveAppVersion(),
 		indexers: {
 			definitionsLoaded,
 			definitionErrors

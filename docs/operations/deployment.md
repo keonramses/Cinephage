@@ -10,9 +10,15 @@ Docker is the simplest way to deploy Cinephage in production.
 
 ### Docker Image
 
-Cinephage uses `node:22-slim` (Debian) as its base image. This provides compatibility with the Camoufox browser used for Cloudflare bypass.
+Cinephage uses `node:24-trixie-slim` (Debian) as its base image. This provides compatibility with the Camoufox browser used for Cloudflare bypass.
 
 > **Note for existing users:** If you're upgrading from an older version that used Alpine, see the [Migration Notes in CHANGELOG.md](../../CHANGELOG.md#migration-notes) for upgrade instructions.
+
+Deployment tags:
+
+- `latest` = current stable release
+- `dev` = current preview build
+- `vX.Y.Z` = pinned stable release
 
 ### Quick Start
 

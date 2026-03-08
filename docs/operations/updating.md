@@ -1,6 +1,6 @@
 # Updating
 
-Keep Cinephage up to date with the latest features and fixes.
+Keep Cinephage up to date with the latest stable releases and fixes.
 
 > **Alpha Software**: Breaking changes may occur between updates. Always backup before updating and review release notes.
 
@@ -40,12 +40,18 @@ Look for:
 
 ## Docker Update
 
+Tag policy:
+
+- `latest` = current stable release
+- `dev` = current preview build
+- `vX.Y.Z` = pinned stable release
+
 ### Standard Update
 
 ```bash
 cd /opt/cinephage
 
-# Pull latest image
+# Pull the configured image tag
 docker compose pull
 
 # Restart with new image
@@ -94,7 +100,7 @@ sudo systemctl stop cinephage
 # Backup database
 cp /opt/cinephage/data/cinephage.db /opt/cinephage/data/cinephage.db.backup
 
-# Pull latest code
+# Pull latest stable code
 cd /opt/cinephage
 git fetch origin
 git pull origin main
@@ -276,10 +282,10 @@ If update introduces breaking changes:
 Check current version:
 
 ```bash
-# From package.json
-cat /opt/cinephage/package.json | grep version
-
 # From running instance
+curl -s http://localhost:3000/health | jq .version
+
+# Alternate status endpoint
 curl -s http://localhost:3000/api/system/status | jq .version
 ```
 
