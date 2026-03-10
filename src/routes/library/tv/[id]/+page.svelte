@@ -44,6 +44,9 @@
 	const series = $derived(seriesState ?? data.series);
 	const seasons = $derived(seasonsState ?? data.seasons);
 	const queueItems = $derived(queueItemsState ?? data.queueItems);
+	const effectiveScoringProfileId = $derived.by(
+		() => series.scoringProfileId ?? data.qualityProfiles.find((p) => p.isDefault)?.id ?? null
+	);
 
 	function computeSeriesEpisodeStats(seasonList: PageData['seasons']) {
 		const regularSeasons = seasonList.filter((season) => season.seasonNumber > 0);
@@ -1198,7 +1201,7 @@
 	async function handleGrab(
 		release: Release,
 		streaming?: boolean
-	): Promise<{ success: boolean; error?: string }> {
+	): Promise<{ success: boolean; error?: string; errorCode?: string }> {
 		try {
 			// Determine season/episode info from release metadata
 			const episodeMatch = release.episodeMatch || release.parsed?.episode;
@@ -1257,7 +1260,7 @@
 				}, 500);
 			}
 
-			return { success: result.success, error: result.error };
+			return { success: result.success, error: result.error, errorCode: result.errorCode };
 		} catch (error) {
 			return {
 				success: false,
@@ -1450,7 +1453,7 @@
 	tvdbId={series.tvdbId}
 	year={series.year}
 	mediaType="tv"
-	scoringProfileId={series.scoringProfileId}
+	scoringProfileId={effectiveScoringProfileId ?? undefined}
 	season={searchContext?.season}
 	episode={searchContext?.episode}
 	searchMode={searchContext?.searchMode ?? 'all'}

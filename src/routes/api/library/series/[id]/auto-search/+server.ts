@@ -236,10 +236,11 @@ export const POST: RequestHandler = async ({ params, request }) => {
 							});
 
 							sendEvent('search:completed', {
-								success: true,
+								success: !result.error,
 								results: result.results,
 								summary: result.summary,
-								seasonPacks: result.seasonPacks
+								seasonPacks: result.seasonPacks,
+								error: result.error
 							});
 							break;
 						}
@@ -256,10 +257,11 @@ export const POST: RequestHandler = async ({ params, request }) => {
 							const result = await searchOnAdd.searchBulkEpisodes(episodeIds, onProgress);
 
 							sendEvent('search:completed', {
-								success: true,
+								success: !result.error,
 								results: result.results,
 								summary: result.summary,
-								seasonPacks: result.seasonPacks
+								seasonPacks: result.seasonPacks,
+								error: result.error
 							});
 							break;
 						}

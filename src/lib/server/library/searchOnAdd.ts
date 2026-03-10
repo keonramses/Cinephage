@@ -26,6 +26,7 @@ import { db } from '$lib/server/db/index.js';
 import { movieFiles, series, episodes, episodeFiles } from '$lib/server/db/schema.js';
 import { eq, and, inArray } from 'drizzle-orm';
 import type { SearchCriteria } from '$lib/server/indexers/types';
+import { evaluateIndexerSearchAvailability } from '$lib/server/indexers/search/availability';
 
 interface SearchForMovieParams {
 	movieId: string;
@@ -115,6 +116,7 @@ interface MultiSearchResult {
 		/** Number of individual episodes grabbed (not via pack) */
 		individualEpisodesGrabbed?: number;
 	};
+	error?: string;
 	/** Season packs that were grabbed */
 	seasonPacks?: Array<{
 		seasonNumber: number;
@@ -164,6 +166,30 @@ class SearchOnAddService {
 			logger.debug('[SearchOnAdd] Movie file status', { movieId, hasExistingFile });
 
 			const indexerManager = await getIndexerManager();
+			const searchSource: 'interactive' | 'automatic' = bypassMonitoring
+				? 'interactive'
+				: 'automatic';
+			const indexerAvailability = evaluateIndexerSearchAvailability(
+				await indexerManager.getIndexers(),
+				{
+					searchType: 'movie',
+					searchSource,
+					scoringProfileId,
+					getDefinitionCapabilities: (definitionId) =>
+						indexerManager.getDefinitionCapabilities(definitionId)
+				}
+			);
+
+			if (!indexerAvailability.ok) {
+				const errorMessage = indexerAvailability.message || 'No indexers are available';
+				logger.info('[SearchOnAdd] Movie search blocked by indexer availability', {
+					movieId,
+					code: indexerAvailability.code,
+					message: errorMessage
+				});
+				onProgress?.('error', errorMessage, { current: 100, total: 100 });
+				return { success: false, error: errorMessage };
+			}
 
 			// Build search criteria
 			const criteria: SearchCriteria = {
@@ -177,9 +203,6 @@ class SearchOnAddService {
 			// Perform enriched search to get scored releases (automatic - on add)
 			onProgress?.('searching', 'Querying indexers for releases...', { current: 10, total: 100 });
 
-			const searchSource: 'interactive' | 'automatic' = bypassMonitoring
-				? 'interactive'
-				: 'automatic';
 			const searchResult = await indexerManager.searchEnhanced(criteria, {
 				searchSource,
 				enrichment: {
@@ -366,6 +389,26 @@ class SearchOnAddService {
 
 		try {
 			const indexerManager = await getIndexerManager();
+			const indexerAvailability = evaluateIndexerSearchAvailability(
+				await indexerManager.getIndexers(),
+				{
+					searchType: 'tv',
+					searchSource: 'automatic',
+					scoringProfileId: scoringProfileId ?? undefined,
+					getDefinitionCapabilities: (definitionId) =>
+						indexerManager.getDefinitionCapabilities(definitionId)
+				}
+			);
+
+			if (!indexerAvailability.ok) {
+				const errorMessage = indexerAvailability.message || 'No indexers are available';
+				logger.info('[SearchOnAdd] Series search blocked by indexer availability', {
+					seriesId,
+					code: indexerAvailability.code,
+					message: errorMessage
+				});
+				return { success: false, error: errorMessage };
+			}
 
 			// Build search criteria for the series
 			// For TV, we search without specific season/episode to find season packs first
@@ -524,6 +567,29 @@ class SearchOnAddService {
 			logger.debug('[SearchOnAdd] Episode file status', { episodeId, hasExistingFile });
 
 			const indexerManager = await getIndexerManager();
+			const searchSource: 'interactive' | 'automatic' = bypassMonitoring
+				? 'interactive'
+				: 'automatic';
+			const indexerAvailability = evaluateIndexerSearchAvailability(
+				await indexerManager.getIndexers(),
+				{
+					searchType: 'tv',
+					searchSource,
+					scoringProfileId: seriesData.scoringProfileId ?? undefined,
+					getDefinitionCapabilities: (definitionId) =>
+						indexerManager.getDefinitionCapabilities(definitionId)
+				}
+			);
+
+			if (!indexerAvailability.ok) {
+				const errorMessage = indexerAvailability.message || 'No indexers are available';
+				logger.info('[SearchOnAdd] Episode search blocked by indexer availability', {
+					episodeId,
+					code: indexerAvailability.code,
+					message: errorMessage
+				});
+				return { success: false, error: errorMessage };
+			}
 
 			// Build search criteria with season and episode number
 			const criteria: SearchCriteria = {
@@ -537,9 +603,6 @@ class SearchOnAddService {
 			};
 
 			// Perform enriched search to get scored releases (automatic - on add)
-			const searchSource: 'interactive' | 'automatic' = bypassMonitoring
-				? 'interactive'
-				: 'automatic';
 			const searchResult = await indexerManager.searchEnhanced(criteria, {
 				searchSource,
 				enrichment: {
@@ -682,6 +745,30 @@ class SearchOnAddService {
 			});
 
 			const indexerManager = await getIndexerManager();
+			const searchSource: 'interactive' | 'automatic' = bypassMonitoring
+				? 'interactive'
+				: 'automatic';
+			const indexerAvailability = evaluateIndexerSearchAvailability(
+				await indexerManager.getIndexers(),
+				{
+					searchType: 'tv',
+					searchSource,
+					scoringProfileId: seriesData.scoringProfileId ?? undefined,
+					getDefinitionCapabilities: (definitionId) =>
+						indexerManager.getDefinitionCapabilities(definitionId)
+				}
+			);
+
+			if (!indexerAvailability.ok) {
+				const errorMessage = indexerAvailability.message || 'No indexers are available';
+				logger.info('[SearchOnAdd] Season search blocked by indexer availability', {
+					seriesId,
+					seasonNumber,
+					code: indexerAvailability.code,
+					message: errorMessage
+				});
+				return { success: false, error: errorMessage };
+			}
 
 			// Build search criteria with season only (no episode number = season pack search)
 			const criteria: SearchCriteria = {
@@ -694,9 +781,6 @@ class SearchOnAddService {
 			};
 
 			// Perform enriched search to get scored releases (automatic - on add)
-			const searchSource: 'interactive' | 'automatic' = bypassMonitoring
-				? 'interactive'
-				: 'automatic';
 			const searchResult = await indexerManager.searchEnhanced(criteria, {
 				searchSource,
 				enrichment: {
@@ -821,7 +905,34 @@ class SearchOnAddService {
 			if (!seriesData) {
 				return {
 					results: [],
-					summary: { searched: 0, found: 0, grabbed: 0 }
+					summary: { searched: 0, found: 0, grabbed: 0 },
+					error: 'Series not found'
+				};
+			}
+
+			const indexerManager = await getIndexerManager();
+			const indexerAvailability = evaluateIndexerSearchAvailability(
+				await indexerManager.getIndexers(),
+				{
+					searchType: 'tv',
+					searchSource: 'interactive',
+					scoringProfileId: seriesData.scoringProfileId ?? undefined,
+					getDefinitionCapabilities: (definitionId) =>
+						indexerManager.getDefinitionCapabilities(definitionId)
+				}
+			);
+
+			if (!indexerAvailability.ok) {
+				const errorMessage = indexerAvailability.message || 'No indexers are available';
+				logger.info('[SearchOnAdd] Missing episodes search blocked by indexer availability', {
+					seriesId,
+					code: indexerAvailability.code,
+					message: errorMessage
+				});
+				return {
+					results: [],
+					summary: { searched: 0, found: 0, grabbed: 0 },
+					error: errorMessage
 				};
 			}
 
@@ -941,7 +1052,8 @@ class SearchOnAddService {
 			logger.error('[SearchOnAdd] Missing episodes search failed', { seriesId, error: message });
 			return {
 				results: [],
-				summary: { searched: 0, found: 0, grabbed: 0 }
+				summary: { searched: 0, found: 0, grabbed: 0 },
+				error: message
 			};
 		}
 	}
@@ -968,6 +1080,32 @@ class SearchOnAddService {
 		}
 
 		try {
+			const indexerManager = await getIndexerManager();
+			const indexerAvailability = evaluateIndexerSearchAvailability(
+				await indexerManager.getIndexers(),
+				{
+					searchType: 'tv',
+					searchSource: 'interactive',
+					scoringProfileId: undefined,
+					getDefinitionCapabilities: (definitionId) =>
+						indexerManager.getDefinitionCapabilities(definitionId)
+				}
+			);
+
+			if (!indexerAvailability.ok) {
+				const errorMessage = indexerAvailability.message || 'No indexers are available';
+				logger.info('[SearchOnAdd] Bulk episode search blocked by indexer availability', {
+					count: episodeIds.length,
+					code: indexerAvailability.code,
+					message: errorMessage
+				});
+				return {
+					results: [],
+					summary: { searched: 0, found: 0, grabbed: 0 },
+					error: errorMessage
+				};
+			}
+
 			// Load all episodes
 			const allEpisodes = await db.query.episodes.findMany({
 				where: inArray(episodes.id, episodeIds)
@@ -1116,7 +1254,8 @@ class SearchOnAddService {
 			logger.error('[SearchOnAdd] Bulk episode search failed', { error: message });
 			return {
 				results: [],
-				summary: { searched: 0, found: 0, grabbed: 0 }
+				summary: { searched: 0, found: 0, grabbed: 0 },
+				error: message
 			};
 		}
 	}

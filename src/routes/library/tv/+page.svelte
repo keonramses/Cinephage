@@ -44,6 +44,9 @@
 	let selectedSeriesForSearch = $state<(typeof data.series)[number] | null>(null);
 	let autoSearchingIds = new SvelteSet<string>();
 	const searchProgress = createSearchProgress();
+	const defaultScoringProfileId = $derived.by(
+		() => data.qualityProfiles.find((profile) => profile.isDefault)?.id ?? null
+	);
 
 	const selectedCount = $derived(selectedSeries.size);
 
@@ -229,7 +232,9 @@
 
 			if (searchProgress.results) {
 				const summary = searchProgress.results.summary;
-				if (summary && summary.grabbed > 0) {
+				if (searchProgress.results.error) {
+					toasts.error(searchProgress.results.error);
+				} else if (summary && summary.grabbed > 0) {
 					toasts.success(`Auto-grabbed ${summary.grabbed} release(s) for "${show.title}"`);
 				} else if (summary && summary.found > 0) {
 					toasts.info(`Found ${summary.found} releases but none met criteria for "${show.title}"`);
@@ -313,7 +318,7 @@
 				return { success: true };
 			} else {
 				toasts.error(result.error || 'Failed to grab release');
-				return { success: false, error: result.error };
+				return { success: false, error: result.error, errorCode: result.errorCode };
 			}
 		} catch {
 			toasts.error('Failed to grab release');
@@ -836,7 +841,9 @@
 		imdbId={selectedSeriesForSearch.imdbId ?? undefined}
 		year={selectedSeriesForSearch.year ?? undefined}
 		mediaType="tv"
-		scoringProfileId={selectedSeriesForSearch.scoringProfileId ?? undefined}
+		scoringProfileId={selectedSeriesForSearch.scoringProfileId ??
+			defaultScoringProfileId ??
+			undefined}
 		onClose={() => {
 			isSearchModalOpen = false;
 			selectedSeriesForSearch = null;

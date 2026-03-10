@@ -250,6 +250,8 @@ export interface GrabResponse {
 		};
 	};
 	error?: string;
+	/** Machine-readable error code for UI handling */
+	errorCode?: string;
 	/** Machine-readable rejection type for UI handling */
 	rejectionType?: string;
 	/** Upgrade decision details */

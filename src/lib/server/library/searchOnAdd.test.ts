@@ -54,12 +54,47 @@ vi.mock('$lib/logging/index.js', () => ({
 
 import { searchOnAdd } from './searchOnAdd';
 
+const TEST_INDEXER_CONFIG = {
+	id: 'indexer-1',
+	name: 'Cinephage Library',
+	definitionId: 'cinephage-stream',
+	enabled: true,
+	baseUrl: 'https://example.test',
+	alternateUrls: [],
+	priority: 1,
+	protocol: 'streaming',
+	enableAutomaticSearch: true,
+	enableInteractiveSearch: true
+};
+
+const TEST_INDEXER_CAPABILITIES = {
+	search: { available: true, supportedParams: [] },
+	movieSearch: { available: true, supportedParams: [] },
+	tvSearch: { available: true, supportedParams: [] },
+	categories: new Map([
+		[2000, 'Movies'],
+		[5000, 'TV']
+	]),
+	supportsPagination: false,
+	supportsInfoHash: true,
+	limitMax: 100,
+	limitDefault: 100
+};
+
+function createIndexerManagerMock() {
+	return {
+		searchEnhanced: mocks.searchEnhanced,
+		getIndexers: vi.fn().mockResolvedValue([TEST_INDEXER_CONFIG]),
+		getDefinitionCapabilities: vi.fn((definitionId: string) =>
+			definitionId === TEST_INDEXER_CONFIG.definitionId ? TEST_INDEXER_CAPABILITIES : undefined
+		)
+	};
+}
+
 describe('SearchOnAddService.searchForEpisode monitoring behavior', () => {
 	beforeEach(() => {
 		vi.clearAllMocks();
-		mocks.getIndexerManager.mockResolvedValue({
-			searchEnhanced: mocks.searchEnhanced
-		});
+		mocks.getIndexerManager.mockResolvedValue(createIndexerManagerMock());
 		mocks.getMultiSeasonSearchStrategy.mockReturnValue({
 			searchWithMultiSeasonPriority: mocks.searchWithMultiSeasonPriority
 		});
@@ -229,9 +264,7 @@ describe('SearchOnAddService.searchForEpisode monitoring behavior', () => {
 describe('SearchOnAddService.searchForMovie monitoring behavior', () => {
 	beforeEach(() => {
 		vi.clearAllMocks();
-		mocks.getIndexerManager.mockResolvedValue({
-			searchEnhanced: mocks.searchEnhanced
-		});
+		mocks.getIndexerManager.mockResolvedValue(createIndexerManagerMock());
 		mocks.movieFilesFindFirst.mockResolvedValue(undefined);
 		mocks.grabRelease.mockResolvedValue({
 			success: true,
@@ -329,6 +362,7 @@ describe('SearchOnAddService.searchForMovie monitoring behavior', () => {
 describe('SearchOnAddService.searchForMissingEpisodes monitoring behavior', () => {
 	beforeEach(() => {
 		vi.clearAllMocks();
+		mocks.getIndexerManager.mockResolvedValue(createIndexerManagerMock());
 		mocks.getMultiSeasonSearchStrategy.mockReturnValue({
 			searchWithMultiSeasonPriority: mocks.searchWithMultiSeasonPriority
 		});

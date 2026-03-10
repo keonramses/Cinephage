@@ -258,7 +258,7 @@
 			</button>
 
 			<!-- Action buttons -->
-			<div class="flex shrink-0 items-center gap-2 sm:ml-auto" title={seasonMonitorTooltip}>
+			<div class="flex shrink-0 items-center gap-2 sm:ml-auto">
 				<!-- Season monitor toggle -->
 				<button
 					class="btn btn-ghost btn-sm {season.monitored
@@ -266,6 +266,7 @@
 						: 'text-base-content/40'} {seasonMonitorDisabled ? 'opacity-40' : ''}"
 					onclick={handleSeasonMonitorToggle}
 					disabled={seasonMonitorDisabled}
+					title={seasonMonitorTooltip}
 				>
 					{#if seasonMonitorDisabled}
 						<Lock size={16} />

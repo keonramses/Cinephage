@@ -44,6 +44,9 @@
 	let selectedMovieForSearch = $state<(typeof data.movies)[number] | null>(null);
 	let autoSearchingIds = new SvelteSet<string>();
 	const searchProgress = createSearchProgress();
+	const defaultScoringProfileId = $derived.by(
+		() => data.qualityProfiles.find((profile) => profile.isDefault)?.id ?? null
+	);
 
 	const selectedCount = $derived(selectedMovies.size);
 
@@ -222,7 +225,9 @@
 			await searchProgress.startSearch(`/api/library/movies/${movieId}/auto-search`);
 
 			if (searchProgress.results) {
-				if (searchProgress.results.grabbed) {
+				if (searchProgress.results.error) {
+					toasts.error(searchProgress.results.error);
+				} else if (searchProgress.results.grabbed) {
 					toasts.success(
 						`Auto-grabbed "${searchProgress.results.releaseName}" for "${movie.title}"`
 					);
@@ -308,7 +313,7 @@
 				return { success: true };
 			} else {
 				toasts.error(result.error || 'Failed to grab release');
-				return { success: false, error: result.error };
+				return { success: false, error: result.error, errorCode: result.errorCode };
 			}
 		} catch {
 			toasts.error('Failed to grab release');
@@ -817,7 +822,9 @@
 		imdbId={selectedMovieForSearch.imdbId ?? undefined}
 		year={selectedMovieForSearch.year ?? undefined}
 		mediaType="movie"
-		scoringProfileId={selectedMovieForSearch.scoringProfileId ?? undefined}
+		scoringProfileId={selectedMovieForSearch.scoringProfileId ??
+			defaultScoringProfileId ??
+			undefined}
 		onClose={() => {
 			isSearchModalOpen = false;
 			selectedMovieForSearch = null;

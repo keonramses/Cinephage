@@ -46,6 +46,9 @@
 		grabbed?: boolean;
 		error?: string | null;
 		streaming?: boolean;
+		showUsenetStreamButton?: boolean;
+		canUsenetStream?: boolean;
+		usenetStreamUnavailableReason?: string | null;
 		onClick?: () => void;
 		clickable?: boolean;
 	}
@@ -57,6 +60,9 @@
 		grabbed = false,
 		error = null,
 		streaming = false,
+		showUsenetStreamButton = true,
+		canUsenetStream = true,
+		usenetStreamUnavailableReason = null,
 		onClick = undefined,
 		clickable = false
 	}: Props = $props();
@@ -147,6 +153,7 @@
 	}
 
 	async function handleStream() {
+		if (!canUsenetStream) return;
 		await onGrab(release, true);
 	}
 
@@ -268,13 +275,15 @@
 					<X size={16} />
 				</span>
 			{:else}
-				{#if release.protocol === 'usenet'}
+				{#if release.protocol === 'usenet' && showUsenetStreamButton}
 					<!-- Stream button for usenet releases -->
 					<button
 						class="btn btn-sm btn-accent"
 						onclick={handleStream}
-						disabled={grabbing || streaming}
-						title="Stream (NNTP)"
+						disabled={grabbing || streaming || !canUsenetStream}
+						title={canUsenetStream
+							? 'Stream (NNTP)'
+							: (usenetStreamUnavailableReason ?? 'NNTP streaming unavailable')}
 					>
 						{#if streaming}
 							<Loader2 size={16} class="animate-spin" />

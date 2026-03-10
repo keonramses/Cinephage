@@ -13,7 +13,9 @@ import type { DownloadInfo } from '$lib/server/downloadClients/core/interfaces';
 import { categoryMatchesSearchType, getCategoryContentType } from '$lib/server/indexers/types';
 import { strmService, StrmService, getStreamingBaseUrl } from '$lib/server/streaming';
 import { getNzbMountManager } from '$lib/server/streaming/nzb';
+import { getNntpServerService } from '$lib/server/streaming/nzb/NntpServerService';
 import { getUsenetStreamService } from '$lib/server/streaming/usenet/UsenetStreamService';
+import { getNntpManager } from '$lib/server/streaming/usenet/NntpManager';
 import { mediaInfoService } from '$lib/server/library/media-info';
 import { getLibraryRelativePath } from '$lib/server/library/media-paths.js';
 import { db } from '$lib/server/db';
@@ -187,6 +189,57 @@ export const POST: RequestHandler = async ({ request }) => {
 		// NZB STREAMING - Stream directly via NNTP without download client
 		// ============================================================
 		if (data.protocol === 'usenet' && data.streamUsenet) {
+			const nntpServerService = getNntpServerService();
+			const configuredServers = await nntpServerService.getServers();
+
+			if (configuredServers.length === 0) {
+				return json(
+					{
+						success: false,
+						errorCode: 'NNTP_NOT_CONFIGURED',
+						error:
+							'No NNTP servers are configured. Add one in Settings -> Integrations -> NNTP Servers.'
+					} satisfies GrabResponse,
+					{ status: 400 }
+				);
+			}
+
+			const enabledServers = configuredServers.filter((server) => server.enabled);
+			if (enabledServers.length === 0) {
+				return json(
+					{
+						success: false,
+						errorCode: 'NNTP_NOT_ENABLED',
+						error:
+							'NNTP servers are configured but disabled. Enable at least one server to stream Usenet releases.'
+					} satisfies GrabResponse,
+					{ status: 400 }
+				);
+			}
+
+			const nntpManager = getNntpManager();
+			if (!nntpManager.isReady || nntpManager.providerCount === 0) {
+				try {
+					await nntpManager.reload();
+				} catch (error) {
+					logger.warn('[Grab] Failed to reload NNTP manager before streaming grab', {
+						error: error instanceof Error ? error.message : String(error)
+					});
+				}
+			}
+
+			if (!nntpManager.isReady || nntpManager.providerCount === 0) {
+				return json(
+					{
+						success: false,
+						errorCode: 'NNTP_UNAVAILABLE',
+						error:
+							'NNTP streaming is temporarily unavailable. Verify server connectivity and try again.'
+					} satisfies GrabResponse,
+					{ status: 503 }
+				);
+			}
+
 			return await handleNzbStreamingGrab(data);
 		}
 
@@ -304,6 +357,7 @@ export const POST: RequestHandler = async ({ request }) => {
 			return json(
 				{
 					success: false,
+					errorCode: 'NO_ENABLED_DOWNLOAD_CLIENT',
 					error: `No enabled ${protocol} download client configured`
 				} satisfies GrabResponse,
 				{ status: 400 }

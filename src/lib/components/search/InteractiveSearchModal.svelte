@@ -95,6 +95,10 @@
 		rejectedIndexers?: RejectedIndexer[];
 	}
 
+	interface NntpServerStatus {
+		enabled?: boolean;
+	}
+
 	export type SearchMode = 'all' | 'multiSeasonPack';
 
 	interface Props {
@@ -113,7 +117,7 @@
 		onGrab: (
 			release: Release,
 			streaming?: boolean
-		) => Promise<{ success: boolean; error?: string }>;
+		) => Promise<{ success: boolean; error?: string; errorCode?: string }>;
 	}
 
 	let {
@@ -142,6 +146,9 @@
 	let streamingIds = new SvelteSet<string>();
 	let grabErrors = new SvelteMap<string, string>();
 	let searchTriggered = $state(false);
+	let usenetStreamingState = $state<
+		'unknown' | 'available' | 'noConfiguredServers' | 'noEnabledServers' | 'unavailable'
+	>('unknown');
 
 	// Sorting
 	let sortBy = $state<'score' | 'seeders' | 'size' | 'age'>('score');
@@ -190,6 +197,64 @@
 	function releaseKey(release: Release): string {
 		return `${release.guid}-${release.indexerId}`;
 	}
+
+	async function loadUsenetStreamingAvailability() {
+		try {
+			usenetStreamingState = 'unknown';
+			const response = await fetch('/api/usenet/servers');
+
+			if (!response.ok) {
+				usenetStreamingState = 'unavailable';
+				return;
+			}
+
+			const servers = (await response.json()) as NntpServerStatus[];
+
+			if (servers.length === 0) {
+				usenetStreamingState = 'noConfiguredServers';
+				return;
+			}
+
+			if (!servers.some((server) => server.enabled)) {
+				usenetStreamingState = 'noEnabledServers';
+				return;
+			}
+
+			usenetStreamingState = 'available';
+		} catch {
+			usenetStreamingState = 'unavailable';
+		}
+	}
+
+	function getGrabErrorMessage(errorCode?: string, error?: string): string {
+		switch (errorCode) {
+			case 'NNTP_NOT_CONFIGURED':
+				return 'No NNTP server configured. Add one in Settings -> Integrations -> NNTP Servers.';
+			case 'NNTP_NOT_ENABLED':
+				return 'No enabled NNTP server. Enable at least one server to use Stream.';
+			case 'NNTP_UNAVAILABLE':
+				return 'NNTP streaming is unavailable right now. Check NNTP server connectivity.';
+			case 'NO_ENABLED_DOWNLOAD_CLIENT':
+				return 'No enabled download client is configured for this protocol.';
+			default:
+				return error || 'Failed to grab';
+		}
+	}
+
+	const showUsenetStreamButton = $derived.by(() => usenetStreamingState !== 'noConfiguredServers');
+	const canUsenetStream = $derived.by(() => usenetStreamingState === 'available');
+	const usenetStreamUnavailableReason = $derived.by(() => {
+		switch (usenetStreamingState) {
+			case 'unknown':
+				return 'Checking NNTP server availability...';
+			case 'noEnabledServers':
+				return 'NNTP servers are configured but disabled. Enable one to stream.';
+			case 'unavailable':
+				return 'Unable to verify NNTP server status right now.';
+			default:
+				return null;
+		}
+	});
 
 	// Helper to check if a release is a multi-season pack
 	function isMultiSeasonPack(release: Release): boolean {
@@ -292,7 +357,8 @@
 	$effect(() => {
 		if (open && releases.length === 0 && !searching && !searchTriggered) {
 			searchTriggered = true;
-			performSearch();
+			void loadUsenetStreamingAvailability();
+			void performSearch();
 		}
 	});
 
@@ -309,6 +375,7 @@
 			grabErrors.clear();
 			filterQuery = '';
 			searchTriggered = false;
+			usenetStreamingState = 'unknown';
 		}
 	});
 
@@ -353,6 +420,12 @@
 	}
 
 	async function handleGrab(release: Release, streaming?: boolean) {
+		if (streaming && !canUsenetStream) {
+			const reason = usenetStreamUnavailableReason ?? 'NNTP streaming is unavailable';
+			grabErrors.set(releaseKey(release), reason);
+			return;
+		}
+
 		const key = releaseKey(release);
 		grabbingIds.add(key);
 		if (streaming) {
@@ -365,7 +438,7 @@
 			if (result.success) {
 				grabbedIds.add(key);
 			} else {
-				grabErrors.set(key, result.error || 'Failed to grab');
+				grabErrors.set(key, getGrabErrorMessage(result.errorCode, result.error));
 			}
 		} catch (err) {
 			grabErrors.set(key, err instanceof Error ? err.message : 'Failed');
@@ -791,6 +864,9 @@
 								grabbed={grabbedIds.has(releaseKey(release))}
 								streaming={streamingIds.has(releaseKey(release))}
 								error={grabErrors.get(releaseKey(release))}
+								{showUsenetStreamButton}
+								{canUsenetStream}
+								{usenetStreamUnavailableReason}
 								onClick={showDebugPanel ? () => (selectedDebugRelease = release) : undefined}
 								clickable={showDebugPanel}
 							/>
@@ -897,11 +973,14 @@
 									Failed
 								</span>
 							{:else}
-								{#if release.protocol === 'usenet'}
+								{#if release.protocol === 'usenet' && showUsenetStreamButton}
 									<button
 										class="btn btn-xs btn-accent"
 										onclick={() => handleGrab(release, true)}
-										disabled={isGrabbing || isStreaming}
+										disabled={isGrabbing || isStreaming || !canUsenetStream}
+										title={canUsenetStream
+											? 'Stream (NNTP)'
+											: (usenetStreamUnavailableReason ?? 'NNTP streaming unavailable')}
 									>
 										{#if isStreaming}
 											<Loader2 size={12} class="animate-spin" />

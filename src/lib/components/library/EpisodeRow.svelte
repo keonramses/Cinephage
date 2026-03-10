@@ -258,13 +258,14 @@
 				>
 					{episode.title || 'TBA'}
 				</span>
-				<div class="ml-auto flex shrink-0 items-center gap-1 sm:hidden" title={monitorTooltip}>
+				<div class="ml-auto flex shrink-0 items-center gap-1 sm:hidden">
 					<button
 						class="btn btn-ghost btn-xs {episode.monitored
 							? 'text-success'
 							: 'text-base-content/40'} {monitorDisabled ? 'opacity-40' : ''}"
 						onclick={handleMonitorClick}
 						disabled={monitorDisabled}
+						title={monitorTooltip}
 					>
 						{#if monitorDisabled}
 							<Lock size={14} />
@@ -490,7 +491,7 @@
 
 	<!-- Actions -->
 	<td class="hidden sm:table-cell">
-		<div class="flex flex-wrap items-center gap-1" title={monitorTooltip}>
+		<div class="flex flex-wrap items-center gap-1">
 			<!-- Monitor toggle -->
 			<button
 				class="btn btn-ghost btn-xs {episode.monitored
@@ -498,6 +499,7 @@
 					: 'text-base-content/40'} {monitorDisabled ? 'opacity-40' : ''}"
 				onclick={handleMonitorClick}
 				disabled={monitorDisabled}
+				title={monitorTooltip}
 			>
 				{#if monitorDisabled}
 					<Lock size={14} />

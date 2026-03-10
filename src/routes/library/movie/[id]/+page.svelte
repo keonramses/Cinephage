@@ -301,7 +301,7 @@
 	async function handleGrab(
 		release: Release,
 		streaming?: boolean
-	): Promise<{ success: boolean; error?: string }> {
+	): Promise<{ success: boolean; error?: string; errorCode?: string }> {
 		try {
 			const response = await fetch('/api/download/grab', {
 				method: 'POST',
@@ -323,7 +323,7 @@
 
 			const result = await response.json();
 
-			return { success: result.success, error: result.error };
+			return { success: result.success, error: result.error, errorCode: result.errorCode };
 		} catch (error) {
 			return {
 				success: false,
@@ -743,7 +743,7 @@
 	imdbId={movie.imdbId}
 	year={movie.year}
 	mediaType="movie"
-	scoringProfileId={movie.scoringProfileId}
+	scoringProfileId={prefetchProfileId ?? undefined}
 	onClose={() => (isSearchModalOpen = false)}
 	onGrab={handleGrab}
 />
