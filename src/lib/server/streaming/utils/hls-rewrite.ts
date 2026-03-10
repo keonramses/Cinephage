@@ -42,6 +42,11 @@ export function resolveHlsUrl(url: string, base: URL, basePath: string): string 
 		return `${base.origin}${url}`;
 	}
 	// Relative path — preserve query parameters from base URL (e.g., auth tokens)
+	// If the relative URL already has query parameters (e.g., Pluto TV variant playlists),
+	// use it as-is since it has its own auth tokens. Otherwise append base URL params.
+	if (url.includes('?')) {
+		return `${base.origin}${basePath}${url}`;
+	}
 	const queryString = base.search || '';
 	return `${base.origin}${basePath}${url}${queryString}`;
 }

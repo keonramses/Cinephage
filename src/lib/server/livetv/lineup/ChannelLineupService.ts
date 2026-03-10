@@ -20,6 +20,7 @@ import { eq, asc, inArray, sql, and } from 'drizzle-orm';
 import { alias } from 'drizzle-orm/sqlite-core';
 import { logger } from '$lib/logging';
 import { randomUUID } from 'crypto';
+import { normalizeLiveTvChannelName } from '$lib/livetv/channel-name-normalizer';
 import { liveTvEvents } from '../LiveTvEvents';
 import type {
 	ChannelLineupItemWithDetails,
@@ -54,15 +55,13 @@ function toChannelResponse(
 	record: LivetvChannelRecord,
 	categoryTitle: string | null
 ): CachedChannel {
-	const normalizedName = record.name.replace(/#+/g, ' ').replace(/\s+/g, ' ').trim();
-
 	// Build provider-specific data based on provider type
 	const providerData: CachedChannel = {
 		id: record.id,
 		accountId: record.accountId,
 		providerType: record.providerType,
 		externalId: record.externalId,
-		name: normalizedName,
+		name: record.name,
 		number: record.number,
 		logo: record.logo,
 		categoryId: record.categoryId,
@@ -119,7 +118,7 @@ function toLineupItem(
 		channel: channelData,
 		accountName,
 		category: toCategoryResponse(category),
-		displayName: record.customName || channelData.name,
+		displayName: record.customName || channel.name,
 		displayLogo: record.customLogo || channel.logo,
 		epgSourceChannel: epgSourceChannel
 			? toChannelResponse(epgSourceChannel, epgSourceCategoryTitle)
@@ -417,6 +416,72 @@ class ChannelLineupService {
 			liveTvEvents.emitLineupUpdated();
 		}
 		return result.changes;
+	}
+
+	/**
+	 * Apply cleaned names to lineup items that do not already have a custom name
+	 */
+	async bulkApplyCleanNames(itemIds: string[]): Promise<{
+		updated: number;
+		skippedExistingCustom: number;
+		skippedUnchanged: number;
+	}> {
+		if (itemIds.length === 0) {
+			return {
+				updated: 0,
+				skippedExistingCustom: 0,
+				skippedUnchanged: 0
+			};
+		}
+
+		const rows = await db
+			.select({
+				item: channelLineupItems,
+				channel: livetvChannels
+			})
+			.from(channelLineupItems)
+			.innerJoin(livetvChannels, eq(channelLineupItems.channelId, livetvChannels.id))
+			.where(inArray(channelLineupItems.id, itemIds));
+
+		const now = new Date().toISOString();
+		let updated = 0;
+		let skippedExistingCustom = 0;
+		let skippedUnchanged = 0;
+
+		for (const row of rows) {
+			if (row.item.customName?.trim()) {
+				skippedExistingCustom++;
+				continue;
+			}
+
+			const cleanedName = normalizeLiveTvChannelName(
+				row.channel.name,
+				row.channel.providerType
+			).trim();
+			const rawName = row.channel.name.trim();
+
+			if (!cleanedName || cleanedName === rawName) {
+				skippedUnchanged++;
+				continue;
+			}
+
+			await db
+				.update(channelLineupItems)
+				.set({ customName: cleanedName, updatedAt: now })
+				.where(eq(channelLineupItems.id, row.item.id));
+
+			updated++;
+		}
+
+		if (updated > 0) {
+			liveTvEvents.emitLineupUpdated();
+		}
+
+		return {
+			updated,
+			skippedExistingCustom,
+			skippedUnchanged
+		};
 	}
 
 	// =========================================================================

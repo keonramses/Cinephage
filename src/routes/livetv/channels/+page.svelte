@@ -22,14 +22,18 @@
 		ChannelEditModal,
 		ChannelCategoryManagerModal,
 		ChannelBulkActionBar,
+		ChannelBulkCleanNamesModal,
 		ChannelRemoveModal,
 		ChannelBrowserModal,
 		EpgSourcePickerModal,
 		ChannelScheduleModal
 	} from '$lib/components/livetv';
 	import type {
+		BulkApplyCleanNamesResult,
 		ChannelLineupItemWithDetails,
 		ChannelCategory,
+		BulkApplyCleanNamesRequest,
+		ChannelCleanNamePreview,
 		UpdateChannelRequest
 	} from '$lib/types/livetv';
 	import { onMount } from 'svelte';
@@ -42,6 +46,7 @@
 		NowNextEntry
 	} from '$lib/types/sse/events/livetv-channel-events.js';
 	import type { LogoDownloadProgress } from '$lib/server/logos/LogoDownloadService';
+	import { normalizeLiveTvChannelName } from '$lib/livetv/channel-name-normalizer';
 
 	// Data state
 	let lineup = $state<ChannelLineupItemWithDetails[]>([]);
@@ -94,10 +99,11 @@
 
 	// Bulk action state
 	let bulkActionLoading = $state(false);
-	let bulkAction = $state<'category' | 'remove' | null>(null);
+	let bulkAction = $state<'category' | 'clean-names' | 'remove' | null>(null);
 	let removeModalOpen = $state(false);
 	let removeModalMode = $state<'single' | 'bulk' | null>(null);
 	let removeModalChannel = $state<ChannelLineupItemWithDetails | null>(null);
+	let bulkCleanNamesModalOpen = $state(false);
 
 	// EPG state (now/next programs)
 	let epgData = new SvelteMap<string, NowNextEntry>();
@@ -308,7 +314,6 @@
 	const orderedCategories = $derived([...categories].sort((a, b) => a.position - b.position));
 
 	// Derived: Selection helpers
-	const _hasSelection = $derived(selectedIds.size > 0);
 	const selectedCount = $derived(selectedIds.size);
 	const selectedCategoryIds = $derived.by(() => {
 		const ids = new SvelteSet<string | null>();
@@ -322,9 +327,82 @@
 	const removeModalCount = $derived(
 		removeModalMode === 'single' ? (removeModalChannel ? 1 : 0) : selectedIds.size
 	);
+	const selectedCleanNameSummary = $derived.by(() => {
+		const previews: ChannelCleanNamePreview[] = [];
+		let skippedExistingCustom = 0;
+		let skippedUnchanged = 0;
+
+		for (const item of lineup) {
+			if (!selectedIds.has(item.id)) {
+				continue;
+			}
+
+			if (item.customName?.trim()) {
+				skippedExistingCustom++;
+				continue;
+			}
+
+			const currentName = item.channel.name.trim();
+			const cleanedName = normalizeLiveTvChannelName(currentName, item.providerType).trim();
+
+			if (!cleanedName || cleanedName === currentName) {
+				skippedUnchanged++;
+				continue;
+			}
+
+			previews.push({
+				itemId: item.id,
+				channelNumber: item.channelNumber ?? item.position,
+				accountName: item.accountName,
+				providerType: item.providerType,
+				currentName,
+				cleanedName
+			});
+		}
+
+		return {
+			previews,
+			skippedExistingCustom,
+			skippedUnchanged
+		};
+	});
+	const selectedCleanNameCount = $derived(selectedCleanNameSummary.previews.length);
 	const removeModalChannelName = $derived(
 		removeModalMode === 'single' ? (removeModalChannel?.displayName ?? null) : null
 	);
+
+	function buildCleanNameToast(result: BulkApplyCleanNamesResult): string {
+		const parts: string[] = [];
+
+		parts.push(
+			`Applied cleaned names to ${result.updated} channel${result.updated === 1 ? '' : 's'}`
+		);
+
+		if (result.skippedExistingCustom > 0) {
+			parts.push(
+				`${result.skippedExistingCustom} already had custom name${result.skippedExistingCustom === 1 ? '' : 's'}`
+			);
+		}
+
+		if (result.skippedUnchanged > 0) {
+			parts.push(
+				`${result.skippedUnchanged} already looked clean${result.skippedUnchanged === 1 ? '' : 's'}`
+			);
+		}
+
+		return parts.join(' - ');
+	}
+
+	function openBulkCleanNamesModal() {
+		if (selectedIds.size === 0) return;
+
+		bulkCleanNamesModalOpen = true;
+	}
+
+	function closeBulkCleanNamesModal(force = false) {
+		if (!force && bulkActionLoading && bulkAction === 'clean-names') return;
+		bulkCleanNamesModalOpen = false;
+	}
 
 	onMount(() => {
 		loadData();
@@ -727,6 +805,48 @@
 		}
 	}
 
+	async function handleBulkApplyCleanNames() {
+		if (selectedIds.size === 0) return;
+
+		bulkActionLoading = true;
+		bulkAction = 'clean-names';
+
+		try {
+			const payload: BulkApplyCleanNamesRequest = {
+				itemIds: Array.from(selectedIds)
+			};
+
+			const response = await fetch('/api/livetv/lineup/bulk-clean-names', {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify(payload)
+			});
+
+			const result = (await response.json().catch(() => null)) as BulkApplyCleanNamesResult | null;
+			if (!response.ok) {
+				throw new Error(
+					(result as { error?: string } | null)?.error || 'Failed to apply cleaned names'
+				);
+			}
+
+			await loadData();
+			clearSelection();
+			closeBulkCleanNamesModal(true);
+
+			if (result && result.updated > 0) {
+				toasts.success(buildCleanNameToast(result));
+			} else {
+				toasts.success('No cleaned names were applied');
+			}
+		} catch (e) {
+			console.error('Failed to bulk apply cleaned names:', e);
+			toasts.error(e instanceof Error ? e.message : 'Failed to apply cleaned names');
+		} finally {
+			bulkActionLoading = false;
+			bulkAction = null;
+		}
+	}
+
 	function handleBulkRemove() {
 		openBulkRemoveModal();
 	}
@@ -1110,11 +1230,24 @@
 	{selectedCount}
 	{categories}
 	excludedCategoryIds={selectedCategoryIds}
+	cleanNameCount={selectedCleanNameCount}
 	loading={bulkActionLoading}
 	currentAction={bulkAction}
 	onSetCategory={handleBulkSetCategory}
+	onApplyCleanNames={openBulkCleanNamesModal}
 	onRemove={handleBulkRemove}
 	onClear={clearSelection}
+/>
+
+<ChannelBulkCleanNamesModal
+	open={bulkCleanNamesModalOpen}
+	loading={bulkActionLoading && bulkAction === 'clean-names'}
+	{selectedCount}
+	previews={selectedCleanNameSummary.previews}
+	skippedExistingCustom={selectedCleanNameSummary.skippedExistingCustom}
+	skippedUnchanged={selectedCleanNameSummary.skippedUnchanged}
+	onConfirm={handleBulkApplyCleanNames}
+	onCancel={closeBulkCleanNamesModal}
 />
 
 <!-- Channel Browser Modal -->

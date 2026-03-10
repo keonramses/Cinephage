@@ -1,14 +1,16 @@
 <script lang="ts">
-	import { X, FolderOpen, Trash2, Loader2 } from 'lucide-svelte';
+	import { X, FolderOpen, Trash2, Loader2, Pencil } from 'lucide-svelte';
 	import type { ChannelCategory } from '$lib/types/livetv';
 
 	interface Props {
 		selectedCount: number;
 		categories: ChannelCategory[];
 		excludedCategoryIds?: Set<string | null>;
+		cleanNameCount?: number;
 		loading: boolean;
-		currentAction: 'category' | 'remove' | null;
+		currentAction: 'category' | 'clean-names' | 'remove' | null;
 		onSetCategory: (categoryId: string | null) => void;
+		onApplyCleanNames: () => void;
 		onRemove: () => void;
 		onClear: () => void;
 	}
@@ -17,9 +19,11 @@
 		selectedCount,
 		categories,
 		excludedCategoryIds = new Set<string | null>(),
+		cleanNameCount = 0,
 		loading,
 		currentAction,
 		onSetCategory,
+		onApplyCleanNames,
 		onRemove,
 		onClear
 	}: Props = $props();
@@ -61,6 +65,23 @@
 			<div class="h-4 w-px bg-base-content/20"></div>
 
 			<div class="flex items-center gap-1">
+				<button
+					class="btn gap-1.5 btn-ghost btn-sm"
+					onclick={onApplyCleanNames}
+					disabled={loading}
+					title="Apply cleaned names to selected channels"
+				>
+					{#if loading && currentAction === 'clean-names'}
+						<Loader2 size={16} class="animate-spin" />
+					{:else}
+						<Pencil size={16} />
+					{/if}
+					<span class="hidden sm:inline">Apply Cleaned Names</span>
+					{#if cleanNameCount > 0}
+						<span class="badge badge-ghost badge-xs">{cleanNameCount}</span>
+					{/if}
+				</button>
+
 				<!-- Set Category Dropdown -->
 				<div class="relative">
 					<button

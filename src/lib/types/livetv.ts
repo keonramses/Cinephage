@@ -597,6 +597,34 @@ export interface RemoveFromLineupRequest {
 	itemIds: string[];
 }
 
+/**
+ * Request to apply cleaned names to lineup items
+ */
+export interface BulkApplyCleanNamesRequest {
+	itemIds: string[];
+}
+
+/**
+ * Preview entry for applying cleaned names in bulk
+ */
+export interface ChannelCleanNamePreview {
+	itemId: string;
+	channelNumber: number;
+	accountName: string;
+	providerType: LiveTvProviderType;
+	currentName: string;
+	cleanedName: string;
+}
+
+/**
+ * Result of applying cleaned names in bulk
+ */
+export interface BulkApplyCleanNamesResult {
+	updated: number;
+	skippedExistingCustom: number;
+	skippedUnchanged: number;
+}
+
 // ============================================================================
 // EPG (Electronic Program Guide) TYPES
 // ============================================================================

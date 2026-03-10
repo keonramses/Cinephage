@@ -498,10 +498,6 @@
 		selectedIds.clear();
 	}
 
-	function formatChannelName(name: string): string {
-		return name.replace(/#+/g, ' ').replace(/\s+/g, ' ').trim();
-	}
-
 	// Helper to get category display name (handles M3U group-title)
 	function getCategoryDisplayName(channel: CachedChannel): string {
 		if (channel.categoryTitle) return channel.categoryTitle;
@@ -712,7 +708,7 @@
 							{/if}
 							<div class="min-w-0 flex-1">
 								<div class="text-sm font-medium break-words sm:text-base" title={channel.name}>
-									{formatChannelName(channel.name)}
+									{channel.name}
 								</div>
 								<div class="mt-1 text-xs text-base-content/60">
 									{#if channel.number}
@@ -831,7 +827,7 @@
 										{/if}
 										<div>
 											<p class="max-w-xs font-medium break-words" title={channel.name}>
-												{formatChannelName(channel.name)}
+												{channel.name}
 											</p>
 											{#if channel.number}
 												<p class="text-xs text-base-content/50">#{channel.number}</p>

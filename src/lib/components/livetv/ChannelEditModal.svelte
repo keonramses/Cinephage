@@ -15,6 +15,7 @@
 		X
 	} from 'lucide-svelte';
 	import ModalWrapper from '$lib/components/ui/modal/ModalWrapper.svelte';
+	import { normalizeLiveTvChannelName } from '$lib/livetv/channel-name-normalizer';
 	import { copyToClipboard as copyTextToClipboard } from '$lib/utils/clipboard';
 	import { toasts } from '$lib/stores/toast.svelte';
 	import { SvelteURLSearchParams } from 'svelte/reactivity';
@@ -106,6 +107,14 @@
 	);
 
 	const isValid = $derived(!channelNumberError && !customLogoError);
+
+	const normalizedSuggestedName = $derived(
+		channel ? normalizeLiveTvChannelName(channel.channel.name, channel.providerType) : ''
+	);
+
+	const canApplySuggestedName = $derived(
+		normalizedSuggestedName.length > 0 && customName.trim() !== normalizedSuggestedName
+	);
 
 	const logoPreviewUrl = $derived.by(() => {
 		const trimmed = customLogo.trim();
@@ -263,6 +272,15 @@
 		};
 
 		onSave(channel.id, data);
+	}
+
+	function applySuggestedName() {
+		if (!normalizedSuggestedName) return;
+		customName = normalizedSuggestedName;
+	}
+
+	function clearCustomName() {
+		customName = '';
 	}
 
 	function clearEpgSource() {
@@ -469,6 +487,19 @@
 					bind:value={customName}
 					placeholder={channel.channel.name}
 				/>
+				<div class="mt-2 flex flex-wrap items-center gap-2 text-xs text-base-content/60">
+					<span>Cleaned name: {normalizedSuggestedName || channel.channel.name}</span>
+					{#if canApplySuggestedName}
+						<button type="button" class="btn btn-ghost btn-xs" onclick={applySuggestedName}>
+							Use Cleaned Name
+						</button>
+					{/if}
+					{#if customName.trim()}
+						<button type="button" class="btn btn-ghost btn-xs" onclick={clearCustomName}>
+							Use Provider Name
+						</button>
+					{/if}
+				</div>
 			</div>
 
 			<div>

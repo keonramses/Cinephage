@@ -331,6 +331,7 @@ export function createHlsToTsStream(options: HlsToTsConverterOptions): ReadableS
 				}
 
 				// 4. Check if this is a master playlist and fetch the best variant
+				let playlistUrl = finalUrl;
 				if (isMasterPlaylist(playlistText)) {
 					logger.info('[HlsToTsConverter] Detected master playlist, selecting best variant', {
 						lineupItemId
@@ -358,6 +359,7 @@ export function createHlsToTsStream(options: HlsToTsConverterOptions): ReadableS
 					}
 
 					playlistText = await variantResponse.text();
+					playlistUrl = bestVariantUrl;
 					logger.debug('[HlsToTsConverter] Fetched variant playlist', {
 						lineupItemId,
 						variantUrl: bestVariantUrl.substring(0, 80)
@@ -365,7 +367,7 @@ export function createHlsToTsStream(options: HlsToTsConverterOptions): ReadableS
 				}
 
 				// 5. Parse the media playlist
-				const playlist = parseHlsPlaylist(playlistText, finalUrl);
+				const playlist = parseHlsPlaylist(playlistText, playlistUrl);
 
 				if (playlist.segments.length === 0) {
 					logger.warn('[HlsToTsConverter] Empty playlist', { lineupItemId });
