@@ -7,7 +7,7 @@
 
 import { db } from '$lib/server/db';
 import { livetvAccounts, livetvChannels, livetvCategories } from '$lib/server/db/schema';
-import { eq } from 'drizzle-orm';
+import { and, eq, inArray, notInArray } from 'drizzle-orm';
 import { logger } from '$lib/logging';
 import { randomUUID } from 'crypto';
 import type {
@@ -198,6 +198,7 @@ export class StalkerProvider implements LiveTvProvider {
 
 			let channelsAdded = 0;
 			let channelsUpdated = 0;
+			let channelsRemoved = 0;
 
 			// Sync channels
 			for (const channel of channels) {
@@ -245,6 +246,28 @@ export class StalkerProvider implements LiveTvProvider {
 				}
 			}
 
+			const providerChannelIds = channels.map((channel) => channel.id);
+			if (providerChannelIds.length > 0) {
+				const deletedChannels = await db
+					.delete(livetvChannels)
+					.where(
+						and(
+							eq(livetvChannels.accountId, accountId),
+							notInArray(livetvChannels.externalId, providerChannelIds)
+						)
+					);
+				channelsRemoved = deletedChannels.changes ?? 0;
+			}
+
+			const providerCategoryIds = categories.map((category) => category.id);
+			const staleCategoryIds = existingCategories
+				.filter((category) => !providerCategoryIds.includes(category.externalId))
+				.map((category) => category.id);
+
+			if (staleCategoryIds.length > 0) {
+				await db.delete(livetvCategories).where(inArray(livetvCategories.id, staleCategoryIds));
+			}
+
 			// Update category channel counts
 			for (const [externalId, categoryId] of categoryMap) {
 				const count = channels.filter((c) => c.genreId === externalId).length;
@@ -274,6 +297,7 @@ export class StalkerProvider implements LiveTvProvider {
 				categoriesUpdated,
 				channelsAdded,
 				channelsUpdated,
+				channelsRemoved,
 				duration
 			});
 
@@ -283,7 +307,7 @@ export class StalkerProvider implements LiveTvProvider {
 				categoriesUpdated,
 				channelsAdded,
 				channelsUpdated,
-				channelsRemoved: 0,
+				channelsRemoved,
 				duration
 			};
 		} catch (error) {

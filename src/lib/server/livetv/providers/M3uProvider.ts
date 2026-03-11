@@ -7,7 +7,7 @@
 
 import { db } from '$lib/server/db';
 import { livetvAccounts, livetvChannels, livetvCategories } from '$lib/server/db/schema';
-import { eq } from 'drizzle-orm';
+import { and, eq, inArray, notInArray } from 'drizzle-orm';
 import { logger } from '$lib/logging';
 import { randomUUID } from 'crypto';
 import { XMLParser } from 'fast-xml-parser';
@@ -271,8 +271,10 @@ export class M3uProvider implements LiveTvProvider {
 			const channelMap = new Map(existingChannels.map((c) => [c.externalId, c.id]));
 			let channelsAdded = 0;
 			let channelsUpdated = 0;
+			let channelsRemoved = 0;
 			let duplicateTvgIdCount = 0;
 			const tvgIdSeenCount = new Map<string, number>();
+			const providerChannelIds = new Set<string>();
 
 			// Sync channels
 			for (let i = 0; i < entries.length; i++) {
@@ -302,6 +304,7 @@ export class M3uProvider implements LiveTvProvider {
 					// Preserve legacy fallback behavior for playlists with no tvg-id.
 					externalId = `m3u_${i}`;
 				}
+				providerChannelIds.add(externalId);
 				const categoryId = entry.groupTitle ? categoryMap.get(entry.groupTitle) : null;
 
 				const existingId = channelMap.get(externalId);
@@ -339,6 +342,26 @@ export class M3uProvider implements LiveTvProvider {
 				}
 			}
 
+			if (providerChannelIds.size > 0) {
+				const deletedChannels = await db
+					.delete(livetvChannels)
+					.where(
+						and(
+							eq(livetvChannels.accountId, accountId),
+							notInArray(livetvChannels.externalId, Array.from(providerChannelIds))
+						)
+					);
+				channelsRemoved = deletedChannels.changes ?? 0;
+			}
+
+			const staleCategoryIds = existingCategories
+				.filter((category) => !groupTitles.includes(category.title))
+				.map((category) => category.id);
+
+			if (staleCategoryIds.length > 0) {
+				await db.delete(livetvCategories).where(inArray(livetvCategories.id, staleCategoryIds));
+			}
+
 			// Update account sync status
 			await db
 				.update(livetvAccounts)
@@ -359,6 +382,7 @@ export class M3uProvider implements LiveTvProvider {
 				categoriesUpdated,
 				channelsAdded,
 				channelsUpdated,
+				channelsRemoved,
 				duplicateTvgIdCount,
 				duration
 			});
@@ -369,7 +393,7 @@ export class M3uProvider implements LiveTvProvider {
 				categoriesUpdated,
 				channelsAdded,
 				channelsUpdated,
-				channelsRemoved: 0,
+				channelsRemoved,
 				duration
 			};
 		} catch (error) {
