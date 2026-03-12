@@ -14,10 +14,17 @@ export const GET: RequestHandler = async () => {
 	const services = serviceManager.getStatus();
 	const allReady = serviceManager.allReady();
 
-	return json({
-		success: true,
-		ready: allReady,
-		version: resolveAppVersion(),
-		services
-	});
+	return json(
+		{
+			success: true,
+			ready: allReady,
+			version: resolveAppVersion(),
+			services
+		},
+		{
+			headers: {
+				'cache-control': 'no-store, no-cache, must-revalidate'
+			}
+		}
+	);
 };

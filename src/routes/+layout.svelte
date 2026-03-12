@@ -1,5 +1,6 @@
 <script lang="ts">
 	import './layout.css';
+	import { browser } from '$app/environment';
 	import { goto } from '$app/navigation';
 	import { ThemeSelector } from '$lib/components/ui';
 	import Toasts from '$lib/components/ui/Toasts.svelte';
@@ -120,13 +121,33 @@
 		}
 	];
 
-	const appVersion = (() => {
+	const envAppVersion = (() => {
 		const version = env.PUBLIC_APP_VERSION?.trim();
 		if (!version || version === PLACEHOLDER_PACKAGE_VERSION) {
 			return 'dev-local';
 		}
 		return version;
 	})();
+	let appVersion = $state(envAppVersion);
+
+	async function refreshAppVersion(): Promise<void> {
+		if (!browser) return;
+		try {
+			const response = await fetch(`/api/system/status?_=${Date.now()}`, {
+				cache: 'no-store'
+			});
+			if (!response.ok) return;
+			const payload = (await response.json()) as { version?: string };
+			const candidate = payload.version?.trim();
+			if (!candidate || candidate === PLACEHOLDER_PACKAGE_VERSION) {
+				appVersion = 'dev-local';
+				return;
+			}
+			appVersion = candidate;
+		} catch {
+			// Keep current version badge if runtime check fails
+		}
+	}
 
 	const useFocusedLayout = $derived(usesFocusedLayout($page.url.pathname));
 
@@ -134,6 +155,34 @@
 		if (useFocusedLayout) {
 			closeMobileDrawer();
 		}
+	});
+
+	$effect(() => {
+		if (!browser) return;
+
+		void refreshAppVersion();
+
+		const interval = window.setInterval(() => {
+			void refreshAppVersion();
+		}, 60_000);
+
+		const handleFocus = () => {
+			void refreshAppVersion();
+		};
+		const handleVisibility = () => {
+			if (document.visibilityState === 'visible') {
+				void refreshAppVersion();
+			}
+		};
+
+		window.addEventListener('focus', handleFocus);
+		document.addEventListener('visibilitychange', handleVisibility);
+
+		return () => {
+			window.clearInterval(interval);
+			window.removeEventListener('focus', handleFocus);
+			document.removeEventListener('visibilitychange', handleVisibility);
+		};
 	});
 </script>
 

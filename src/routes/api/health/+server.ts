@@ -24,12 +24,19 @@ export const GET: RequestHandler = async () => {
 		);
 	}
 
-	return json({
-		status: 'ok',
-		version: resolveAppVersion(),
-		indexers: {
-			definitionsLoaded,
-			definitionErrors
+	return json(
+		{
+			status: 'ok',
+			version: resolveAppVersion(),
+			indexers: {
+				definitionsLoaded,
+				definitionErrors
+			}
+		},
+		{
+			headers: {
+				'cache-control': 'no-store, no-cache, must-revalidate'
+			}
 		}
-	});
+	);
 };
