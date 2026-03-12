@@ -594,6 +594,39 @@
 		return true;
 	}
 
+	function removeStaleQueueLinkedRows(queueActivity: UnifiedActivity): number {
+		if (!isQueueActivityId(queueActivity.id) || !queueActivity.queueItemId) {
+			return 0;
+		}
+
+		const staleRowIds = new Set(
+			activities
+				.filter(
+					(activity) =>
+						activity.id !== queueActivity.id &&
+						!isQueueActivityId(activity.id) &&
+						activity.queueItemId === queueActivity.queueItemId
+				)
+				.map((activity) => activity.id)
+		);
+
+		if (staleRowIds.size === 0) {
+			return 0;
+		}
+
+		activities = activities.filter((activity) => !staleRowIds.has(activity.id));
+
+		if (
+			selectedActivity &&
+			selectedActivity.queueItemId === queueActivity.queueItemId &&
+			staleRowIds.has(selectedActivity.id)
+		) {
+			selectedActivity = queueActivity;
+		}
+
+		return staleRowIds.size;
+	}
+
 	function upsertActivity(activity: Partial<UnifiedActivity>): void {
 		const normalized = normalizeActivity(activity);
 		if (!normalized) return;
@@ -615,6 +648,7 @@
 		if (existingIndex >= 0) {
 			const existing = activities[existingIndex];
 			Object.assign(existing, normalized);
+			const removedDuplicates = removeStaleQueueLinkedRows(existing);
 			if (
 				selectedActivity &&
 				selectedActivity !== existing &&
@@ -622,12 +656,16 @@
 			) {
 				selectedActivity = existing;
 			}
+			if (removedDuplicates > 0) {
+				total = Math.max(0, total - removedDuplicates);
+			}
 			activities = sortActivitiesList(activities);
 			return;
 		}
 
 		activities = sortActivitiesList([normalized, ...activities]);
-		total += 1;
+		const removedDuplicates = removeStaleQueueLinkedRows(normalized);
+		total = Math.max(0, total + 1 - removedDuplicates);
 	}
 
 	// Detail modal state
