@@ -7,7 +7,7 @@ import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
 import { db } from '$lib/server/db';
 import { settings } from '$lib/server/db/schema';
-import { resolveAppVersion } from '$lib/version.js';
+import { resolveAppVersion } from '$lib/server/version.js';
 
 export const GET: RequestHandler = async () => {
 	const checks: Record<string, { status: 'healthy' | 'unhealthy'; latencyMs?: number }> = {};

@@ -4,9 +4,7 @@ import { z } from 'zod';
 import { captchaSolverSettingsService, getCaptchaSolver } from '$lib/server/captcha';
 import { logger } from '$lib/logging';
 import { requireAdmin } from '$lib/server/auth/authorization.js';
-import { resolveAppVersion } from '$lib/version.js';
-
-const appVersion = resolveAppVersion();
+import { resolveAppVersion } from '$lib/server/version.js';
 
 const requestSchema = z
 	.object({
@@ -22,6 +20,7 @@ const requestSchema = z
 	}));
 
 export const POST: RequestHandler = async (event) => {
+	const appVersion = resolveAppVersion();
 	const authError = requireAdmin(event);
 	if (authError) return authError;
 
