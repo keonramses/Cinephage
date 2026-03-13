@@ -14,6 +14,49 @@ interface RateLimitConfig {
 	maxRequests: number; // Max requests per window
 }
 
+function hasAuthenticatedUserSession(event: RequestEvent): boolean {
+	return Boolean(event.locals.user);
+}
+
+function isStreamingApiKeyRoute(pathname: string): boolean {
+	if (pathname.startsWith('/api/streaming/')) {
+		return true;
+	}
+	if (pathname === '/api/livetv/playlist.m3u' || pathname.startsWith('/api/livetv/playlist.m3u/')) {
+		return true;
+	}
+	if (pathname === '/api/livetv/epg.xml' || pathname.startsWith('/api/livetv/epg.xml/')) {
+		return true;
+	}
+	if (pathname.startsWith('/api/livetv/stream/')) {
+		return true;
+	}
+
+	return false;
+}
+
+function shouldEnforceApiRateLimit(event: RequestEvent): boolean {
+	const pathname = event.url.pathname;
+
+	if (!pathname.startsWith('/api/')) {
+		return false;
+	}
+
+	// Always protect auth endpoints from brute-force attempts.
+	if (pathname.startsWith('/api/auth/')) {
+		return true;
+	}
+
+	// Streaming/LiveTV playback routes already require a validated API key
+	// and are governed by per-key limits in Better Auth.
+	if (isStreamingApiKeyRoute(pathname) && event.locals.apiKey) {
+		return false;
+	}
+
+	// Internal authenticated UI traffic should not be throttled by shared IP limits.
+	return !hasAuthenticatedUserSession(event);
+}
+
 // Default rate limits
 const DEFAULT_API_LIMIT: RateLimitConfig = {
 	windowMs: 15 * 60 * 1000, // 15 minutes
@@ -168,6 +211,10 @@ function getRateLimitInfo(
  * Returns null if allowed, or a Response if rate limited
  */
 export function checkApiRateLimit(event: RequestEvent): Response | null {
+	if (!shouldEnforceApiRateLimit(event)) {
+		return null;
+	}
+
 	const pathname = event.url.pathname;
 
 	// Determine rate limit config based on route
@@ -232,12 +279,11 @@ export function checkApiRateLimit(event: RequestEvent): Response | null {
  * Usage in hooks or individual routes
  */
 export function applyRateLimitHeaders(event: RequestEvent, response: Response): Response {
-	const pathname = event.url.pathname;
-
-	// Skip rate limit headers for non-API routes
-	if (!pathname.startsWith('/api/')) {
+	if (!shouldEnforceApiRateLimit(event)) {
 		return response;
 	}
+
+	const pathname = event.url.pathname;
 
 	// Determine rate limit config
 	let config: RateLimitConfig;

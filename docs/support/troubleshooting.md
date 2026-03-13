@@ -570,6 +570,14 @@ Indexers auto-disable after repeated failures:
 2. Try refreshing the stream URL
 3. Try a different provider
 
+### Streams buffer or stop unexpectedly
+
+1. Confirm the streaming API key is being used by your player/integration.
+2. Increase streaming API-key limits in `.env` if needed:
+   - `STREAMING_API_KEY_RATE_LIMIT_WINDOW_MS=3600000`
+   - `STREAMING_API_KEY_RATE_LIMIT_MAX=25000`
+3. Restart Cinephage after changing environment variables.
+
 ### .strm files not working
 
 1. **Check External URL configuration**:

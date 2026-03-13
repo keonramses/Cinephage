@@ -127,15 +127,13 @@ jobs:
 
           SOURCE_CONFIG="$(crane config --platform linux/amd64 "$SOURCE_IMAGE")"
           VERSION_LABEL="$(echo "$SOURCE_CONFIG" | jq -r '.config.Labels["org.opencontainers.image.version"] // ""')"
-          APP_INTERNAL_VERSION_ENV="$(echo "$SOURCE_CONFIG" | jq -r '.config.Env[]? | select(startswith("APP_VERSION="))' | tail -n 1 | sed 's/^APP_VERSION=//')"
-          APP_VERSION_ENV="$(echo "$SOURCE_CONFIG" | jq -r '.config.Env[]? | select(startswith("PUBLIC_APP_VERSION="))' | tail -n 1 | sed 's/^PUBLIC_APP_VERSION=//')"
+          APP_VERSION_ENV="$(echo "$SOURCE_CONFIG" | jq -r '.config.Env[]? | select(startswith("APP_VERSION="))' | tail -n 1 | sed 's/^APP_VERSION=//')"
           CINEPHAGE_API_VERSION_ENV="$(echo "$SOURCE_CONFIG" | jq -r '.config.Env[]? | select(startswith("CINEPHAGE_API_VERSION="))' | tail -n 1 | sed 's/^CINEPHAGE_API_VERSION=//')"
           CINEPHAGE_API_COMMIT_ENV="$(echo "$SOURCE_CONFIG" | jq -r '.config.Env[]? | select(startswith("CINEPHAGE_API_COMMIT="))' | tail -n 1 | sed 's/^CINEPHAGE_API_COMMIT=//')"
 
           echo "Source tag: ${SOURCE_TAG}"
           echo "Version label: ${VERSION_LABEL:-<empty>}"
-          echo "App version env: ${APP_INTERNAL_VERSION_ENV:-<empty>}"
-          echo "Public app version env: ${APP_VERSION_ENV:-<empty>}"
+          echo "App version env: ${APP_VERSION_ENV:-<empty>}"
           echo "Cinephage API version env: ${CINEPHAGE_API_VERSION_ENV:-<empty>}"
           echo "Cinephage API commit env: ${CINEPHAGE_API_COMMIT_ENV:-<empty>}"
 
@@ -144,13 +142,8 @@ jobs:
             exit 1
           fi
 
-          if [ "$APP_INTERNAL_VERSION_ENV" != "$SOURCE_TAG" ]; then
-            echo "Refusing retag: APP_VERSION metadata must match ${SOURCE_TAG}."
-            exit 1
-          fi
-
           if [ "$APP_VERSION_ENV" != "$SOURCE_TAG" ]; then
-            echo "Refusing retag: PUBLIC_APP_VERSION metadata must match ${SOURCE_TAG}."
+            echo "Refusing retag: APP_VERSION metadata must match ${SOURCE_TAG}."
             exit 1
           fi
 

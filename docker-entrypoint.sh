@@ -3,6 +3,12 @@ set -e
 
 cd /app
 
+APP_VERSION_FILE="/app/version.txt"
+if [ -f "$APP_VERSION_FILE" ]; then
+  APP_VERSION="$(tr -d '\r\n' < "$APP_VERSION_FILE")"
+  export APP_VERSION
+fi
+
 CONFIG_ROOT="/config"
 LEGACY_DATA_DIR="/app/data"
 LEGACY_LOG_DIR="/app/logs"
@@ -237,4 +243,7 @@ else
 fi
 
 echo "Starting Cinephage..."
+if [ -n "${APP_VERSION:-}" ]; then
+  echo "App version: ${APP_VERSION}"
+fi
 exec "$@"

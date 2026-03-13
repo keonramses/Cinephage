@@ -69,6 +69,15 @@ Controls concurrency for background tasks.
 - Decrease workers if system resources are limited
 - Default values work well for most setups
 
+### Streaming API Key Rate Limiting
+
+Configure per-key rate limits for streaming and Live TV API key traffic.
+
+| Variable                                 | Default   | Description                                         |
+| ---------------------------------------- | --------- | --------------------------------------------------- |
+| `STREAMING_API_KEY_RATE_LIMIT_WINDOW_MS` | `3600000` | Streaming API key rate limit window in milliseconds |
+| `STREAMING_API_KEY_RATE_LIMIT_MAX`       | `10000`   | Max streaming API key requests allowed per window   |
+
 ### Graceful Shutdown
 
 | Variable           | Default | Description                              |

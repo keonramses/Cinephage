@@ -13,8 +13,31 @@ export type ManagedApiKeyType = 'main' | 'streaming';
 
 type ApiKeyPermissions = Record<string, string[]>;
 
-const STREAMING_API_KEY_RATE_LIMIT_WINDOW_MS = 1000 * 60 * 60;
-const STREAMING_API_KEY_RATE_LIMIT_MAX = 10000;
+const DEFAULT_STREAMING_API_KEY_RATE_LIMIT_WINDOW_MS = 1000 * 60 * 60;
+const DEFAULT_STREAMING_API_KEY_RATE_LIMIT_MAX = 10000;
+
+function getPositiveIntegerEnv(name: string, fallback: number): number {
+	const raw = process.env[name];
+	if (!raw) {
+		return fallback;
+	}
+
+	const parsed = Number.parseInt(raw, 10);
+	if (Number.isNaN(parsed) || parsed <= 0) {
+		return fallback;
+	}
+
+	return parsed;
+}
+
+const STREAMING_API_KEY_RATE_LIMIT_WINDOW_MS = getPositiveIntegerEnv(
+	'STREAMING_API_KEY_RATE_LIMIT_WINDOW_MS',
+	DEFAULT_STREAMING_API_KEY_RATE_LIMIT_WINDOW_MS
+);
+const STREAMING_API_KEY_RATE_LIMIT_MAX = getPositiveIntegerEnv(
+	'STREAMING_API_KEY_RATE_LIMIT_MAX',
+	DEFAULT_STREAMING_API_KEY_RATE_LIMIT_MAX
+);
 
 type BetterAuthApiKey = {
 	id: string;

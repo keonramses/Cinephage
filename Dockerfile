@@ -38,6 +38,7 @@ ARG APP_SOURCE=https://github.com/MoldyTaint/Cinephage
 ARG VCS_REF=unknown
 ARG BUILD_CREATED=unknown
 ENV APP_VERSION=${APP_VERSION}
+RUN printf '%s\n' "$APP_VERSION" > /app/version.txt
 
 LABEL org.opencontainers.image.title='Cinephage' \
 	org.opencontainers.image.description='Self-hosted media management application' \

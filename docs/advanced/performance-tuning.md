@@ -77,6 +77,13 @@ PROXY_FETCH_TIMEOUT_MS=60000
 PROXY_SEGMENT_MAX_SIZE=26214400  # 25MB
 ```
 
+If external players make many segment requests, increase streaming API-key limits:
+
+```bash
+STREAMING_API_KEY_RATE_LIMIT_WINDOW_MS=3600000
+STREAMING_API_KEY_RATE_LIMIT_MAX=25000
+```
+
 ### Circuit Breaker
 
 If providers fail often:

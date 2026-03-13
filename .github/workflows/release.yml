@@ -310,7 +310,6 @@ jobs:
             --platform linux/amd64 \
             --tag "$RELEASE_AMD64_IMAGE" \
             --env "APP_VERSION=$VERSION" \
-            --env "PUBLIC_APP_VERSION=$VERSION" \
             --env "CINEPHAGE_API_VERSION=$CINEPHAGE_API_VERSION" \
             --env "CINEPHAGE_API_COMMIT=$CINEPHAGE_API_COMMIT" \
             --label "org.opencontainers.image.version=$VERSION"
@@ -319,7 +318,6 @@ jobs:
             --platform linux/arm64 \
             --tag "$RELEASE_ARM64_IMAGE" \
             --env "APP_VERSION=$VERSION" \
-            --env "PUBLIC_APP_VERSION=$VERSION" \
             --env "CINEPHAGE_API_VERSION=$CINEPHAGE_API_VERSION" \
             --env "CINEPHAGE_API_COMMIT=$CINEPHAGE_API_COMMIT" \
             --label "org.opencontainers.image.version=$VERSION"
@@ -327,22 +325,18 @@ jobs:
           # Confirm the runtime app version envs were written to promoted tags.
           AMD64_APP_VERSION_ENV=$(crane config --platform linux/amd64 "$RELEASE_AMD64_IMAGE" | jq -r '.config.Env[]? | select(startswith("APP_VERSION="))' | tail -n 1)
           ARM64_APP_VERSION_ENV=$(crane config --platform linux/arm64 "$RELEASE_ARM64_IMAGE" | jq -r '.config.Env[]? | select(startswith("APP_VERSION="))' | tail -n 1)
-          AMD64_VERSION_ENV=$(crane config --platform linux/amd64 "$RELEASE_AMD64_IMAGE" | jq -r '.config.Env[]? | select(startswith("PUBLIC_APP_VERSION="))' | tail -n 1)
-          ARM64_VERSION_ENV=$(crane config --platform linux/arm64 "$RELEASE_ARM64_IMAGE" | jq -r '.config.Env[]? | select(startswith("PUBLIC_APP_VERSION="))' | tail -n 1)
           AMD64_CINEPHAGE_VERSION_ENV=$(crane config --platform linux/amd64 "$RELEASE_AMD64_IMAGE" | jq -r '.config.Env[]? | select(startswith("CINEPHAGE_API_VERSION="))' | tail -n 1)
           ARM64_CINEPHAGE_VERSION_ENV=$(crane config --platform linux/arm64 "$RELEASE_ARM64_IMAGE" | jq -r '.config.Env[]? | select(startswith("CINEPHAGE_API_VERSION="))' | tail -n 1)
           AMD64_CINEPHAGE_COMMIT_ENV=$(crane config --platform linux/amd64 "$RELEASE_AMD64_IMAGE" | jq -r '.config.Env[]? | select(startswith("CINEPHAGE_API_COMMIT="))' | tail -n 1)
           ARM64_CINEPHAGE_COMMIT_ENV=$(crane config --platform linux/arm64 "$RELEASE_ARM64_IMAGE" | jq -r '.config.Env[]? | select(startswith("CINEPHAGE_API_COMMIT="))' | tail -n 1)
           echo "amd64 ${AMD64_APP_VERSION_ENV}"
           echo "arm64 ${ARM64_APP_VERSION_ENV}"
-          echo "amd64 ${AMD64_VERSION_ENV}"
-          echo "arm64 ${ARM64_VERSION_ENV}"
           echo "amd64 ${AMD64_CINEPHAGE_VERSION_ENV}"
           echo "arm64 ${ARM64_CINEPHAGE_VERSION_ENV}"
           echo "amd64 ${AMD64_CINEPHAGE_COMMIT_ENV}"
           echo "arm64 ${ARM64_CINEPHAGE_COMMIT_ENV}"
 
-          if [ "$AMD64_APP_VERSION_ENV" != "APP_VERSION=$VERSION" ] || [ "$ARM64_APP_VERSION_ENV" != "APP_VERSION=$VERSION" ] || [ "$AMD64_VERSION_ENV" != "PUBLIC_APP_VERSION=$VERSION" ] || [ "$ARM64_VERSION_ENV" != "PUBLIC_APP_VERSION=$VERSION" ] || [ "$AMD64_CINEPHAGE_VERSION_ENV" != "CINEPHAGE_API_VERSION=$CINEPHAGE_API_VERSION" ] || [ "$ARM64_CINEPHAGE_VERSION_ENV" != "CINEPHAGE_API_VERSION=$CINEPHAGE_API_VERSION" ] || [ "$AMD64_CINEPHAGE_COMMIT_ENV" != "CINEPHAGE_API_COMMIT=$CINEPHAGE_API_COMMIT" ] || [ "$ARM64_CINEPHAGE_COMMIT_ENV" != "CINEPHAGE_API_COMMIT=$CINEPHAGE_API_COMMIT" ]; then
+          if [ "$AMD64_APP_VERSION_ENV" != "APP_VERSION=$VERSION" ] || [ "$ARM64_APP_VERSION_ENV" != "APP_VERSION=$VERSION" ] || [ "$AMD64_CINEPHAGE_VERSION_ENV" != "CINEPHAGE_API_VERSION=$CINEPHAGE_API_VERSION" ] || [ "$ARM64_CINEPHAGE_VERSION_ENV" != "CINEPHAGE_API_VERSION=$CINEPHAGE_API_VERSION" ] || [ "$AMD64_CINEPHAGE_COMMIT_ENV" != "CINEPHAGE_API_COMMIT=$CINEPHAGE_API_COMMIT" ] || [ "$ARM64_CINEPHAGE_COMMIT_ENV" != "CINEPHAGE_API_COMMIT=$CINEPHAGE_API_COMMIT" ]; then
             echo "❌ Failed to set runtime version metadata on promoted images"
             exit 1
           fi

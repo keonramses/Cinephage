@@ -178,12 +178,14 @@ WORKER_MAX_SEARCH=5
 
 ## Streaming Configuration
 
-| Variable                 | Description                         | Default             |
-| ------------------------ | ----------------------------------- | ------------------- |
-| `PROXY_FETCH_TIMEOUT_MS` | Stream URL fetch timeout            | 30000 (30 sec)      |
-| `PROXY_SEGMENT_MAX_SIZE` | Max segment size (bytes)            | 52428800 (50 MB)    |
-| `PROXY_MAX_RETRIES`      | Retry attempts for failed segments  | 2                   |
-| `DEFAULT_PROXY_REFERER`  | Default referer for stream requests | https://videasy.net |
+| Variable                                 | Description                                      | Default             |
+| ---------------------------------------- | ------------------------------------------------ | ------------------- |
+| `PROXY_FETCH_TIMEOUT_MS`                 | Stream URL fetch timeout                         | 30000 (30 sec)      |
+| `PROXY_SEGMENT_MAX_SIZE`                 | Max segment size (bytes)                         | 52428800 (50 MB)    |
+| `PROXY_MAX_RETRIES`                      | Retry attempts for failed segments               | 2                   |
+| `DEFAULT_PROXY_REFERER`                  | Default referer for stream requests              | https://videasy.net |
+| `STREAMING_API_KEY_RATE_LIMIT_WINDOW_MS` | Streaming API key per-key rate limit window (ms) | 3600000 (1 hour)    |
+| `STREAMING_API_KEY_RATE_LIMIT_MAX`       | Streaming API key max requests per window        | 10000               |
 
 ### Timeout Tuning
 
@@ -296,6 +298,8 @@ PROXY_FETCH_TIMEOUT_MS=30000
 PROXY_SEGMENT_MAX_SIZE=52428800
 PROXY_MAX_RETRIES=2
 DEFAULT_PROXY_REFERER=https://videasy.net
+STREAMING_API_KEY_RATE_LIMIT_WINDOW_MS=3600000
+STREAMING_API_KEY_RATE_LIMIT_MAX=10000
 
 # Circuit Breaker
 PROVIDER_MAX_FAILURES=3
@@ -332,6 +336,8 @@ services:
       WORKER_MAX_SCANS: 1
       # Streaming
       PROXY_FETCH_TIMEOUT_MS: 60000
+      STREAMING_API_KEY_RATE_LIMIT_WINDOW_MS: 3600000
+      STREAMING_API_KEY_RATE_LIMIT_MAX: 10000
     volumes:
       - ./config:/config
       - /path/to/media:/media
