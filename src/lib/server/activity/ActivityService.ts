@@ -23,7 +23,7 @@ import {
 	type ActivitySummary
 } from '$lib/types/activity';
 import type { DownloadQueueRecord, DownloadHistoryRecord, MonitoringHistoryRecord } from './types';
-import { mapQueueStatus, projectQueueActivity } from './projectors';
+import { projectQueueActivity } from './projectors';
 
 interface MediaInfo {
 	id: string;

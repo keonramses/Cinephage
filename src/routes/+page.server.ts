@@ -36,7 +36,8 @@ export const load: PageServerLoad = async ({ setHeaders }) => {
 			.getActivities(
 				{ status: 'all', mediaType: 'all', protocol: 'all' },
 				{ field: 'time', direction: 'desc' },
-				{ limit: 10, offset: 0 }
+				{ limit: 10, offset: 0 },
+				'history'
 			)
 			.then((result) => result.activities)
 			.catch((error) => {

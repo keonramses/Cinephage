@@ -158,33 +158,8 @@
 		'dashboard:missingEpisodes': (newMissingEpisodes) => {
 			missingEpisodesState = newMissingEpisodes as typeof missingEpisodes;
 		},
-		'activity:new': (newActivity) => {
-			const activity = newActivity as UnifiedActivity;
-			const currentRecentActivity = recentActivityState ?? [];
-			recentActivityState = [
-				activity,
-				...currentRecentActivity.filter((a) => a.id !== activity.id)
-			].slice(0, 10);
-		},
-		'activity:updated': (updated) => {
-			const update = updated as Partial<UnifiedActivity>;
-			const currentRecentActivity = recentActivityState ?? [];
-			recentActivityState = currentRecentActivity.map((a) =>
-				a.id === update.id ? { ...a, ...update } : a
-			);
-		},
-		'activity:progress': (progressData) => {
-			const progress = progressData as { id: string; progress: number; status?: string };
-			const currentRecentActivity = recentActivityState ?? [];
-			recentActivityState = currentRecentActivity.map((a) =>
-				a.id === progress.id
-					? {
-							...a,
-							downloadProgress: progress.progress,
-							status: (progress.status as UnifiedActivity['status']) || a.status
-						}
-					: a
-			);
+		'dashboard:recentActivity': (newRecentActivity) => {
+			recentActivityState = newRecentActivity as UnifiedActivity[];
 		}
 	});
 
@@ -764,15 +739,15 @@
 			{/if}
 		</div>
 
-		<!-- Recent Activity Sidebar (1/3 width) -->
+		<!-- Recent History Sidebar (1/3 width) -->
 		<div class="card bg-base-200">
 			<div class="card-body">
 				<div class="flex items-center justify-between">
 					<h2 class="card-title">
 						<Activity class="h-5 w-5" />
-						Recent Activity
+						Recent History
 					</h2>
-					<a href={resolvePath('/activity')} class="btn gap-1 btn-ghost btn-xs">
+					<a href={resolvePath('/activity?tab=history')} class="btn gap-1 btn-ghost btn-xs">
 						View all
 						<ArrowRight class="h-3 w-3" />
 					</a>

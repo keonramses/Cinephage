@@ -33,11 +33,15 @@ logs/
 
 # Claude Code local settings
 .claude/
+claude.md
 CLAUDE.md
 .mcp.json
 
 # OpenCode local settings
 .opencode/
+opencode
+opencode.md
+OPENCODE.md
 AGENTS.md
 
 # Backup files
