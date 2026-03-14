@@ -42,8 +42,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 COPY package*.json ./
 COPY .npmrc ./
 
-# Install only runtime dependencies, then remove non-runtime artifacts
-RUN npm ci --omit=dev --omit=optional --no-audit --no-fund \
+# Install only runtime dependencies.
+# Keep optional deps, some runtime packages (e.g. impit) ship
+# platform-native bindings through optionalDependencies.
+RUN npm ci --omit=dev --no-audit --no-fund \
 	&& find node_modules -type f -name '*.map' -delete \
 	&& find node_modules -type d \( -name test -o -name tests -o -name __tests__ -o -name docs -o -name doc -o -name examples -o -name example \) -prune -exec rm -rf '{}' + \
 	&& find node_modules -type d -empty -delete
