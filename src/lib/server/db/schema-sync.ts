@@ -94,9 +94,8 @@ interface MigrationDefinition {
  * Version 66: Fix apikey schema migration for databases stuck after v65
  * Version 67: Add Better Auth rateLimit.id column required by adapter-generated IDs
  * Version 68: Add edition column to episode_files for rename preservation
- */
-/**
  * Version 69: Add indexes on download_history for activity query performance
+ * Version 70: Drop unused activities scaffolding tables (activities, activity_details)
  */
 export const CURRENT_SCHEMA_VERSION = 70;
 
