@@ -25,7 +25,30 @@ COPY server.js svelte.config.js tsconfig.json vite.config.ts ./
 
 ARG APP_VERSION=dev
 
-RUN npm run build && npm prune --omit=dev
+RUN npm run build
+
+# ==========================================
+# Production Dependencies Stage
+# ==========================================
+FROM node:24-trixie-slim AS prod-deps
+WORKDIR /app
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+	python3 \
+	make \
+	g++ \
+	&& rm -rf /var/lib/apt/lists/*
+
+COPY package*.json ./
+COPY .npmrc ./
+
+# Install only runtime dependencies.
+# Keep optional deps, some runtime packages (e.g. impit) ship
+# platform-native bindings through optionalDependencies.
+RUN npm ci --omit=dev --no-audit --no-fund \
+	&& find node_modules -type f -name '*.map' -delete \
+	&& find node_modules -type d \( -name test -o -name tests -o -name __tests__ -o -name docs -o -name doc -o -name examples -o -name example \) -prune -exec rm -rf '{}' + \
+	&& find node_modules -type d -empty -delete
 
 # ==========================================
 # Runtime Stage
@@ -48,7 +71,6 @@ LABEL org.opencontainers.image.title='Cinephage' \
 	org.opencontainers.image.version="${APP_VERSION}"
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
-	wget \
 	ffmpeg \
 	gosu \
 	libgtk-3-0 \
@@ -64,13 +86,13 @@ RUN rm -rf /usr/local/lib/node_modules/npm \
 # Pre-create config directories; ownership is fixed at runtime by entrypoint
 RUN mkdir -p /config/data /config/logs /config/cache
 
-COPY --from=builder /app/node_modules ./node_modules
+COPY --from=prod-deps /app/node_modules ./node_modules
 COPY --from=builder /app/build ./build
 COPY --from=builder /app/package.json ./package.json
 COPY --from=builder /app/server.js ./server.js
 COPY --from=builder /app/scripts ./scripts
 COPY --from=builder /app/data ./bundled-data
-COPY --chmod=755 docker-entrypoint.sh ./docker-entrypoint.sh
+COPY --chmod=755 docker-entrypoint.sh /usr/local/bin/cinephage-entrypoint
 COPY --chmod=755 docker-script-runner.sh /usr/local/bin/cinephage-script
 RUN ln -sf /usr/local/bin/cinephage-script /usr/local/bin/cine-run
 
@@ -86,7 +108,7 @@ ENV NODE_ENV=production \
 EXPOSE 3000
 
 HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=3 \
-  CMD wget --no-verbose --tries=1 --spider "http://127.0.0.1:$PORT/api/health" || exit 1
+  CMD node -e "const port=process.env.PORT||3000;fetch('http://127.0.0.1:'+port+'/api/health').then((r)=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
 
-ENTRYPOINT ["./docker-entrypoint.sh"]
+ENTRYPOINT ["/usr/local/bin/cinephage-entrypoint"]
 CMD ["node", "server.js"]

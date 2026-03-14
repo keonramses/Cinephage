@@ -50,7 +50,23 @@ const SCHEDULER_POLL_INTERVAL_MS = 30 * 1000;
  * Grace period after startup before any automated tasks run (in milliseconds)
  * Allows the application to fully initialize before hammering indexers
  */
-const STARTUP_GRACE_PERIOD_MS = 5 * 60 * 1000; // 5 minutes
+const DEFAULT_STARTUP_GRACE_PERIOD_MS = 5 * 60 * 1000; // 5 minutes
+
+function getStartupGracePeriodMs(): number {
+	const envValue = process.env.MONITORING_STARTUP_GRACE_MINUTES;
+	if (!envValue) {
+		return DEFAULT_STARTUP_GRACE_PERIOD_MS;
+	}
+
+	const parsed = Number(envValue);
+	if (!Number.isFinite(parsed) || parsed < 0) {
+		return DEFAULT_STARTUP_GRACE_PERIOD_MS;
+	}
+
+	return Math.round(parsed * 60 * 1000);
+}
+
+const STARTUP_GRACE_PERIOD_MS = getStartupGracePeriodMs();
 
 /**
  * When to trigger subtitle search during import

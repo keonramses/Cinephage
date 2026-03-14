@@ -112,14 +112,24 @@ const DEFAULT_OPTIONS: Required<
 	respectEnabled: true,
 	respectBackoff: true,
 	useTieredSearch: true,
-	concurrency: 5,
-	timeout: 30000,
+	concurrency: getPositiveIntEnv('INDEXER_SEARCH_CONCURRENCY', 5),
+	timeout: getPositiveIntEnv('INDEXER_SEARCH_TIMEOUT_MS', 30_000),
 	useCache: true
 };
 
 interface TvEpisodeCounts {
 	seriesEpisodeCount?: number;
 	seasonEpisodeCounts: Map<number, number>;
+}
+
+function getPositiveIntEnv(name: string, fallback: number): number {
+	const envValue = process.env[name];
+	if (!envValue) return fallback;
+
+	const parsed = Number(envValue);
+	if (!Number.isFinite(parsed) || parsed <= 0) return fallback;
+
+	return Math.round(parsed);
 }
 
 /**

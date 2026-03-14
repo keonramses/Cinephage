@@ -6,14 +6,15 @@ Complete reference for all environment variables supported by Cinephage.
 
 ## Docker-Specific Variables
 
-| Variable          | Description                            | Default                                       | Required |
-| ----------------- | -------------------------------------- | --------------------------------------------- | -------- |
-| `PORT`            | HTTP port to listen on                 | 3000                                          | No       |
-| `PUID`            | User ID for file permissions           | 1000                                          | No       |
-| `PGID`            | Group ID for file permissions          | 1000                                          | No       |
-| `ORIGIN`          | Trusted app origin / CSRF origin       | http://localhost:3000                         | No       |
-| `BETTER_AUTH_URL` | Better Auth callback/redirect base URL | Saved External URL or `http://localhost:5173` | No       |
-| `TZ`              | Timezone                               | UTC                                           | No       |
+| Variable                          | Description                                             | Default                                       | Required |
+| --------------------------------- | ------------------------------------------------------- | --------------------------------------------- | -------- |
+| `PORT`                            | HTTP port to listen on                                  | 3000                                          | No       |
+| `PUID`                            | User ID for file permissions                            | 1000                                          | No       |
+| `PGID`                            | Group ID for file permissions                           | 1000                                          | No       |
+| `CINEPHAGE_FORCE_RECURSIVE_CHOWN` | Force full recursive ownership fix on startup (`0`/`1`) | 0                                             | No       |
+| `ORIGIN`                          | Trusted app origin / CSRF origin                        | http://localhost:3000                         | No       |
+| `BETTER_AUTH_URL`                 | Better Auth callback/redirect base URL                  | Saved External URL or `http://localhost:5173` | No       |
+| `TZ`                              | Timezone                                                | UTC                                           | No       |
 
 ### Example Docker Compose
 
@@ -235,6 +236,60 @@ Prevents EPG flooding on restart.
 
 ---
 
+## Startup and Readiness Tuning
+
+These variables help tune startup behavior in Docker/Kubernetes environments.
+
+| Variable                                   | Description                                                           | Default |
+| ------------------------------------------ | --------------------------------------------------------------------- | ------- |
+| `MONITORING_STARTUP_GRACE_MINUTES`         | Delay before monitoring scheduler begins automated tasks              | 5       |
+| `DOWNLOAD_MONITOR_STARTUP_SYNC_ENABLED`    | Run download-client orphan sync at startup (`true`/`false`)           | true    |
+| `DOWNLOAD_MONITOR_STARTUP_SYNC_TIMEOUT_MS` | Per-client timeout for startup sync (milliseconds)                    | 10000   |
+| `EXTERNAL_ID_RUN_ON_STARTUP`               | Run External ID refresh automatically during startup (`true`/`false`) | true    |
+
+### Example (slower storage or constrained clusters)
+
+```bash
+MONITORING_STARTUP_GRACE_MINUTES=10
+DOWNLOAD_MONITOR_STARTUP_SYNC_ENABLED=false
+EXTERNAL_ID_RUN_ON_STARTUP=false
+```
+
+---
+
+## Integration Runtime Tuning
+
+These variables control post-start runtime polling, search load, and health-failure pacing.
+
+| Variable                                        | Description                                                          | Default |
+| ----------------------------------------------- | -------------------------------------------------------------------- | ------- |
+| `DOWNLOAD_MONITOR_POLL_ACTIVE_MS`               | Download-client polling interval while active downloads exist        | 5000    |
+| `DOWNLOAD_MONITOR_POLL_IDLE_MS`                 | Download-client polling interval while idle                          | 30000   |
+| `INDEXER_SEARCH_CONCURRENCY`                    | Max concurrent indexer requests per search batch                     | 5       |
+| `INDEXER_SEARCH_TIMEOUT_MS`                     | Timeout per indexer request                                          | 30000   |
+| `INDEXER_FAILURES_BEFORE_DISABLE`               | Consecutive failures before auto-disabling an indexer                | 3       |
+| `INDEXER_FAILURE_INCREMENT_INTERVAL_MS`         | Minimum spacing between consecutive-failure increments per indexer   | 30000   |
+| `INDEXER_BACKOFF_BASE_MS`                       | Base indexer backoff duration                                        | 5000    |
+| `INDEXER_BACKOFF_MAX_MS`                        | Max indexer backoff duration                                         | 60000   |
+| `INDEXER_BACKOFF_MULTIPLIER`                    | Exponential backoff multiplier                                       | 2       |
+| `DOWNLOAD_CLIENT_FAILURES_BEFORE_FAILING`       | Consecutive failures before download-client health becomes `failing` | 3       |
+| `DOWNLOAD_CLIENT_FAILURE_INCREMENT_INTERVAL_MS` | Minimum spacing between consecutive-failure increments per client    | 30000   |
+
+### Example (reduce integration pressure)
+
+```bash
+DOWNLOAD_MONITOR_POLL_ACTIVE_MS=10000
+DOWNLOAD_MONITOR_POLL_IDLE_MS=60000
+INDEXER_SEARCH_CONCURRENCY=2
+INDEXER_SEARCH_TIMEOUT_MS=45000
+INDEXER_FAILURES_BEFORE_DISABLE=5
+INDEXER_FAILURE_INCREMENT_INTERVAL_MS=45000
+DOWNLOAD_CLIENT_FAILURES_BEFORE_FAILING=5
+DOWNLOAD_CLIENT_FAILURE_INCREMENT_INTERVAL_MS=45000
+```
+
+---
+
 ## Advanced Settings
 
 | Variable           | Description                         | Default |
@@ -310,6 +365,25 @@ PROVIDER_PARALLEL_COUNT=3
 
 # Live TV
 EPG_STARTUP_GRACE_MS=30000
+
+# Startup / readiness tuning
+MONITORING_STARTUP_GRACE_MINUTES=5
+DOWNLOAD_MONITOR_STARTUP_SYNC_ENABLED=true
+DOWNLOAD_MONITOR_STARTUP_SYNC_TIMEOUT_MS=10000
+EXTERNAL_ID_RUN_ON_STARTUP=true
+
+# Integration runtime tuning
+DOWNLOAD_MONITOR_POLL_ACTIVE_MS=5000
+DOWNLOAD_MONITOR_POLL_IDLE_MS=30000
+INDEXER_SEARCH_CONCURRENCY=5
+INDEXER_SEARCH_TIMEOUT_MS=30000
+INDEXER_FAILURES_BEFORE_DISABLE=3
+INDEXER_FAILURE_INCREMENT_INTERVAL_MS=30000
+INDEXER_BACKOFF_BASE_MS=5000
+INDEXER_BACKOFF_MAX_MS=60000
+INDEXER_BACKOFF_MULTIPLIER=2
+DOWNLOAD_CLIENT_FAILURES_BEFORE_FAILING=3
+DOWNLOAD_CLIENT_FAILURE_INCREMENT_INTERVAL_MS=30000
 
 # Advanced
 SHUTDOWN_TIMEOUT=30

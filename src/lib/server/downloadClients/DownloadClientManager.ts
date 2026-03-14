@@ -44,6 +44,23 @@ const IMPLEMENTATION_PROTOCOL_MAP: Record<string, DownloadClientProtocol> = {
 	nzbget: 'usenet'
 };
 
+function parsePositiveIntEnv(name: string, fallback: number): number {
+	const value = process.env[name];
+	if (!value) return fallback;
+	const parsed = Number(value);
+	if (!Number.isFinite(parsed) || parsed <= 0) return fallback;
+	return Math.round(parsed);
+}
+
+const DOWNLOAD_CLIENT_FAILURES_BEFORE_FAILING = parsePositiveIntEnv(
+	'DOWNLOAD_CLIENT_FAILURES_BEFORE_FAILING',
+	3
+);
+const DOWNLOAD_CLIENT_FAILURE_INCREMENT_INTERVAL_MS = parsePositiveIntEnv(
+	'DOWNLOAD_CLIENT_FAILURE_INCREMENT_INTERVAL_MS',
+	30_000
+);
+
 const LEGACY_DOWNLOAD_CLIENT_SELECT = {
 	id: downloadClientsTable.id,
 	name: downloadClientsTable.name,
@@ -641,12 +658,24 @@ export class DownloadClientManager {
 		const now = new Date().toISOString();
 		try {
 			const [row] = await db
-				.select({ consecutiveFailures: downloadClientsTable.consecutiveFailures })
+				.select({
+					consecutiveFailures: downloadClientsTable.consecutiveFailures,
+					lastFailure: downloadClientsTable.lastFailure
+				})
 				.from(downloadClientsTable)
 				.where(eq(downloadClientsTable.id, id));
 
-			const consecutiveFailures = (row?.consecutiveFailures ?? 0) + 1;
-			const health: DownloadClientHealth = consecutiveFailures >= 3 ? 'failing' : 'warning';
+			const previousFailures = row?.consecutiveFailures ?? 0;
+			const lastFailureTime = row?.lastFailure ? new Date(row.lastFailure).getTime() : 0;
+			const nowTime = Date.now();
+			const shouldIncrementConsecutive =
+				!lastFailureTime ||
+				nowTime - lastFailureTime >= DOWNLOAD_CLIENT_FAILURE_INCREMENT_INTERVAL_MS;
+			const consecutiveFailures = shouldIncrementConsecutive
+				? previousFailures + 1
+				: previousFailures;
+			const health: DownloadClientHealth =
+				consecutiveFailures >= DOWNLOAD_CLIENT_FAILURES_BEFORE_FAILING ? 'failing' : 'warning';
 
 			await db
 				.update(downloadClientsTable)

@@ -15,7 +15,9 @@ Currently single-user with password protection via session cookie.
 ### System
 
 ```
-GET    /api/health              - Health check
+GET    /api/health              - Health check (detailed runtime + DB checks)
+GET    /api/ready               - Readiness check (DB + services started)
+GET    /health                  - Legacy health URL (308 redirect to /api/health)
 GET    /api/system/status       - System status
 GET    /api/system/logs         - Recent logs
 ```

@@ -235,11 +235,17 @@ export class PersistentStatusTracker {
 	 */
 	async recordFailure(indexerId: string, message: string, requestUrl?: string): Promise<void> {
 		const status = await this.getOrCreateStatus(indexerId);
+		const now = new Date();
 
 		status.totalRequests++;
 		status.totalFailures++;
-		status.consecutiveFailures++;
-		status.lastFailure = new Date();
+		const lastFailureAt = status.lastFailure?.getTime();
+		const shouldIncrementConsecutive =
+			!lastFailureAt || now.getTime() - lastFailureAt >= this.config.minFailureIncrementIntervalMs;
+		if (shouldIncrementConsecutive) {
+			status.consecutiveFailures++;
+		}
+		status.lastFailure = now;
 
 		// Add to recent failures
 		const failure: FailureRecord = {
@@ -486,7 +492,8 @@ export class PersistentStatusTracker {
 	private calculateHealth(status: IndexerStatus): HealthStatus {
 		if (!status.isEnabled) return 'disabled';
 		if (status.isDisabled) return 'disabled';
-		if (status.consecutiveFailures >= 3) return 'failing';
+		const failingThreshold = Math.max(2, this.config.failuresBeforeDisable - 1);
+		if (status.consecutiveFailures >= failingThreshold) return 'failing';
 		if (status.consecutiveFailures >= 1) return 'warning';
 		return 'healthy';
 	}

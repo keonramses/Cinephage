@@ -283,7 +283,7 @@ Check current version:
 
 ```bash
 # From running instance
-curl -s http://localhost:3000/health | jq .version
+curl -s http://localhost:3000/api/health | jq .version
 
 # Alternate status endpoint
 curl -s http://localhost:3000/api/system/status | jq .version

@@ -86,7 +86,7 @@ What actually happens.
 
 - OS: (Ubuntu 22.04, Windows 11, etc.)
 - Node.js version: (output of `node --version`)
-- Cinephage version: (from Settings, `/health`, or `/api/system/status`)
+- Cinephage version: (from Settings, `/api/health`, or `/api/system/status`)
 - Installation method: (Docker/Manual)
 
 ## Logs

@@ -1,39 +1,54 @@
 import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
-import { getIndexerManager } from '$lib/server/indexers/IndexerManager';
+import { db } from '$lib/server/db';
+import { settings } from '$lib/server/db/schema';
+import { getServiceManager } from '$lib/server/services/service-manager.js';
 import { resolveAppVersion } from '$lib/server/version.js';
 
-export const GET: RequestHandler = async () => {
-	// Get indexer manager to check definition status
-	// Note: getIndexerManager() will initialize if not already done
-	let definitionsLoaded: number;
-	let definitionErrors: number;
+type HealthCheckResult = {
+	status: 'healthy' | 'unhealthy';
+	latencyMs?: number;
+};
 
+export const GET: RequestHandler = async () => {
+	const checks: Record<string, HealthCheckResult> = {};
+	let overallHealthy = true;
+
+	// Database check
+	const dbStart = performance.now();
 	try {
-		const manager = await getIndexerManager();
-		definitionsLoaded = manager.getUnifiedDefinitions().length;
-		definitionErrors = manager.getDefinitionErrors().length;
+		await db.select().from(settings).limit(1);
+		checks.database = {
+			status: 'healthy',
+			latencyMs: Math.round(performance.now() - dbStart)
+		};
 	} catch {
-		// If manager fails to initialize, report as unhealthy
-		return json(
-			{
-				status: 'error',
-				error: 'Failed to initialize indexer manager'
-			},
-			{ status: 503 }
-		);
+		checks.database = { status: 'unhealthy' };
+		overallHealthy = false;
 	}
+
+	const serviceManager = getServiceManager();
+	const servicesStarted = serviceManager.isStarted();
+	const status: 'healthy' | 'starting' | 'unhealthy' = !overallHealthy
+		? 'unhealthy'
+		: servicesStarted
+			? 'healthy'
+			: 'starting';
+	const httpStatus = status === 'unhealthy' ? 503 : 200;
 
 	return json(
 		{
-			status: 'ok',
+			status,
 			version: resolveAppVersion(),
-			indexers: {
-				definitionsLoaded,
-				definitionErrors
-			}
+			timestamp: new Date().toISOString(),
+			runtime: {
+				uptimeSeconds: Math.round(process.uptime()),
+				servicesStarted
+			},
+			checks
 		},
 		{
+			status: httpStatus,
 			headers: {
 				'cache-control': 'no-store, no-cache, must-revalidate'
 			}

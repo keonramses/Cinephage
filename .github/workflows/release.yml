@@ -388,7 +388,7 @@ jobs:
             exit 1
           fi
 
-          HEALTH=$(curl -sS "${API_URL}/health")
+          HEALTH=$(curl -sS "${API_URL}/api/health")
           echo "$HEALTH" | jq .
 
           if ! echo "$HEALTH" | jq -e --arg version "$CINEPHAGE_API_VERSION" '.version == $version' >/dev/null 2>&1; then

@@ -108,12 +108,13 @@ Data, configuration, and logs are stored under `/config` in the container. Mount
 
 These variables are read directly by the container entrypoint. They only take effect when the container starts as root (for example, no `user:` flag in Compose or `--user` in `docker run`).
 
-| Variable | Required | Default | Description                 |
-| -------- | -------- | ------- | --------------------------- |
-| `PUID`   | No       | 1000    | Runtime user ID to drop to  |
-| `PGID`   | No       | 1000    | Runtime group ID to drop to |
+| Variable                          | Required | Default | Description                                   |
+| --------------------------------- | -------- | ------- | --------------------------------------------- |
+| `PUID`                            | No       | 1000    | Runtime user ID to drop to                    |
+| `PGID`                            | No       | 1000    | Runtime group ID to drop to                   |
+| `CINEPHAGE_FORCE_RECURSIVE_CHOWN` | No       | 0       | Force full recursive ownership fix on startup |
 
-At startup, the entrypoint ensures ownership of `/config` matches the runtime UID/GID, which covers cache, data & logs.
+At startup, the entrypoint uses an ownership stamp to avoid expensive recursive `chown` on every boot. A full recursive ownership fix runs when UID/GID changes (or when forced), and cache/data/log paths are always checked.
 
 ### Using Docker Run
 
@@ -135,7 +136,7 @@ docker run -d \
 
 > **Note:** When using `docker run`, pass the actual application variables (`ORIGIN`, `BETTER_AUTH_URL`, `TZ`, `PUID`, `PGID`) directly.
 >
-> The container starts as root, then the entrypoint automatically drops privileges to `PUID:PGID` (default: 1000:1000) and fixes ownership of `/config` and cache directories.
+> The container starts as root, then the entrypoint automatically drops privileges to `PUID:PGID` (default: 1000:1000). It performs a full recursive ownership fix when needed (or when `CINEPHAGE_FORCE_RECURSIVE_CHOWN=1`), then uses a fast path on subsequent boots.
 
 If you want preview builds instead of stable releases, change the image tag to `ghcr.io/moldytaint/cinephage:dev`.
 

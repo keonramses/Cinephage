@@ -39,6 +39,7 @@ CLAUDE.md
 
 # OpenCode local settings
 .opencode/
+opencode.json
 opencode
 opencode.md
 OPENCODE.md

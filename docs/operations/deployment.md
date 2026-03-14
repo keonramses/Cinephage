@@ -314,7 +314,40 @@ Caddy provisions SSL automatically. No configuration needed.
 Test that Cinephage is running:
 
 ```bash
-curl http://localhost:3000/health
+curl http://localhost:3000/api/health
+curl http://localhost:3000/api/ready
+```
+
+`/api/health` is the primary health endpoint (includes runtime + DB check details).
+`/api/ready` is a readiness endpoint that returns `200` only after database connectivity
+and service startup are complete.
+Legacy `/health` requests are redirected (`308`) to `/api/health`.
+
+### Kubernetes Probes
+
+Recommended probe configuration:
+
+```yaml
+startupProbe:
+  httpGet:
+    path: /api/health
+    port: 3000
+  periodSeconds: 10
+  failureThreshold: 60
+
+livenessProbe:
+  httpGet:
+    path: /api/health
+    port: 3000
+  periodSeconds: 10
+  failureThreshold: 3
+
+readinessProbe:
+  httpGet:
+    path: /api/ready
+    port: 3000
+  periodSeconds: 5
+  failureThreshold: 12
 ```
 
 ---

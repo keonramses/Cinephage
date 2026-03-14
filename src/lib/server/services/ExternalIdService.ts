@@ -37,7 +37,7 @@ const DEFAULT_CONFIG: ExternalIdServiceConfig = {
 	intervalHours: 6,
 	batchSize: 50,
 	apiDelayMs: 250,
-	runOnStartup: true
+	runOnStartup: process.env.EXTERNAL_ID_RUN_ON_STARTUP !== 'false'
 };
 
 /**

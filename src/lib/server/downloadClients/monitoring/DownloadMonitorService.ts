@@ -42,8 +42,43 @@ async function getImportService() {
 /**
  * Polling intervals in milliseconds
  */
-const POLL_INTERVAL_ACTIVE = 5_000; // 5 seconds when active downloads
-const POLL_INTERVAL_IDLE = 30_000; // 30 seconds when idle
+const DEFAULT_POLL_INTERVAL_ACTIVE_MS = 5_000; // 5 seconds when active downloads
+const DEFAULT_POLL_INTERVAL_IDLE_MS = 30_000; // 30 seconds when idle
+
+function getPositiveIntEnv(name: string, fallback: number): number {
+	const envValue = process.env[name];
+	if (!envValue) {
+		return fallback;
+	}
+
+	const parsed = Number(envValue);
+	if (!Number.isFinite(parsed) || parsed <= 0) {
+		return fallback;
+	}
+
+	return Math.round(parsed);
+}
+
+const POLL_INTERVAL_ACTIVE = getPositiveIntEnv(
+	'DOWNLOAD_MONITOR_POLL_ACTIVE_MS',
+	DEFAULT_POLL_INTERVAL_ACTIVE_MS
+);
+const POLL_INTERVAL_IDLE = getPositiveIntEnv(
+	'DOWNLOAD_MONITOR_POLL_IDLE_MS',
+	DEFAULT_POLL_INTERVAL_IDLE_MS
+);
+
+const STARTUP_SYNC_ENABLED = process.env.DOWNLOAD_MONITOR_STARTUP_SYNC_ENABLED !== 'false';
+const DEFAULT_STARTUP_SYNC_TIMEOUT_MS = 10_000; // 10 seconds per client
+
+function getStartupSyncTimeoutMs(): number {
+	return getPositiveIntEnv(
+		'DOWNLOAD_MONITOR_STARTUP_SYNC_TIMEOUT_MS',
+		DEFAULT_STARTUP_SYNC_TIMEOUT_MS
+	);
+}
+
+const STARTUP_SYNC_TIMEOUT_MS = getStartupSyncTimeoutMs();
 
 /**
  * Max import attempts before marking as failed
@@ -246,6 +281,13 @@ export class DownloadMonitorService extends EventEmitter implements BackgroundSe
 
 		// Perform async startup in background
 		setImmediate(() => {
+			if (!STARTUP_SYNC_ENABLED) {
+				logger.info('Skipping download monitor startup sync (disabled by config)');
+				this._status = 'ready';
+				this.schedulePoll(0); // Poll immediately on start
+				return;
+			}
+
 			this.performStartupSync()
 				.then(() => {
 					this._status = 'ready';
@@ -301,7 +343,6 @@ export class DownloadMonitorService extends EventEmitter implements BackgroundSe
 			}
 
 			// Sync all clients in parallel with timeout for faster startup
-			const SYNC_TIMEOUT_MS = 10_000; // 10 second timeout per client
 			const syncResults = await Promise.all(
 				enabledClients.map(async ({ client, instance }) => {
 					try {
@@ -309,7 +350,7 @@ export class DownloadMonitorService extends EventEmitter implements BackgroundSe
 						const downloads = await Promise.race([
 							instance.getDownloads(),
 							new Promise<never>((_, reject) =>
-								setTimeout(() => reject(new Error('Sync timeout')), SYNC_TIMEOUT_MS)
+								setTimeout(() => reject(new Error('Sync timeout')), STARTUP_SYNC_TIMEOUT_MS)
 							)
 						]);
 

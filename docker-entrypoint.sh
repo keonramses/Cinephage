@@ -59,6 +59,7 @@ HOME="${CONFIG_ROOT}/cache/home"
 export HOME
 CAMOUFOX_CACHE_DIR="${HOME}/.cache/camoufox"
 CAMOUFOX_NOTICE_FILE="${CONFIG_ROOT}/README-DO-NOT-DELETE-CAMOUFOX-CACHE.txt"
+OWNERSHIP_STAMP_FILE="${CONFIG_ROOT}/.cinephage-ownership-stamp"
 export CAMOUFOX_PATH="$CAMOUFOX_CACHE_DIR"
 
 has_contents() {
@@ -112,6 +113,34 @@ EOF
   fi
 }
 
+should_run_recursive_ownership_fix() {
+  local target_uid="$1"
+  local target_gid="$2"
+  local expected="${target_uid}:${target_gid}"
+
+  if [ "${CINEPHAGE_FORCE_RECURSIVE_CHOWN:-0}" = "1" ]; then
+    return 0
+  fi
+
+  if [ ! -f "$OWNERSHIP_STAMP_FILE" ]; then
+    return 0
+  fi
+
+  local current
+  current="$(tr -d '\r\n' < "$OWNERSHIP_STAMP_FILE" 2>/dev/null || true)"
+  [ "$current" != "$expected" ]
+}
+
+mark_recursive_ownership_fix_complete() {
+  local target_uid="$1"
+  local target_gid="$2"
+  local expected="${target_uid}:${target_gid}"
+
+  if ! printf '%s\n' "$expected" > "$OWNERSHIP_STAMP_FILE" 2>/dev/null; then
+    echo "Warning: Failed to write ownership stamp file at ${OWNERSHIP_STAMP_FILE}"
+  fi
+}
+
 if [ "$(id -u)" = "0" ] && [ -z "${CINEPHAGE_REEXEC:-}" ]; then
   TARGET_UID="${PUID:-1000}"
   TARGET_GID="${PGID:-1000}"
@@ -144,12 +173,28 @@ if [ "$(id -u)" = "0" ] && [ -z "${CINEPHAGE_REEXEC:-}" ]; then
     echo "Mount ${CONFIG_ROOT} and keep legacy mounts for one run to migrate."
   fi
 
-  echo "Setting ownership on application directories..."
-  chown -R "$TARGET_UID:$TARGET_GID" "$CONFIG_ROOT" 2>/dev/null || true
-  # Exclude node_modules — owned by root, never written to at runtime,
-  # and walking it on every boot adds meaningful startup latency
-  find /app -mindepth 1 -maxdepth 1 -not -name 'node_modules' \
-    -exec chown -R "$TARGET_UID:$TARGET_GID" {} +
+  if should_run_recursive_ownership_fix "$TARGET_UID" "$TARGET_GID"; then
+    echo "Setting ownership on application directories..."
+    chown -R "$TARGET_UID:$TARGET_GID" "$CONFIG_ROOT" 2>/dev/null || true
+    # Exclude node_modules — owned by root, never written to at runtime,
+    # and walking it on every boot adds meaningful startup latency
+    find /app -mindepth 1 -maxdepth 1 -not -name 'node_modules' \
+      -exec chown -R "$TARGET_UID:$TARGET_GID" {} +
+    mark_recursive_ownership_fix_complete "$TARGET_UID" "$TARGET_GID"
+  else
+    echo "Skipping recursive ownership update (UID/GID unchanged)."
+    chown "$TARGET_UID:$TARGET_GID" \
+      "$CONFIG_ROOT" \
+      "$DATA_DIR" \
+      "$LOG_DIR" \
+      "$INDEXER_DEFINITIONS_PATH" \
+      "$EXTERNAL_LISTS_PRESETS_PATH" \
+      "$INDEXER_CUSTOM_DEFINITIONS_PATH" \
+      "$EXTERNAL_LISTS_CUSTOM_PRESETS_PATH" \
+      "$HOME" \
+      "$CAMOUFOX_CACHE_DIR" \
+      "$OWNERSHIP_STAMP_FILE" 2>/dev/null || true
+  fi
 
   export CINEPHAGE_REEXEC=1
   exec gosu "${TARGET_UID}:${TARGET_GID}" "$0" "$@"
