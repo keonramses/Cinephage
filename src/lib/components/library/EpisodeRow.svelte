@@ -45,6 +45,8 @@
 		isForced?: boolean;
 		isHearingImpaired?: boolean;
 		format?: string;
+		wasSynced?: boolean;
+		syncOffset?: number | null;
 		isEmbedded?: boolean;
 	}
 
@@ -433,7 +435,12 @@
 					{#if allSubtitles.length > 0}
 						<div class="flex items-center gap-1">
 							<Subtitles size={12} class="text-base-content/50" />
-							<SubtitleDisplay subtitles={allSubtitles} maxDisplay={3} size="xs" />
+							<SubtitleDisplay
+								subtitles={allSubtitles}
+								maxDisplay={3}
+								size="xs"
+								showSyncStatus={true}
+							/>
 						</div>
 					{/if}
 				</div>
@@ -461,7 +468,12 @@
 				{#if allSubtitles.length > 0}
 					<div class="flex items-center gap-1">
 						<Subtitles size={12} class="text-base-content/50" />
-						<SubtitleDisplay subtitles={allSubtitles} maxDisplay={3} size="xs" />
+						<SubtitleDisplay
+							subtitles={allSubtitles}
+							maxDisplay={3}
+							size="xs"
+							showSyncStatus={true}
+						/>
 					</div>
 				{/if}
 			</div>

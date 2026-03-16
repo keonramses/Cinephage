@@ -95,7 +95,12 @@ async function getMovieData(movieId: string): Promise<LibraryMovie | null> {
 				language: subtitles.language,
 				isForced: subtitles.isForced,
 				isHearingImpaired: subtitles.isHearingImpaired,
-				format: subtitles.format
+				format: subtitles.format,
+				matchScore: subtitles.matchScore,
+				providerId: subtitles.providerId,
+				dateAdded: subtitles.dateAdded,
+				wasSynced: subtitles.wasSynced,
+				syncOffset: subtitles.syncOffset
 			})
 			.from(subtitles)
 			.where(eq(subtitles.movieId, movieId)),
@@ -132,7 +137,12 @@ async function getMovieData(movieId: string): Promise<LibraryMovie | null> {
 			language: s.language,
 			isForced: s.isForced ?? undefined,
 			isHearingImpaired: s.isHearingImpaired ?? undefined,
-			format: s.format ?? undefined
+			format: s.format ?? undefined,
+			matchScore: s.matchScore,
+			providerId: s.providerId,
+			dateAdded: s.dateAdded,
+			wasSynced: s.wasSynced ?? undefined,
+			syncOffset: s.syncOffset
 		}))
 	};
 }

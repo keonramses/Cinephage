@@ -10,11 +10,12 @@
 	import { TVSeriesSidebar, BulkActionBar } from '$lib/components/library/tv';
 	import { InteractiveSearchModal } from '$lib/components/search';
 	import { SubtitleSearchModal } from '$lib/components/subtitles';
+	import SubtitleSyncModal from '$lib/components/subtitles/SubtitleSyncModal.svelte';
 	import DeleteConfirmationModal from '$lib/components/ui/modal/DeleteConfirmationModal.svelte';
 	import { toasts } from '$lib/stores/toast.svelte';
 	import type { SeriesEditData } from '$lib/components/library/SeriesEditModal.svelte';
 	import type { SearchMode } from '$lib/components/search/InteractiveSearchModal.svelte';
-	import { CheckSquare, FileEdit, Wifi, WifiOff, Loader2 } from 'lucide-svelte';
+	import { CheckSquare, FileEdit, Wifi, WifiOff, Loader2, RefreshCw } from 'lucide-svelte';
 	import { SvelteSet, SvelteMap } from 'svelte/reactivity';
 	import { page } from '$app/stores';
 	import { goto } from '$app/navigation';
@@ -299,6 +300,9 @@
 
 	// Subtitle search state
 	let isSubtitleSearchModalOpen = $state(false);
+	let isSubtitleSyncModalOpen = $state(false);
+	let syncingSubtitleId = $state<string | null>(null);
+	let subtitleSyncError = $state<string | null>(null);
 	let subtitleSearchContext = $state<{
 		episodeId: string;
 		title: string;
@@ -1030,6 +1034,8 @@
 		isForced?: boolean;
 		isHearingImpaired?: boolean;
 		format?: string;
+		wasSynced?: boolean;
+		syncOffset?: number | null;
 	}
 
 	function appendSubtitleToEpisode(episodeId: string, subtitle: DownloadedSubtitle): void {
@@ -1069,6 +1075,11 @@
 		isSubtitleSearchModalOpen = true;
 	}
 
+	function handleSubtitleSync() {
+		subtitleSyncError = null;
+		isSubtitleSyncModalOpen = true;
+	}
+
 	async function handleSubtitleAutoSearch(episode: EpisodeForSubtitle) {
 		subtitleAutoSearchingEpisodes.add(episode.id);
 
@@ -1095,6 +1106,77 @@
 		const episodeId = subtitleSearchContext?.episodeId;
 		if (!episodeId) return;
 		appendSubtitleToEpisode(episodeId, subtitle);
+	}
+
+	const syncableSubtitles = $derived.by(() => {
+		const results: Array<DownloadedSubtitle & { id: string; label: string }> = [];
+
+		for (const season of seasons) {
+			for (const episode of season.episodes) {
+				for (const subtitle of episode.subtitles ?? []) {
+					if ('isEmbedded' in subtitle && subtitle.isEmbedded) continue;
+					results.push({
+						...subtitle,
+						id: subtitle.id,
+						language: subtitle.language,
+						label: `S${String(episode.seasonNumber).padStart(2, '0')}E${String(episode.episodeNumber).padStart(2, '0')} - ${episode.title || `Episode ${episode.episodeNumber}`}`
+					});
+				}
+			}
+		}
+
+		return results;
+	});
+
+	async function handleSubtitleResync(
+		subtitleId: string,
+		settings?: { splitPenalty?: number; noSplits?: boolean }
+	): Promise<void> {
+		syncingSubtitleId = subtitleId;
+		subtitleSyncError = null;
+
+		try {
+			const response = await fetch('/api/subtitles/sync', {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({
+					subtitleId,
+					...(settings?.splitPenalty !== undefined && { splitPenalty: settings.splitPenalty }),
+					...(settings?.noSplits !== undefined && { noSplits: settings.noSplits })
+				})
+			});
+
+			const result = await response.json();
+
+			if (!response.ok || !result.success) {
+				throw new Error(result.error || 'Subtitle sync failed');
+			}
+
+			seasonsState = seasons.map((season) => ({
+				...season,
+				episodes: season.episodes.map((episode) => ({
+					...episode,
+					subtitles: (episode.subtitles ?? []).map((subtitle) =>
+						subtitle.id === subtitleId
+							? {
+									...subtitle,
+									wasSynced: true,
+									syncOffset: result.offsetMs
+								}
+							: subtitle
+					)
+				}))
+			}));
+
+			toasts.success('Subtitle synced', {
+				description: `Applied offset of ${result.offsetMs}ms`
+			});
+		} catch (error) {
+			subtitleSyncError = describeError(error, 'Subtitle sync failed');
+			showActionError('Failed to sync subtitle', error);
+		} finally {
+			syncingSubtitleId = null;
+		}
 	}
 
 	// Selection handlers
@@ -1348,6 +1430,12 @@
 			<div class="flex items-center justify-between">
 				<h2 class="text-lg font-semibold">Seasons</h2>
 				<div class="flex gap-1">
+					{#if syncableSubtitles.length > 0}
+						<button class="btn gap-1 btn-ghost btn-sm" onclick={handleSubtitleSync}>
+							<RefreshCw class="h-4 w-4" />
+							Sync Subtitles
+						</button>
+					{/if}
 					<button
 						class="btn gap-1 btn-ghost btn-sm"
 						onclick={() => (isRenameModalOpen = true)}
@@ -1459,6 +1547,29 @@
 		subtitleSearchContext = null;
 	}}
 	onDownloaded={handleSubtitleDownloaded}
+/>
+
+<SubtitleSyncModal
+	open={isSubtitleSyncModalOpen}
+	title={series.title}
+	subtitles={syncableSubtitles.map((subtitle) => ({
+		id: subtitle.id,
+		language: subtitle.language ?? 'unknown',
+		format: subtitle.format,
+		isForced: subtitle.isForced,
+		isHearingImpaired: subtitle.isHearingImpaired,
+		matchScore: (subtitle as { matchScore?: number | null }).matchScore,
+		dateAdded: (subtitle as { dateAdded?: string | null }).dateAdded,
+		wasSynced: subtitle.wasSynced,
+		syncOffset: subtitle.syncOffset
+	}))}
+	{syncingSubtitleId}
+	errorMessage={subtitleSyncError}
+	onClose={() => {
+		isSubtitleSyncModalOpen = false;
+		subtitleSyncError = null;
+	}}
+	onSync={handleSubtitleResync}
 />
 
 <!-- Rename Preview Modal -->

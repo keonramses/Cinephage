@@ -126,7 +126,12 @@ export const GET: RequestHandler = async ({ params }) => {
 							language: s.language,
 							isForced: s.isForced,
 							isHearingImpaired: s.isHearingImpaired,
-							format: s.format
+							format: s.format,
+							matchScore: s.matchScore,
+							providerId: s.providerId,
+							dateAdded: s.dateAdded,
+							wasSynced: s.wasSynced,
+							syncOffset: s.syncOffset
 						})),
 						subtitleCount: epSubtitles.length,
 						subtitleLanguages: [...new Set(epSubtitles.map((s) => s.language))]

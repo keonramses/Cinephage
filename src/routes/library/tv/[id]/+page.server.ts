@@ -55,6 +55,12 @@ export interface SubtitleInfo {
 	isForced?: boolean;
 	isHearingImpaired?: boolean;
 	format?: string;
+	matchScore?: number | null;
+	providerId?: string | null;
+	dateAdded?: string | null;
+	wasSynced?: boolean;
+	syncOffset?: number | null;
+	isEmbedded?: boolean;
 }
 
 export interface EpisodeWithFile {
@@ -252,7 +258,12 @@ export const load: PageServerLoad = async ({ params }): Promise<LibrarySeriesPag
 						language: subtitles.language,
 						isForced: subtitles.isForced,
 						isHearingImpaired: subtitles.isHearingImpaired,
-						format: subtitles.format
+						format: subtitles.format,
+						matchScore: subtitles.matchScore,
+						providerId: subtitles.providerId,
+						dateAdded: subtitles.dateAdded,
+						wasSynced: subtitles.wasSynced,
+						syncOffset: subtitles.syncOffset
 					})
 					.from(subtitles)
 					.where(inArray(subtitles.episodeId, episodeIds))
@@ -268,7 +279,12 @@ export const load: PageServerLoad = async ({ params }): Promise<LibrarySeriesPag
 				language: sub.language,
 				isForced: sub.isForced ?? undefined,
 				isHearingImpaired: sub.isHearingImpaired ?? undefined,
-				format: sub.format ?? undefined
+				format: sub.format ?? undefined,
+				matchScore: sub.matchScore,
+				providerId: sub.providerId,
+				dateAdded: sub.dateAdded,
+				wasSynced: sub.wasSynced ?? undefined,
+				syncOffset: sub.syncOffset
 			});
 			episodeIdToSubtitles.set(sub.episodeId, existing);
 		}

@@ -1578,8 +1578,6 @@ export const subtitleSettings = sqliteTable('subtitle_settings', {
 // Default subtitle settings keys:
 // - 'search_interval_hours': How often to search for missing subtitles (default: 6)
 // - 'upgrade_interval_hours': How often to search for upgrades (default: 24)
-// - 'auto_sync_enabled': Whether to automatically apply sync corrections (default: true)
-// - 'auto_sync_threshold': Score threshold below which to auto-sync (default: 80)
 // - 'search_on_import': Whether to auto-search when new media is imported (default: true)
 // - 'embed_subtitles': Whether to embed subs in media files - future (default: false)
 // - 'default_language_profile_id': Default profile for new media

@@ -1,15 +1,16 @@
 /**
  * Subtitle Sync Service
  *
- * Integrates with ffsubsync for automatic subtitle timing correction.
- * Syncs subtitles against video audio track or reference subtitle.
+ * Uses the native TypeScript subtitle sync engine (inspired by alass) for
+ * automatic subtitle timing correction. Syncs subtitles against video audio
+ * track or reference subtitle file.
+ *
+ * This replaces the previous implementation that shelled out to the alass-cli binary.
  */
 
-import { execFile } from 'node:child_process';
-import { promisify } from 'node:util';
 import { existsSync } from 'node:fs';
-import { readFile, writeFile, rename } from 'node:fs/promises';
-import { join, dirname, basename, extname } from 'node:path';
+import { readFile, writeFile } from 'node:fs/promises';
+import { join } from 'node:path';
 import { db } from '$lib/server/db';
 import {
 	subtitles,
@@ -26,31 +27,33 @@ import { createChildLogger } from '$lib/logging';
 
 const logger = createChildLogger({ logDomain: 'subtitles' as const });
 import type { SubtitleSyncResult } from '../types';
+import { syncSubtitles } from '../sync/index.js';
 
-const execFileAsync = promisify(execFile);
-
-/** Sync options */
+/** Sync options for subtitle synchronization */
 export interface SyncOptions {
 	/** Reference type: 'video' (audio track) or 'subtitle' (another subtitle file) */
 	referenceType?: 'video' | 'subtitle';
 	/** Path to reference subtitle (if referenceType is 'subtitle') */
 	referencePath?: string;
-	/** Maximum offset in seconds to apply */
-	maxOffsetSeconds?: number;
-	/** Whether to skip framerate correction */
-	noFixFramerate?: boolean;
-	/** Use Golden Section Search (more accurate but slower) */
-	gss?: boolean;
+	/**
+	 * Split penalty controls how aggressively the engine introduces or removes breaks.
+	 * Value between 0 and 1000 (default 7). Values 5-20 are most useful.
+	 * Higher values avoid introducing splits; lower values allow more splits.
+	 */
+	splitPenalty?: number;
+	/**
+	 * When true, only apply a constant offset without introducing splits.
+	 * This is very fast and useful for simple timing corrections.
+	 */
+	noSplits?: boolean;
 }
 
 /**
- * Service for syncing subtitle timing
+ * Service for syncing subtitle timing using the native sync engine
  */
 export class SubtitleSyncService {
 	private static instance: SubtitleSyncService | null = null;
-	private ffsubsyncAvailable: boolean | null = null;
-	/** Resolved binary name ('ffsubsync' or 'ffs') */
-	private ffsubsyncBinary: string = 'ffsubsync';
+	private static readonly DEFAULT_SPLIT_PENALTY = 7;
 
 	private constructor() {}
 
@@ -62,47 +65,17 @@ export class SubtitleSyncService {
 	}
 
 	/**
-	 * Check if ffsubsync is installed and available
+	 * Check if the sync engine is available.
+	 * The native engine is always available — no external binary needed.
 	 */
 	async isAvailable(): Promise<boolean> {
-		if (this.ffsubsyncAvailable !== null) {
-			return this.ffsubsyncAvailable;
-		}
-
-		try {
-			await execFileAsync('ffsubsync', ['--version']);
-			this.ffsubsyncBinary = 'ffsubsync';
-			this.ffsubsyncAvailable = true;
-			logger.info('ffsubsync is available');
-		} catch {
-			// Try alternative: ffs (shorter command)
-			try {
-				await execFileAsync('ffs', ['--version']);
-				this.ffsubsyncBinary = 'ffs';
-				this.ffsubsyncAvailable = true;
-				logger.info('ffsubsync (ffs) is available');
-			} catch {
-				this.ffsubsyncAvailable = false;
-				logger.warn('ffsubsync is not available - subtitle sync will be disabled');
-			}
-		}
-
-		return this.ffsubsyncAvailable;
+		return true;
 	}
 
 	/**
 	 * Sync a subtitle by ID
 	 */
 	async syncSubtitle(subtitleId: string, options?: SyncOptions): Promise<SubtitleSyncResult> {
-		// Check availability
-		if (!(await this.isAvailable())) {
-			return {
-				success: false,
-				offsetMs: 0,
-				error: 'ffsubsync is not installed'
-			};
-		}
-
 		// Get subtitle record
 		const subtitle = await db.select().from(subtitles).where(eq(subtitles.id, subtitleId)).limit(1);
 		if (!subtitle[0]) {
@@ -174,14 +147,6 @@ export class SubtitleSyncService {
 		videoPath: string,
 		options?: SyncOptions
 	): Promise<SubtitleSyncResult> {
-		if (!(await this.isAvailable())) {
-			return {
-				success: false,
-				offsetMs: 0,
-				error: 'ffsubsync is not installed'
-			};
-		}
-
 		return this.performSync(subtitlePath, videoPath, options);
 	}
 
@@ -248,87 +213,72 @@ export class SubtitleSyncService {
 	}
 
 	/**
-	 * Perform the actual sync using ffsubsync
+	 * Perform the actual sync using the native subtitle sync engine.
+	 *
+	 * Uses the TypeScript port of the alass alignment algorithm:
+	 * - Parses both subtitle files to extract time spans
+	 * - For video references, extracts audio via ffmpeg and runs VAD
+	 * - Runs the alignment algorithm (nosplit or split-aware)
+	 * - Applies computed deltas to the subtitle file
 	 */
 	private async performSync(
 		subtitlePath: string,
 		videoPath: string,
 		options?: SyncOptions
 	): Promise<SubtitleSyncResult> {
-		// Create output path (same location with .synced suffix before extension)
-		const dir = dirname(subtitlePath);
-		const ext = extname(subtitlePath);
-		const base = basename(subtitlePath, ext);
-		const outputPath = join(dir, `${base}.synced${ext}`);
-
-		// Build argument array (execFileAsync handles escaping — no shell involved)
-		const execArgs: string[] = [];
-
-		// Reference (video or subtitle)
-		if (options?.referenceType === 'subtitle' && options.referencePath) {
-			execArgs.push(options.referencePath);
-		} else {
-			execArgs.push(videoPath);
-		}
-
-		// Input subtitle
-		execArgs.push('-i', subtitlePath);
-
-		// Output
-		execArgs.push('-o', outputPath);
-
-		// Options
-		if (options?.maxOffsetSeconds) {
-			execArgs.push('--max-offset-seconds', options.maxOffsetSeconds.toString());
-		}
-		if (options?.noFixFramerate) {
-			execArgs.push('--no-fix-framerate');
-		}
-		if (options?.gss) {
-			execArgs.push('--gss');
-		}
+		const splitPenalty = options?.splitPenalty ?? SubtitleSyncService.DEFAULT_SPLIT_PENALTY;
+		const noSplits = options?.noSplits ?? false;
 
 		try {
-			logger.debug({ binary: this.ffsubsyncBinary, args: execArgs }, 'Running ffsubsync');
+			const referenceType = options?.referenceType ?? 'video';
+			const referencePath =
+				referenceType === 'subtitle' && options?.referencePath ? options.referencePath : videoPath;
 
-			const { stdout, stderr } = await execFileAsync(this.ffsubsyncBinary, execArgs, {
-				timeout: 300000 // 5 minute timeout
+			logger.debug(
+				{
+					subtitlePath,
+					referencePath,
+					referenceType,
+					splitPenalty,
+					noSplits
+				},
+				'Running native subtitle sync'
+			);
+
+			const result = await syncSubtitles({
+				referenceType,
+				referencePath,
+				subtitlePath,
+				splitPenalty,
+				noSplits
 			});
 
-			// Parse output for offset info
-			const offsetMatch = stderr.match(/offset: ([-\d.]+)/i) || stdout.match(/offset: ([-\d.]+)/i);
-			const offsetSeconds = offsetMatch ? parseFloat(offsetMatch[1]) : 0;
-			const offsetMs = Math.round(offsetSeconds * 1000);
-
-			// Check if output was created
-			if (!existsSync(outputPath)) {
+			if (!result.success) {
+				logger.error({ error: result.error }, 'Native subtitle sync failed');
 				return {
 					success: false,
 					offsetMs: 0,
-					error: 'Sync failed - no output file created'
+					error: result.error ?? 'Sync failed'
 				};
 			}
 
-			// Replace original with synced version
-			await rename(outputPath, subtitlePath);
+			logger.info(
+				{
+					offsetMs: result.offsetMs,
+					splitCount: result.splitCount,
+					score: result.score,
+					alignmentTimeMs: result.alignmentTimeMs
+				},
+				'Native subtitle sync completed'
+			);
 
 			return {
 				success: true,
-				offsetMs,
-				confidence: this.parseConfidence(stdout + stderr)
+				offsetMs: result.offsetMs
 			};
 		} catch (error) {
 			const errorMsg = error instanceof Error ? error.message : String(error);
-			logger.error({ err: error }, 'ffsubsync failed');
-
-			// Clean up partial output
-			if (existsSync(outputPath)) {
-				try {
-					await import('fs/promises').then((fs) => fs.unlink(outputPath));
-				} catch {
-					// Ignore cleanup errors
-				}
-			}
+			logger.error({ err: error }, 'Subtitle sync failed');
 
 			return {
 				success: false,
@@ -336,14 +286,6 @@ export class SubtitleSyncService {
 				error: errorMsg
 			};
 		}
-	}
-
-	/**
-	 * Parse confidence from ffsubsync output
-	 */
-	private parseConfidence(output: string): number | undefined {
-		const match = output.match(/confidence: ([\d.]+)/i);
-		return match ? parseFloat(match[1]) : undefined;
 	}
 
 	/**

@@ -77,7 +77,14 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 	libx11-xcb1 \
 	libasound2 \
 	xvfb \
+	curl \
+	ca-certificates \
 	&& rm -rf /var/lib/apt/lists/*
+
+# Install alass (Automatic Language-Agnostic Subtitle Synchronization)
+RUN curl -fsSL https://github.com/kaegi/alass/releases/download/v2.0.0/alass-linux64 \
+	-o /usr/local/bin/alass-cli \
+	&& chmod +x /usr/local/bin/alass-cli
 
 # Runtime does not need npm tooling; remove to shrink attack surface and CVE footprint.
 RUN rm -rf /usr/local/lib/node_modules/npm \
@@ -100,6 +107,7 @@ ENV NODE_ENV=production \
     HOST=0.0.0.0 \
     PORT=3000 \
     FFPROBE_PATH=/usr/bin/ffprobe \
+    ALASS_PATH=/usr/local/bin/alass-cli \
     DATA_DIR=/config/data \
     INDEXER_DEFINITIONS_PATH=/config/data/indexers/definitions \
     EXTERNAL_LISTS_PRESETS_PATH=/config/data/external-lists/presets

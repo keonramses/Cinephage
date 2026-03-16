@@ -13,6 +13,8 @@
 		isForced?: boolean;
 		isHearingImpaired?: boolean;
 		format?: string;
+		wasSynced?: boolean;
+		syncOffset?: number | null;
 		isEmbedded?: boolean;
 	}
 
@@ -204,7 +206,7 @@
 	<div class="mt-3 flex flex-wrap items-center justify-between gap-2 border-t border-base-300 pt-3">
 		<div class="flex min-w-0 flex-1 items-center gap-2">
 			<Subtitles size={14} class="text-base-content/50" />
-			<SubtitleDisplay subtitles={allSubtitles} size="sm" />
+			<SubtitleDisplay subtitles={allSubtitles} size="sm" showSyncStatus={true} />
 		</div>
 		{#if onSubtitleSearch || onSubtitleAutoSearch}
 			<div class="flex flex-wrap items-center gap-1">

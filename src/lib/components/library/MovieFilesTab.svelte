@@ -9,6 +9,8 @@
 		isForced?: boolean;
 		isHearingImpaired?: boolean;
 		format?: string;
+		wasSynced?: boolean;
+		syncOffset?: number | null;
 	}
 
 	interface Props {

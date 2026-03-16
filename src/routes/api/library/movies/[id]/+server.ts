@@ -103,7 +103,10 @@ export const GET: RequestHandler = async ({ params }) => {
 					isHearingImpaired: s.isHearingImpaired,
 					format: s.format,
 					matchScore: s.matchScore,
-					dateAdded: s.dateAdded
+					providerId: s.providerId,
+					dateAdded: s.dateAdded,
+					wasSynced: s.wasSynced,
+					syncOffset: s.syncOffset
 				})),
 				subtitleStatus: {
 					satisfied: subtitleStatus.satisfied,

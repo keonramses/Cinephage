@@ -593,7 +593,7 @@ export const subtitleDownloadSchema = z.object({
 });
 
 /**
- * Schema for subtitle sync request.
+ * Schema for subtitle sync request (alass).
  */
 export const subtitleSyncSchema = z.object({
 	subtitleId: z.string().uuid(),
@@ -602,9 +602,8 @@ export const subtitleSyncSchema = z.object({
 		.string()
 		.refine((s) => !s.includes('\0'), { message: 'Path must not contain null bytes' })
 		.optional(),
-	maxOffsetSeconds: z.number().int().min(1).max(600).default(60),
-	noFixFramerate: z.boolean().default(false),
-	gss: z.boolean().default(false)
+	splitPenalty: z.number().int().min(0).max(1000).default(7),
+	noSplits: z.boolean().default(false)
 });
 
 /**
@@ -630,7 +629,6 @@ export const subtitleBlacklistSchema = z.object({
  * have been consolidated into MonitoringScheduler settings.
  */
 export const subtitleSettingsUpdateSchema = z.object({
-	autoSyncEnabled: z.boolean().optional(),
 	defaultLanguageProfileId: z.string().uuid().nullable().optional(),
 	defaultFallbackLanguage: z.string().min(2).max(5).optional()
 });

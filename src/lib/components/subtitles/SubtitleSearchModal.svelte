@@ -37,6 +37,8 @@
 		isForced?: boolean;
 		isHearingImpaired?: boolean;
 		format?: string;
+		wasSynced?: boolean;
+		syncOffset?: number | null;
 	}
 
 	interface Props {
@@ -194,7 +196,9 @@
 				language: data.subtitle?.language ?? result.language,
 				isForced: result.isForced,
 				isHearingImpaired: result.isHearingImpaired,
-				format: data.subtitle?.format ?? result.format
+				format: data.subtitle?.format ?? result.format,
+				wasSynced: data.subtitle?.wasSynced,
+				syncOffset: data.subtitle?.syncOffset ?? null
 			});
 		} catch (err) {
 			downloadErrors.set(key, err instanceof Error ? err.message : 'Download failed');

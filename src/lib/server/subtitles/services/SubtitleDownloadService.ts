@@ -23,6 +23,7 @@ import { writeFile, mkdir, unlink } from 'fs/promises';
 import { existsSync } from 'fs';
 import { dirname, join, basename, extname } from 'path';
 import { createChildLogger } from '$lib/logging';
+import { getSubtitleSyncService } from './SubtitleSyncService';
 
 const logger = createChildLogger({ logDomain: 'subtitles' as const });
 import { normalizeLanguageCode } from '$lib/shared/languages';
@@ -353,14 +354,45 @@ export class SubtitleDownloadService {
 			'Subtitle downloaded'
 		);
 
+		const syncResult = await this.autoSyncSubtitle(subtitleId, result.isForced);
+
 		return {
 			subtitleId,
 			path: subtitlePath,
 			language: normalizedLanguage,
 			format: result.format,
+			wasSynced: syncResult.success,
+			syncOffset: syncResult.success ? syncResult.offsetMs : null,
 			wasUpgrade,
 			replacedSubtitleId
 		};
+	}
+
+	private async autoSyncSubtitle(
+		subtitleId: string,
+		isForced: boolean
+	): Promise<{ success: boolean; offsetMs: number | null }> {
+		if (isForced) {
+			logger.debug({ subtitleId }, 'Skipping automatic subtitle sync for forced subtitle');
+			return { success: false, offsetMs: null };
+		}
+
+		const syncResult = await getSubtitleSyncService().syncSubtitle(subtitleId);
+
+		if (syncResult.success) {
+			logger.debug(
+				{ subtitleId, offsetMs: syncResult.offsetMs },
+				'Automatically synced subtitle after download'
+			);
+			return { success: true, offsetMs: syncResult.offsetMs };
+		}
+
+		logger.warn(
+			{ subtitleId, error: syncResult.error },
+			'Automatic subtitle sync failed after download'
+		);
+
+		return { success: false, offsetMs: null };
 	}
 
 	/**

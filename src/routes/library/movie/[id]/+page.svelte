@@ -11,11 +11,12 @@
 	import type { FileScoreResponse } from '$lib/types/score';
 	import { InteractiveSearchModal } from '$lib/components/search';
 	import { SubtitleSearchModal } from '$lib/components/subtitles';
+	import SubtitleSyncModal from '$lib/components/subtitles/SubtitleSyncModal.svelte';
 	import DeleteConfirmationModal from '$lib/components/ui/modal/DeleteConfirmationModal.svelte';
 	import { ConfirmationModal } from '$lib/components/ui/modal';
 	import { toasts } from '$lib/stores/toast.svelte';
 	import type { MovieEditData } from '$lib/components/library/MovieEditModal.svelte';
-	import { FileEdit, Wifi, WifiOff, Loader2 } from 'lucide-svelte';
+	import { FileEdit, Wifi, WifiOff, Loader2, RefreshCw } from 'lucide-svelte';
 	import { page } from '$app/stores';
 	import { goto } from '$app/navigation';
 	import { resolvePath } from '$lib/utils/routing';
@@ -147,6 +148,9 @@
 	let isEditModalOpen = $state(false);
 	let isSearchModalOpen = $state(false);
 	let isSubtitleSearchModalOpen = $state(false);
+	let isSubtitleSyncModalOpen = $state(false);
+	let syncingSubtitleId = $state<string | null>(null);
+	let subtitleSyncError = $state<string | null>(null);
 	let isRenameModalOpen = $state(false);
 	let isDeleteModalOpen = $state(false);
 	let isDeleteFileModalOpen = $state(false);
@@ -481,6 +485,11 @@
 		isSubtitleSearchModalOpen = true;
 	}
 
+	function handleSubtitleSync() {
+		subtitleSyncError = null;
+		isSubtitleSyncModalOpen = true;
+	}
+
 	async function handleSubtitleAutoSearch() {
 		subtitleAutoSearching = true;
 		try {
@@ -517,6 +526,8 @@
 		isForced?: boolean;
 		isHearingImpaired?: boolean;
 		format?: string;
+		wasSynced?: boolean;
+		syncOffset?: number | null;
 	}) {
 		if (!movie.subtitles) {
 			movie.subtitles = [];
@@ -525,6 +536,51 @@
 			return;
 		}
 		movie.subtitles = [...movie.subtitles, subtitle];
+	}
+
+	async function handleSubtitleResync(
+		subtitleId: string,
+		settings?: { splitPenalty?: number; noSplits?: boolean }
+	): Promise<void> {
+		syncingSubtitleId = subtitleId;
+		subtitleSyncError = null;
+
+		try {
+			const response = await fetch('/api/subtitles/sync', {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({
+					subtitleId,
+					...(settings?.splitPenalty !== undefined && { splitPenalty: settings.splitPenalty }),
+					...(settings?.noSplits !== undefined && { noSplits: settings.noSplits })
+				})
+			});
+
+			const result = await response.json();
+
+			if (!response.ok || !result.success) {
+				throw new Error(result.error || 'Subtitle sync failed');
+			}
+
+			movie.subtitles = (movie.subtitles ?? []).map((subtitle) =>
+				subtitle.id === subtitleId
+					? {
+							...subtitle,
+							wasSynced: true,
+							syncOffset: result.offsetMs
+						}
+					: subtitle
+			);
+
+			toasts.success('Subtitle synced', {
+				description: `Applied offset of ${result.offsetMs}ms`
+			});
+		} catch (error) {
+			subtitleSyncError = describeError(error, 'Subtitle sync failed');
+			showActionError('Failed to sync subtitle', error);
+		} finally {
+			syncingSubtitleId = null;
+		}
 	}
 
 	// Score handlers
@@ -648,12 +704,20 @@
 			<div class="rounded-xl bg-base-200 p-4 md:p-6">
 				<div class="mb-4 flex items-center justify-between">
 					<h2 class="text-lg font-semibold">Files</h2>
-					{#if movie.files.length > 0}
-						<button class="btn gap-1 btn-ghost btn-sm" onclick={() => (isRenameModalOpen = true)}>
-							<FileEdit class="h-4 w-4" />
-							Rename
-						</button>
-					{/if}
+					<div class="flex flex-wrap items-center gap-2">
+						{#if (movie.subtitles?.length ?? 0) > 0}
+							<button class="btn gap-1 btn-ghost btn-sm" onclick={handleSubtitleSync}>
+								<RefreshCw class="h-4 w-4" />
+								Sync Subtitles
+							</button>
+						{/if}
+						{#if movie.files.length > 0}
+							<button class="btn gap-1 btn-ghost btn-sm" onclick={() => (isRenameModalOpen = true)}>
+								<FileEdit class="h-4 w-4" />
+								Rename
+							</button>
+						{/if}
+					</div>
 				</div>
 				<MovieFilesTab
 					files={movie.files}
@@ -780,6 +844,19 @@
 	movieId={movie.id}
 	onClose={() => (isSubtitleSearchModalOpen = false)}
 	onDownloaded={handleSubtitleDownloaded}
+/>
+
+<SubtitleSyncModal
+	open={isSubtitleSyncModalOpen}
+	title={movie.title}
+	subtitles={movie.subtitles ?? []}
+	{syncingSubtitleId}
+	errorMessage={subtitleSyncError}
+	onClose={() => {
+		isSubtitleSyncModalOpen = false;
+		subtitleSyncError = null;
+	}}
+	onSync={handleSubtitleResync}
 />
 
 <!-- Rename Preview Modal -->
