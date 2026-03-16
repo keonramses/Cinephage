@@ -466,7 +466,12 @@ function captureLogEvent(level: LogLevel, event: PreparedLogEvent): void {
 	}
 
 	const payload = event.payload;
-	const err = isRecord(payload?.err) ? (payload.err as Record<string, unknown>) : undefined;
+	const rawErr = payload?.err;
+	const err = isRecord(rawErr)
+		? rawErr instanceof Error
+			? sanitizeError(rawErr)
+			: (rawErr as Record<string, unknown>)
+		: undefined;
 
 	// Keys that are promoted to top-level CapturedLogEntry fields — exclude from `data`
 	const METADATA_KEYS = new Set([
