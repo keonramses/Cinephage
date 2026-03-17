@@ -60,6 +60,8 @@ export const GET: RequestHandler = async () => {
 				syncSnapshot.syncingAll ||
 				syncSnapshot.syncingAccountIds.length > 0,
 			syncingAccountIds: syncSnapshot.syncingAccountIds,
+			cancelRequestedAll: syncSnapshot.cancelRequestedAll,
+			cancelRequestedAccountIds: syncSnapshot.cancelRequestedAccountIds,
 			syncIntervalHours: schedulerStatus.syncIntervalHours,
 			retentionHours: schedulerStatus.retentionHours,
 			lastSyncAt: schedulerStatus.lastSyncAt,

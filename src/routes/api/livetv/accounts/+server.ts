@@ -36,7 +36,8 @@ const liveTvAccountCreateSchema = z.object({
 		.object({
 			baseUrl: z.string().url(),
 			username: z.string().min(1),
-			password: z.string().min(1)
+			password: z.string().min(1),
+			epgUrl: z.string().url().optional()
 		})
 		.optional(),
 	// M3U-specific config

@@ -36,7 +36,7 @@
 		ChannelCleanNamePreview,
 		UpdateChannelRequest
 	} from '$lib/types/livetv';
-	import { onMount } from 'svelte';
+	import { onDestroy, onMount } from 'svelte';
 	import { createSSE } from '$lib/sse';
 	import { resolvePath } from '$lib/utils/routing';
 	import { copyToClipboard as copyTextToClipboard } from '$lib/utils/clipboard';
@@ -127,7 +127,7 @@
 	let loadingLogos = $state(false);
 	let downloadingLogos = $state(false);
 	let logoDownloadProgress = $state<LogoDownloadProgress | null>(null);
-	let logoDownloadEventSource: ReturnType<typeof createSSE> | null = $state(null);
+	let logoDownloadEventSource = $state<EventSource | null>(null);
 
 	function syncLineupChannelIds(ids: string[]) {
 		lineupChannelIds.clear();
@@ -161,6 +161,10 @@
 
 	onMount(() => {
 		loadLogoStatus();
+	});
+
+	onDestroy(() => {
+		closeLogoDownloadStream();
 	});
 
 	async function loadLogoStatus() {
@@ -214,60 +218,76 @@
 	}
 
 	function connectToLogoDownloadStream() {
-		// Close any existing connection
-		if (logoDownloadEventSource) {
-			logoDownloadEventSource.close();
-		}
+		closeLogoDownloadStream();
 
-		logoDownloadEventSource = createSSE<{
-			'logos:status': LogoDownloadProgress;
-			'logos:started': LogoDownloadProgress;
-			'logos:progress': LogoDownloadProgress;
-			'logos:completed': LogoDownloadProgress;
-			'logos:error': LogoDownloadProgress;
-		}>('/api/logos/download/stream', {
-			'logos:status': (payload) => {
-				logoDownloadProgress = payload;
-				if (payload.status === 'completed') {
-					logoDownloaded = true;
-					downloadingLogos = false;
-					logoCount = payload.downloaded;
-					logoDownloadEventSource?.close();
-					logoDownloadEventSource = null;
-					void loadLogoStatus();
-				}
-			},
-			'logos:started': (payload) => {
-				logoDownloadProgress = payload;
-			},
-			'logos:progress': (payload) => {
-				logoDownloadProgress = payload;
-			},
-			'logos:completed': (payload) => {
-				logoDownloadProgress = payload;
+		const stream = new EventSource(resolvePath('/api/logos/download/stream'));
+		logoDownloadEventSource = stream;
+
+		const parsePayload = (event: MessageEvent): LogoDownloadProgress | null => {
+			try {
+				return JSON.parse(event.data) as LogoDownloadProgress;
+			} catch {
+				return null;
+			}
+		};
+
+		stream.addEventListener('logos:status', (event) => {
+			const payload = parsePayload(event as MessageEvent);
+			if (!payload) return;
+			logoDownloadProgress = payload;
+			if (payload.status === 'completed') {
 				logoDownloaded = true;
 				downloadingLogos = false;
 				logoCount = payload.downloaded;
-				logoDownloadEventSource?.close();
-				logoDownloadEventSource = null;
-				toasts.success(`Downloaded ${payload.downloaded} logos`);
+				closeLogoDownloadStream();
 				void loadLogoStatus();
-			},
-			'logos:error': (payload) => {
-				logoDownloadProgress = payload;
-				downloadingLogos = false;
-				logoDownloadEventSource?.close();
-				logoDownloadEventSource = null;
-				toasts.error(payload.error || 'Download failed');
-			},
-			error: () => {
-				if (logoDownloadEventSource) {
-					downloadingLogos = false;
-					logoDownloadEventSource.close();
-					logoDownloadEventSource = null;
-				}
 			}
 		});
+
+		stream.addEventListener('logos:started', (event) => {
+			const payload = parsePayload(event as MessageEvent);
+			if (!payload) return;
+			logoDownloadProgress = payload;
+		});
+
+		stream.addEventListener('logos:progress', (event) => {
+			const payload = parsePayload(event as MessageEvent);
+			if (!payload) return;
+			logoDownloadProgress = payload;
+		});
+
+		stream.addEventListener('logos:completed', (event) => {
+			const payload = parsePayload(event as MessageEvent);
+			if (!payload) return;
+			logoDownloadProgress = payload;
+			logoDownloaded = true;
+			downloadingLogos = false;
+			logoCount = payload.downloaded;
+			closeLogoDownloadStream();
+			toasts.success(`Downloaded ${payload.downloaded} logos`);
+			void loadLogoStatus();
+		});
+
+		stream.addEventListener('logos:error', (event) => {
+			const payload = parsePayload(event as MessageEvent);
+			logoDownloadProgress = payload;
+			downloadingLogos = false;
+			closeLogoDownloadStream();
+			toasts.error(payload?.error || 'Download failed');
+		});
+
+		stream.onerror = () => {
+			if (logoDownloadEventSource) {
+				downloadingLogos = false;
+				closeLogoDownloadStream();
+			}
+		};
+	}
+
+	function closeLogoDownloadStream() {
+		if (!logoDownloadEventSource) return;
+		logoDownloadEventSource.close();
+		logoDownloadEventSource = null;
 	}
 
 	// SSE Connection - internally handles browser/SSR

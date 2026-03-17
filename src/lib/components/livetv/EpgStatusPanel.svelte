@@ -1,5 +1,14 @@
 <script lang="ts">
-	import { RefreshCw, AlertTriangle, Check, Info, Loader2, Clock, Database } from 'lucide-svelte';
+	import {
+		RefreshCw,
+		AlertTriangle,
+		Check,
+		Info,
+		Loader2,
+		Clock,
+		Database,
+		X
+	} from 'lucide-svelte';
 	import type { EpgStatus } from '$lib/types/livetv';
 
 	interface Props {
@@ -7,11 +16,26 @@
 		loading: boolean;
 		syncingAll: boolean;
 		syncingAccountIds: string[];
+		cancelRequestedAll: boolean;
+		cancelRequestedAccountIds: string[];
 		onSync: () => void;
 		onSyncAccount: (accountId: string) => void;
+		onCancel: () => void;
+		onCancelAccount: (accountId: string) => void;
 	}
 
-	let { status, loading, syncingAll, syncingAccountIds, onSync, onSyncAccount }: Props = $props();
+	let {
+		status,
+		loading,
+		syncingAll,
+		syncingAccountIds,
+		cancelRequestedAll,
+		cancelRequestedAccountIds,
+		onSync,
+		onSyncAccount,
+		onCancel,
+		onCancelAccount
+	}: Props = $props();
 
 	function formatRelativeTime(isoDate: string | null): string {
 		if (!isoDate) return 'Never';
@@ -55,7 +79,16 @@
 		await onSyncAccount(accountId);
 	}
 
+	async function handleCancel() {
+		await onCancel();
+	}
+
+	async function handleCancelAccount(accountId: string) {
+		await onCancelAccount(accountId);
+	}
+
 	const syncingAccountIdSet = $derived(new Set(syncingAccountIds));
+	const cancelRequestedAccountIdSet = $derived(new Set(cancelRequestedAccountIds));
 	const hasAccountSyncRunning = $derived(syncingAccountIds.length > 0);
 	const anySyncing = $derived(syncingAll || hasAccountSyncRunning);
 
@@ -205,18 +238,35 @@
 					<div class="badge badge-sm badge-warning">{accountsWithoutEpg} no EPG</div>
 				{/if}
 			</div>
-			<button class="btn btn-sm btn-primary" onclick={onSync} disabled={anySyncing}>
-				{#if syncingAll}
-					<Loader2 class="h-4 w-4 animate-spin" />
-					Syncing All...
-				{:else if hasAccountSyncRunning}
-					<Loader2 class="h-4 w-4 animate-spin" />
-					Sync In Progress...
-				{:else}
-					<RefreshCw class="h-4 w-4" />
-					Sync All Accounts
+			<div class="flex items-center gap-2">
+				{#if anySyncing}
+					<button
+						class="btn btn-outline btn-sm btn-error"
+						onclick={handleCancel}
+						disabled={cancelRequestedAll}
+					>
+						{#if cancelRequestedAll}
+							<Loader2 class="h-4 w-4 animate-spin" />
+							Cancelling...
+						{:else}
+							<X class="h-4 w-4" />
+							Cancel Sync
+						{/if}
+					</button>
 				{/if}
-			</button>
+				<button class="btn btn-sm btn-primary" onclick={onSync} disabled={anySyncing}>
+					{#if syncingAll}
+						<Loader2 class="h-4 w-4 animate-spin" />
+						Syncing All...
+					{:else if hasAccountSyncRunning}
+						<Loader2 class="h-4 w-4 animate-spin" />
+						Sync In Progress...
+					{:else}
+						<RefreshCw class="h-4 w-4" />
+						Sync All Accounts
+					{/if}
+				</button>
+			</div>
 		</div>
 
 		<!-- Account list -->
@@ -224,6 +274,8 @@
 			<div class="space-y-2">
 				{#each status.accounts as account (account.id)}
 					{@const isAccountSyncing = syncingAll || syncingAccountIdSet.has(account.id)}
+					{@const isCancelRequested =
+						cancelRequestedAll || cancelRequestedAccountIdSet.has(account.id)}
 					<div class="card bg-base-200">
 						<div class="card-body flex-row items-center justify-between p-4">
 							<div class="flex items-center gap-4">
@@ -256,12 +308,25 @@
 							</div>
 							<button
 								class="btn btn-ghost btn-sm"
-								onclick={() => handleSyncAccount(account.id)}
-								disabled={anySyncing}
-								title={anySyncing ? 'Another EPG sync is currently running' : 'Sync this account'}
+								onclick={() =>
+									isAccountSyncing
+										? handleCancelAccount(account.id)
+										: handleSyncAccount(account.id)}
+								disabled={isAccountSyncing ? isCancelRequested : anySyncing}
+								title={isAccountSyncing
+									? isCancelRequested
+										? 'Cancellation requested'
+										: 'Cancel sync for this account'
+									: anySyncing
+										? 'Another EPG sync is currently running'
+										: 'Sync this account'}
 							>
 								{#if isAccountSyncing}
-									<Loader2 class="h-4 w-4 animate-spin" />
+									{#if isCancelRequested}
+										<Loader2 class="h-4 w-4 animate-spin" />
+									{:else}
+										<X class="h-4 w-4" />
+									{/if}
 								{:else}
 									<RefreshCw class="h-4 w-4" />
 								{/if}

@@ -1,7 +1,7 @@
 import { readdir, stat } from 'node:fs/promises';
 import { basename, extname, join } from 'node:path';
+import { LOGOS_DIR } from './constants.js';
 
-const LOGOS_DIR = 'data/channel-logos';
 const CACHE_TTL_MS = 15_000;
 
 export interface LogoInfo {

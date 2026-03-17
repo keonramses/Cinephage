@@ -213,7 +213,10 @@ export class EpgScheduler extends EventEmitter implements BackgroundService {
 			liveTvEvents.emitEpgSyncStarted();
 
 			const epgService = getEpgService();
-			const results = await epgService.syncAll();
+			const results = await epgService.syncAll({
+				shouldCancelAll: () => syncState.isCancelRequestedAll(),
+				shouldCancelAccount: (accountId) => syncState.isCancelRequestedForAccount(accountId)
+			});
 
 			const successful = results.filter((r) => r.success).length;
 			const totalAdded = results.reduce((sum, r) => sum + r.programsAdded, 0);

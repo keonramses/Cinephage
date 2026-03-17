@@ -173,7 +173,9 @@
 				{/if}
 			</div>
 			<div class="label py-1">
-				<span class="label-text-alt text-xs">Override EPG source (XMLTV format)</span>
+				<span class="label-text-alt block text-xs wrap-break-word whitespace-normal"
+					>Override EPG source (XMLTV format)</span
+				>
 			</div>
 		</div>
 

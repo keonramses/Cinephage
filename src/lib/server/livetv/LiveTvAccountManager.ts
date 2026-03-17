@@ -9,6 +9,7 @@ import { and, eq, inArray, lte, sql } from 'drizzle-orm';
 import { db } from '$lib/server/db';
 import { epgPrograms, livetvAccounts, type LivetvAccountRecord } from '$lib/server/db/schema';
 import { createChildLogger } from '$lib/logging';
+import { toFriendlyLiveTvTestError } from '$lib/livetv/errorMessages';
 import { randomUUID } from 'crypto';
 import { getProvider, getProviderForAccount } from './providers';
 import { liveTvEvents } from './LiveTvEvents';
@@ -316,9 +317,10 @@ export class LiveTvAccountManager implements BackgroundService {
 			};
 		} else if (input.providerType === 'xstream' && input.xstreamConfig) {
 			xstreamConfig = {
-				baseUrl: input.xstreamConfig.baseUrl.replace(/\/$/, ''),
+				baseUrl: input.xstreamConfig.baseUrl,
 				username: input.xstreamConfig.username,
-				password: input.xstreamConfig.password
+				password: input.xstreamConfig.password,
+				epgUrl: input.xstreamConfig.epgUrl
 			};
 		} else if (input.providerType === 'm3u' && input.m3uConfig) {
 			m3uConfig = {
@@ -547,7 +549,13 @@ export class LiveTvAccountManager implements BackgroundService {
 
 		try {
 			const provider = getProviderForAccount(account);
-			const result = await provider.testConnection(account);
+			const providerResult = await provider.testConnection(account);
+			const result = providerResult.success
+				? providerResult
+				: {
+						...providerResult,
+						error: toFriendlyLiveTvTestError(providerResult.error, account.providerType)
+					};
 
 			// Update account with test results
 			const now = new Date().toISOString();
@@ -576,7 +584,7 @@ export class LiveTvAccountManager implements BackgroundService {
 			const message = error instanceof Error ? error.message : String(error);
 			return {
 				success: false,
-				error: message
+				error: toFriendlyLiveTvTestError(message, account.providerType)
 			};
 		}
 	}

@@ -231,6 +231,11 @@
 			onDelete(episode);
 		}
 	}
+
+	function handleSubtitleAutoSearchClick() {
+		if (subtitleAutoSearching) return;
+		onSubtitleAutoSearch?.(episode);
+	}
 </script>
 
 <tr class="hover" class:opacity-60={!isAired(episode.airDate) && !hasEpisodeFile}>
@@ -435,7 +440,7 @@
 							onSync={onSubtitleSync}
 							onDelete={onSubtitleDelete}
 							onSearch={() => onSubtitleSearch?.(episode)}
-							onAutoSearch={() => onSubtitleAutoSearch?.(episode)}
+							onAutoSearch={handleSubtitleAutoSearchClick}
 						/>
 					</div>
 				</div>
@@ -493,7 +498,7 @@
 						onSync={onSubtitleSync}
 						onDelete={onSubtitleDelete}
 						onSearch={() => onSubtitleSearch?.(episode)}
-						onAutoSearch={() => onSubtitleAutoSearch?.(episode)}
+						onAutoSearch={handleSubtitleAutoSearchClick}
 					/>
 				</div>
 			</div>

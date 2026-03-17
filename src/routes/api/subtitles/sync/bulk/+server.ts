@@ -50,7 +50,6 @@ export const POST: RequestHandler = async ({ request }) => {
 
 			// Process with limited concurrency
 			let nextIndex = 0;
-			let completedCount = 0;
 
 			async function processOne(): Promise<void> {
 				while (nextIndex < total) {
@@ -82,8 +81,6 @@ export const POST: RequestHandler = async ({ request }) => {
 							total
 						});
 					}
-
-					completedCount++;
 				}
 			}
 

@@ -5,8 +5,8 @@ import { createChildLogger } from '$lib/logging';
 const logger = createChildLogger({ logDomain: 'system' as const });
 import { EventEmitter } from 'node:events';
 import { invalidateLogoLibraryCache } from './logo-library.js';
+import { LOGO_REPO_PATH_PREFIX, LOGOS_DIR } from './constants.js';
 
-const LOGOS_DIR = 'data/channel-logos';
 const GITHUB_REPO = 'MoldyTaint/Cinephage';
 const GITHUB_BRANCH = 'main';
 
@@ -125,7 +125,7 @@ export class LogoDownloadService extends EventEmitter {
 			const logoFiles = treeData.tree.filter(
 				(item: { path: string; type: string }) =>
 					item.type === 'blob' &&
-					item.path.startsWith('data/channel-logos/') &&
+					item.path.startsWith(LOGO_REPO_PATH_PREFIX) &&
 					/\.(png|jpg|jpeg)$/i.test(item.path)
 			);
 
@@ -143,7 +143,7 @@ export class LogoDownloadService extends EventEmitter {
 
 				// Get the raw content URL
 				const rawUrl = `https://raw.githubusercontent.com/${GITHUB_REPO}/${GITHUB_BRANCH}/${file.path}`;
-				const localPath = join(LOGOS_DIR, file.path.replace('data/channel-logos/', ''));
+				const localPath = join(LOGOS_DIR, file.path.replace(LOGO_REPO_PATH_PREFIX, ''));
 
 				try {
 					// Ensure subdirectory exists

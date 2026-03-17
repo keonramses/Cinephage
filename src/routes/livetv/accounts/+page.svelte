@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { Plus, RefreshCw, Loader2, Wifi, WifiOff } from 'lucide-svelte';
 	import { LiveTvAccountTable, LiveTvAccountModal } from '$lib/components/livetv';
+	import { toFriendlyLiveTvTestError } from '$lib/livetv/errorMessages';
 	import { ConfirmationModal } from '$lib/components/ui/modal';
 	import type { LiveTvAccount, LiveTvAccountTestResult } from '$lib/types/livetv';
 	import type { FormData, TestConfig } from '$lib/components/livetv/LiveTvAccountModal.svelte';
@@ -138,14 +139,17 @@
 						epgUrl: data.epgUrl || undefined
 					};
 					break;
-				case 'xstream':
+				case 'xstream': {
+					const normalizedXstreamEpgUrl = data.epgUrl.trim();
 					body.xstreamConfig = {
 						baseUrl: data.baseUrl,
 						username: data.username,
 						password: data.password,
-						epgUrl: data.epgUrl || undefined
+						// In edit mode, send empty string to explicitly clear an existing EPG URL.
+						epgUrl: normalizedXstreamEpgUrl || (modalMode === 'edit' ? '' : undefined)
 					};
 					break;
+				}
 				case 'm3u':
 					if (data.selectedCountries?.length) {
 						// IPTV-Org mode
@@ -276,20 +280,29 @@
 
 			if (!response.ok) {
 				throw new Error(
-					typeof payload?.error === 'string' ? payload.error : 'Failed to test account'
+					toFriendlyLiveTvTestError(
+						typeof payload?.error === 'string' ? payload.error : 'Failed to test account',
+						account.providerType
+					)
 				);
 			}
 
-			const testResult =
+			const rawTestResult =
 				payload?.result && typeof payload.result.success === 'boolean'
 					? payload.result
 					: payload && typeof payload.success === 'boolean'
 						? payload
 						: null;
 
-			if (!testResult) {
+			if (!rawTestResult) {
 				throw new Error('Invalid test response');
 			}
+			const testResult = rawTestResult.success
+				? rawTestResult
+				: {
+						...rawTestResult,
+						error: toFriendlyLiveTvTestError(rawTestResult.error, account.providerType)
+					};
 
 			const now = new Date().toISOString();
 			accounts = accounts.map((existing) => {
@@ -323,7 +336,10 @@
 			}
 		} catch (e) {
 			toasts.error(`Connection test failed: ${account.name}`, {
-				description: e instanceof Error ? e.message : 'Failed to test account'
+				description: toFriendlyLiveTvTestError(
+					e instanceof Error ? e.message : 'Failed to test account',
+					account.providerType
+				)
 			});
 		} finally {
 			testingId = null;
@@ -370,7 +386,8 @@
 				body.xstreamConfig = {
 					baseUrl: config.baseUrl,
 					username: config.username,
-					password: config.password
+					password: config.password,
+					epgUrl: config.epgUrl
 				};
 				break;
 			case 'm3u':
@@ -389,36 +406,62 @@
 				break;
 		}
 
-		const response = await fetch('/api/livetv/accounts/test', {
-			method: 'POST',
-			headers: { 'Content-Type': 'application/json' },
-			body: JSON.stringify(body)
-		});
+		try {
+			const response = await fetch('/api/livetv/accounts/test', {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify(body)
+			});
 
-		const result = await response.json();
+			const result = await response.json();
 
-		if (!response.ok) {
+			if (!response.ok) {
+				return {
+					success: false,
+					error: toFriendlyLiveTvTestError(
+						typeof result?.error === 'string'
+							? result.error
+							: 'Failed to test account configuration',
+						config.providerType
+					)
+				};
+			}
+
+			// API currently returns { success, result }, but keep backward compatibility
+			// in case the endpoint returns LiveTvAccountTestResult directly.
+			if (result?.result && typeof result.result.success === 'boolean') {
+				const testResult = result.result as LiveTvAccountTestResult;
+				return testResult.success
+					? testResult
+					: {
+							...testResult,
+							error: toFriendlyLiveTvTestError(testResult.error, config.providerType)
+						};
+			}
+
+			if (typeof result?.success === 'boolean') {
+				const testResult = result as LiveTvAccountTestResult;
+				return testResult.success
+					? testResult
+					: {
+							...testResult,
+							error: toFriendlyLiveTvTestError(testResult.error, config.providerType)
+						};
+			}
+
 			return {
 				success: false,
-				error:
-					typeof result?.error === 'string' ? result.error : 'Failed to test account configuration'
+				error: 'Invalid response from test endpoint'
+			};
+		} catch (error) {
+			return {
+				success: false,
+				error: toFriendlyLiveTvTestError(
+					error instanceof Error ? error.message : 'Failed to test account configuration',
+					config.providerType
+				)
 			};
 		}
-
-		// API currently returns { success, result }, but keep backward compatibility
-		// in case the endpoint returns LiveTvAccountTestResult directly.
-		if (result?.result && typeof result.result.success === 'boolean') {
-			return result.result as LiveTvAccountTestResult;
-		}
-
-		if (typeof result?.success === 'boolean') {
-			return result as LiveTvAccountTestResult;
-		}
-
-		return {
-			success: false,
-			error: 'Invalid response from test endpoint'
-		};
 	}
 </script>
 

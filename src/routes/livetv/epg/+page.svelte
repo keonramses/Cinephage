@@ -31,8 +31,11 @@
 	let epgStatusLoading = $state(true);
 	let epgSyncingAll = $state(false);
 	let epgSyncingAccountIds = new SvelteSet<string>();
+	let epgCancelRequestedAll = $state(false);
+	let epgCancelRequestedAccountIds = new SvelteSet<string>();
 	const epgSyncingAny = $derived(epgSyncingAll || epgSyncingAccountIds.size > 0);
 	const epgSyncingAccountList = $derived([...epgSyncingAccountIds]);
+	const epgCancelRequestedAccountList = $derived([...epgCancelRequestedAccountIds]);
 
 	// EPG now/next data for coverage tab
 	let epgData = new SvelteMap<string, NowNextEntry>();
@@ -50,12 +53,18 @@
 	function applySyncStateFromStatus(status: EpgStatus | null | undefined) {
 		if (!status) return;
 		const syncingIds = status.syncingAccountIds ?? [];
+		const cancelRequestedIds = status.cancelRequestedAccountIds ?? [];
 		epgSyncingAll = status.isSyncing && syncingIds.length === 0;
+		epgCancelRequestedAll = status.cancelRequestedAll ?? false;
 		if (status.syncingAccountIds !== undefined) {
 			epgSyncingAccountIds.clear();
 			for (const id of syncingIds) {
 				epgSyncingAccountIds.add(id);
 			}
+		}
+		epgCancelRequestedAccountIds.clear();
+		for (const id of cancelRequestedIds) {
+			epgCancelRequestedAccountIds.add(id);
 		}
 	}
 
@@ -154,6 +163,8 @@
 
 	async function triggerEpgSync() {
 		if (epgSyncingAny) return;
+		epgCancelRequestedAll = false;
+		epgCancelRequestedAccountIds.clear();
 		epgSyncingAll = true;
 		try {
 			const response = await fetch('/api/livetv/epg/sync', { method: 'POST' });
@@ -171,6 +182,7 @@
 
 	async function triggerAccountSync(accountId: string) {
 		if (epgSyncingAny) return;
+		epgCancelRequestedAccountIds.delete(accountId);
 		epgSyncingAccountIds.add(accountId);
 		try {
 			const response = await fetch(`/api/livetv/epg/sync?accountId=${accountId}`, {
@@ -182,6 +194,44 @@
 			await response.json();
 		} catch {
 			epgSyncingAccountIds.delete(accountId);
+		}
+	}
+
+	async function cancelEpgSync() {
+		if (!epgSyncingAny) return;
+		epgCancelRequestedAll = true;
+
+		try {
+			const response = await fetch('/api/livetv/epg/sync', { method: 'DELETE' });
+			if (!response.ok) {
+				throw new Error('Failed to cancel EPG sync');
+			}
+			const payload = (await response.json()) as { cancelRequested?: boolean };
+			if (payload?.cancelRequested === false) {
+				epgCancelRequestedAll = false;
+			}
+		} catch {
+			epgCancelRequestedAll = false;
+		}
+	}
+
+	async function cancelAccountSync(accountId: string) {
+		if (!epgSyncingAll && !epgSyncingAccountIds.has(accountId)) return;
+		epgCancelRequestedAccountIds.add(accountId);
+
+		try {
+			const response = await fetch(`/api/livetv/epg/sync?accountId=${accountId}`, {
+				method: 'DELETE'
+			});
+			if (!response.ok) {
+				throw new Error('Failed to cancel EPG sync');
+			}
+			const payload = (await response.json()) as { cancelRequested?: boolean };
+			if (payload?.cancelRequested === false) {
+				epgCancelRequestedAccountIds.delete(accountId);
+			}
+		} catch {
+			epgCancelRequestedAccountIds.delete(accountId);
 		}
 	}
 
@@ -272,8 +322,12 @@
 			loading={epgStatusLoading}
 			syncingAll={epgSyncingAll}
 			syncingAccountIds={epgSyncingAccountList}
+			cancelRequestedAll={epgCancelRequestedAll}
+			cancelRequestedAccountIds={epgCancelRequestedAccountList}
 			onSync={triggerEpgSync}
 			onSyncAccount={triggerAccountSync}
+			onCancel={cancelEpgSync}
+			onCancelAccount={cancelAccountSync}
 		/>
 	{:else if activeTab === 'coverage'}
 		<EpgCoverageTable

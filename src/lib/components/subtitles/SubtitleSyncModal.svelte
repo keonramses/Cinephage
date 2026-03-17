@@ -75,16 +75,16 @@
 
 	// Bulk sync state
 	let bulkSyncStatus = $state<BulkSyncStatus>('idle');
-	let bulkSyncStates = $state(new SvelteMap<string, SubtitleSyncState>());
-	let bulkSyncResults = $state(new SvelteMap<string, { offsetMs: number; error?: string }>());
+	let bulkSyncStates = new SvelteMap<string, SubtitleSyncState>();
+	let bulkSyncResults = new SvelteMap<string, { offsetMs: number; error?: string }>();
 	let bulkSyncProgress = $state({ completed: 0, total: 0 });
 
 	// Group expansion state
-	let expandedGroups = $state(new SvelteSet<string>());
+	let expandedGroups = new SvelteSet<string>();
 
 	// Group subtitles by episode label
 	const groupedSubtitles = $derived.by(() => {
-		const groups = new Map<string, SubtitleItem[]>();
+		const groups = new SvelteMap<string, SubtitleItem[]>();
 
 		for (const sub of subtitles) {
 			const label = sub.label || 'Unknown';
@@ -103,11 +103,14 @@
 	$effect(() => {
 		if (open) {
 			bulkSyncStatus = 'idle';
-			bulkSyncStates = new SvelteMap();
-			bulkSyncResults = new SvelteMap();
+			bulkSyncStates.clear();
+			bulkSyncResults.clear();
 			bulkSyncProgress = { completed: 0, total: 0 };
 			// Expand all groups by default
-			expandedGroups = new SvelteSet(groupedSubtitles.keys());
+			expandedGroups.clear();
+			for (const label of groupedSubtitles.keys()) {
+				expandedGroups.add(label);
+			}
 		}
 	});
 
@@ -152,12 +155,11 @@
 		bulkSyncProgress = { completed: 0, total: ids.length };
 
 		// Initialize all as pending
-		const newStates = new SvelteMap<string, SubtitleSyncState>();
+		bulkSyncStates.clear();
 		for (const id of ids) {
-			newStates.set(id, 'pending');
+			bulkSyncStates.set(id, 'pending');
 		}
-		bulkSyncStates = newStates;
-		bulkSyncResults = new SvelteMap();
+		bulkSyncResults.clear();
 
 		onBulkSync(
 			ids,

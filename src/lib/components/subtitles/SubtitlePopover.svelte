@@ -1,13 +1,5 @@
 <script lang="ts">
-	import {
-		RefreshCw,
-		Trash2,
-		Search,
-		Subtitles,
-		Loader2,
-		CheckCircle2,
-		Clock3
-	} from 'lucide-svelte';
+	import { RefreshCw, Trash2, Search, Subtitles, Loader2, Clock3 } from 'lucide-svelte';
 	import SubtitleBadge from './SubtitleBadge.svelte';
 	import SubtitleSyncBadge from './SubtitleSyncBadge.svelte';
 
@@ -71,7 +63,6 @@
 	}
 </script>
 
-<!-- svelte-ignore a11y_no_noninteractive_tabindex -->
 <div
 	tabindex="0"
 	role="dialog"

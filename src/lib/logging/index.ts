@@ -3,6 +3,7 @@ import type { AsyncLocalStorage as NodeAsyncLocalStorage } from 'node:async_hook
 import pino, { stdSerializers, type Logger as PinoLogger, type LoggerOptions } from 'pino';
 
 import type { CapturedLogEntry } from './log-capture';
+import { PLACEHOLDER_PACKAGE_VERSION } from '$lib/version.js';
 
 export type LogLevel = 'debug' | 'info' | 'warn' | 'error';
 
@@ -135,6 +136,22 @@ function shouldIncludeErrorStack(): boolean {
 	if (configured === 'true') return true;
 	if (configured === 'false') return false;
 	return isDev();
+}
+
+function readVersion(value: string | undefined): string | null {
+	const normalized = value?.trim();
+	if (!normalized) return null;
+	if (normalized === '0.0.0') return null;
+	if (normalized === PLACEHOLDER_PACKAGE_VERSION) return null;
+	return normalized;
+}
+
+function resolveLogVersion(): string {
+	return (
+		readVersion(getRuntimeEnv('APP_VERSION')) ??
+		readVersion(getRuntimeEnv('npm_package_version')) ??
+		'dev-local'
+	);
 }
 
 function isRedactionBypassed(): boolean {
@@ -298,7 +315,7 @@ function getBasePinoOptions(): LoggerOptions {
 		base: {
 			service: 'cinephage',
 			env: getRuntimeEnv('NODE_ENV') || 'development',
-			version: getRuntimeEnv('npm_package_version') || '0.0.0'
+			version: resolveLogVersion()
 		},
 		timestamp: pino.stdTimeFunctions.isoTime,
 		messageKey: 'msg',

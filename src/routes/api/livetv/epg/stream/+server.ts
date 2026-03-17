@@ -30,6 +30,8 @@ interface EpgStatusData {
 	isEnabled: boolean;
 	isSyncing: boolean;
 	syncingAccountIds: string[];
+	cancelRequestedAll: boolean;
+	cancelRequestedAccountIds: string[];
 	syncIntervalHours: number;
 	retentionHours: number;
 	lastSyncAt: string | null;
@@ -87,6 +89,8 @@ async function getEpgStatus(): Promise<EpgStatusData> {
 			syncSnapshot.syncingAll ||
 			syncSnapshot.syncingAccountIds.length > 0,
 		syncingAccountIds: syncSnapshot.syncingAccountIds,
+		cancelRequestedAll: syncSnapshot.cancelRequestedAll,
+		cancelRequestedAccountIds: syncSnapshot.cancelRequestedAccountIds,
 		syncIntervalHours: schedulerStatus.syncIntervalHours,
 		retentionHours: schedulerStatus.retentionHours,
 		lastSyncAt: schedulerStatus.lastSyncAt,

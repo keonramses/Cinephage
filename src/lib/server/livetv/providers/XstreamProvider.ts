@@ -10,6 +10,7 @@ import { livetvAccounts, livetvChannels, livetvCategories } from '$lib/server/db
 import { and, eq, inArray, notInArray } from 'drizzle-orm';
 import { createChildLogger } from '$lib/logging';
 import { randomUUID } from 'crypto';
+import { XMLParser } from 'fast-xml-parser';
 
 const logger = createChildLogger({ logDomain: 'livetv' as const });
 import type {
@@ -27,6 +28,7 @@ import type {
 	XstreamChannelData
 } from '$lib/types/livetv';
 import { recordToAccount } from '../LiveTvAccountManager.js';
+import { buildXstreamPlayerApiUrl, normalizeXstreamBaseUrl } from './xstream-url.js';
 
 // XStream API Response Types
 interface XstreamAuthResponse {
@@ -85,6 +87,8 @@ interface XstreamEpgEntry {
 	description?: string;
 	name?: string;
 }
+
+type XstreamEpgTestStatus = NonNullable<NonNullable<LiveTvAccountTestResult['profile']>['epg']>;
 
 export class XstreamProvider implements LiveTvProvider {
 	readonly type = 'xstream';
@@ -167,6 +171,8 @@ export class XstreamProvider implements LiveTvProvider {
 
 			let categoryCount = 0;
 			let channelCount = 0;
+			const configuredEpgUrl = config.epgUrl?.trim();
+			const epg = await this.testConfiguredXmltvEpg(configuredEpgUrl || null);
 
 			try {
 				const [categories, streams] = await Promise.all([
@@ -202,7 +208,8 @@ export class XstreamProvider implements LiveTvProvider {
 					categoryCount,
 					expiresAt: expDate,
 					serverTimezone: result.server_info?.timezone || 'UTC',
-					streamVerified: false
+					streamVerified: false,
+					epg
 				}
 			};
 		} catch (error) {
@@ -381,6 +388,7 @@ export class XstreamProvider implements LiveTvProvider {
 				const xstreamData: XstreamChannelData = {
 					streamId: stream.stream_id.toString(),
 					streamType: stream.stream_type,
+					epgChannelId: stream.epg_channel_id,
 					directStreamUrl: stream.direct_source,
 					containerExtension: ''
 				};
@@ -547,7 +555,7 @@ export class XstreamProvider implements LiveTvProvider {
 				};
 			}
 
-			const baseUrl = config.baseUrl.replace(/\/$/, '');
+			const baseUrl = normalizeXstreamBaseUrl(config.baseUrl);
 			const format = config.outputFormat || 'ts';
 			const url = `${baseUrl}/live/${config.username}/${config.password}/${xstreamData.streamId}.${format}`;
 
@@ -578,6 +586,27 @@ export class XstreamProvider implements LiveTvProvider {
 				return [];
 			}
 
+			const configuredEpgUrl = config.epgUrl?.trim();
+			if (configuredEpgUrl) {
+				const xmltvPrograms = await this.fetchConfiguredXmltvEpg(
+					account.id,
+					configuredEpgUrl,
+					startTime,
+					endTime
+				);
+				if (xmltvPrograms.length > 0) {
+					return xmltvPrograms;
+				}
+
+				logger.warn(
+					{
+						accountId: account.id,
+						epgUrl: configuredEpgUrl
+					},
+					'[XstreamProvider] Configured XMLTV returned no programs, falling back to player_api EPG'
+				);
+			}
+
 			const channels = await db
 				.select()
 				.from(livetvChannels)
@@ -589,7 +618,7 @@ export class XstreamProvider implements LiveTvProvider {
 			}
 
 			const programs: EpgProgram[] = [];
-			const baseUrl = config.baseUrl.replace(/\/$/, '');
+			const baseUrl = normalizeXstreamBaseUrl(config.baseUrl);
 			let actionOrder: string[] = ['get_epg', 'get_simple_data_table', 'get_short_epg'];
 			const failedChannelSamples: Array<{ channelId: string; streamId: string }> = [];
 			const errorChannelSamples: Array<{ channelId: string; streamId: string; error: string }> = [];
@@ -741,7 +770,7 @@ export class XstreamProvider implements LiveTvProvider {
 				};
 			}
 
-			const baseUrl = config.baseUrl.replace(/\/$/, '');
+			const baseUrl = normalizeXstreamBaseUrl(config.baseUrl);
 			const startTimestamp = Math.floor(startTime.getTime() / 1000);
 			const url = `${baseUrl}/timeshift/${config.username}/${config.password}/${duration}/${startTimestamp}/${xstreamData.streamId}.ts`;
 
@@ -768,12 +797,16 @@ export class XstreamProvider implements LiveTvProvider {
 		actionOrder: string[]
 	): Promise<{ entries: XstreamEpgEntry[]; usedAction: string | null } | null> {
 		for (const action of actionOrder) {
-			const extraParams = action === 'get_short_epg' ? '&limit=200' : '';
-			const url =
-				`${baseUrl}/player_api.php?username=${encodeURIComponent(username)}` +
-				`&password=${encodeURIComponent(password)}&action=${action}&stream_id=${streamId}${extraParams}`;
+			const url = new URL('player_api.php', `${baseUrl}/`);
+			url.searchParams.set('username', username);
+			url.searchParams.set('password', password);
+			url.searchParams.set('action', action);
+			url.searchParams.set('stream_id', streamId);
+			if (action === 'get_short_epg') {
+				url.searchParams.set('limit', '200');
+			}
 
-			const response = await fetch(url, {
+			const response = await fetch(url.toString(), {
 				headers: {
 					'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
 				},
@@ -843,14 +876,325 @@ export class XstreamProvider implements LiveTvProvider {
 		}
 	}
 
+	private async testConfiguredXmltvEpg(epgUrl: string | null): Promise<XstreamEpgTestStatus> {
+		if (!epgUrl) {
+			return {
+				status: 'not_configured'
+			};
+		}
+
+		try {
+			const response = await fetch(epgUrl, {
+				headers: {
+					'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+				},
+				signal: AbortSignal.timeout(30000)
+			});
+
+			if (!response.ok) {
+				return {
+					status: 'unreachable',
+					source: 'configured',
+					error: `HTTP ${response.status}`
+				};
+			}
+
+			const xmlContent = await response.text();
+			if (!xmlContent.trim()) {
+				return {
+					status: 'unreachable',
+					source: 'configured',
+					error: 'Empty XMLTV response'
+				};
+			}
+
+			const parser = new XMLParser({
+				ignoreAttributes: false,
+				attributeNamePrefix: '@_',
+				textNodeName: '#text',
+				parseAttributeValue: false,
+				trimValues: true
+			});
+			const parsed = parser.parse(xmlContent);
+			if (!parsed?.tv) {
+				return {
+					status: 'unreachable',
+					source: 'configured',
+					error: 'Invalid XMLTV format: missing <tv> root'
+				};
+			}
+
+			return {
+				status: 'reachable',
+				source: 'configured'
+			};
+		} catch (error) {
+			return {
+				status: 'unreachable',
+				source: 'configured',
+				error: error instanceof Error ? error.message : String(error)
+			};
+		}
+	}
+
+	private async fetchConfiguredXmltvEpg(
+		accountId: string,
+		epgUrl: string,
+		startTime: Date,
+		endTime: Date
+	): Promise<EpgProgram[]> {
+		try {
+			logger.info({ accountId, epgUrl }, '[XstreamProvider] Fetching configured XMLTV EPG');
+
+			const response = await fetch(epgUrl, {
+				headers: {
+					'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+				},
+				signal: AbortSignal.timeout(60000)
+			});
+
+			if (!response.ok) {
+				throw new Error(`Failed to fetch XMLTV: HTTP ${response.status}`);
+			}
+
+			const xmlContent = await response.text();
+			if (!xmlContent.trim()) {
+				logger.warn({ accountId }, '[XstreamProvider] Configured XMLTV returned empty response');
+				return [];
+			}
+
+			const parser = new XMLParser({
+				ignoreAttributes: false,
+				attributeNamePrefix: '@_',
+				textNodeName: '#text',
+				parseAttributeValue: false,
+				trimValues: true
+			});
+			const parsed = parser.parse(xmlContent);
+			if (!parsed?.tv) {
+				logger.warn({ accountId }, '[XstreamProvider] Configured XMLTV missing <tv> root');
+				return [];
+			}
+
+			const channels = await db
+				.select()
+				.from(livetvChannels)
+				.where(eq(livetvChannels.accountId, accountId));
+
+			const channelMap = new Map<string, Map<string, { id: string; externalId: string }>>();
+			const normalizedLookup = new Map<string, Map<string, { id: string; externalId: string }>>();
+			const addChannelMapEntry = (
+				xmltvChannelId: string | undefined,
+				channelInfo: { id: string; externalId: string }
+			) => {
+				if (!xmltvChannelId) return;
+				const key = xmltvChannelId.trim();
+				if (!key) return;
+				if (!channelMap.has(key)) {
+					channelMap.set(key, new Map());
+				}
+				channelMap.get(key)!.set(channelInfo.id, channelInfo);
+			};
+			const addNormalizedLookupEntry = (
+				value: string | undefined,
+				channelInfo: { id: string; externalId: string }
+			) => {
+				const key = this.normalizeChannelLookupKey(value);
+				if (!key) return;
+				if (!normalizedLookup.has(key)) {
+					normalizedLookup.set(key, new Map());
+				}
+				normalizedLookup.get(key)!.set(channelInfo.id, channelInfo);
+			};
+
+			for (const channel of channels) {
+				const channelInfo = { id: channel.id, externalId: channel.externalId };
+				addChannelMapEntry(channel.xstreamData?.epgChannelId, channelInfo);
+				addChannelMapEntry(channel.externalId, channelInfo);
+				addNormalizedLookupEntry(channel.name, channelInfo);
+				addNormalizedLookupEntry(channel.externalId, channelInfo);
+				addNormalizedLookupEntry(channel.xstreamData?.epgChannelId, channelInfo);
+			}
+
+			const xmlChannels = Array.isArray(parsed.tv.channel)
+				? parsed.tv.channel
+				: parsed.tv.channel
+					? [parsed.tv.channel]
+					: [];
+			for (const xmlChannel of xmlChannels) {
+				const xmltvChannelId = xmlChannel?.['@_id']?.toString().trim();
+				if (!xmltvChannelId || channelMap.has(xmltvChannelId)) continue;
+
+				const resolvedMatches = new Map<string, { id: string; externalId: string }>();
+				const lookupKeys = new Set<string>();
+
+				const normalizedXmlId = this.normalizeChannelLookupKey(xmltvChannelId);
+				if (normalizedXmlId) {
+					lookupKeys.add(normalizedXmlId);
+				}
+
+				const displayNameValues = Array.isArray(xmlChannel?.['display-name'])
+					? xmlChannel['display-name']
+					: xmlChannel?.['display-name']
+						? [xmlChannel['display-name']]
+						: [];
+				for (const value of displayNameValues) {
+					const displayName = this.extractXmltvText(value);
+					const normalizedName = this.normalizeChannelLookupKey(displayName ?? undefined);
+					if (normalizedName) {
+						lookupKeys.add(normalizedName);
+					}
+				}
+
+				for (const key of lookupKeys) {
+					const matches = normalizedLookup.get(key);
+					if (!matches) continue;
+					for (const [channelId, channelInfo] of matches) {
+						resolvedMatches.set(channelId, channelInfo);
+					}
+				}
+
+				if (resolvedMatches.size > 0) {
+					channelMap.set(xmltvChannelId, resolvedMatches);
+				}
+			}
+
+			const programmes = Array.isArray(parsed.tv.programme)
+				? parsed.tv.programme
+				: parsed.tv.programme
+					? [parsed.tv.programme]
+					: [];
+			const programs: EpgProgram[] = [];
+
+			for (const programme of programmes) {
+				const xmltvChannelId = programme?.['@_channel']?.toString().trim();
+				if (!xmltvChannelId) continue;
+
+				const channelInfos = channelMap.get(xmltvChannelId);
+				if (!channelInfos || channelInfos.size === 0) continue;
+
+				const startRaw = programme?.['@_start'];
+				const endRaw = programme?.['@_stop'];
+				if (!startRaw || !endRaw) continue;
+
+				const programmeStart = this.parseXmltvTime(startRaw);
+				const programmeEnd = this.parseXmltvTime(endRaw);
+				if (!programmeStart || !programmeEnd) continue;
+				if (programmeEnd < startTime || programmeStart > endTime) continue;
+
+				const title = this.extractXmltvText(programme?.title) ?? 'Unknown';
+				const description = this.extractXmltvText(programme?.desc);
+				const category = this.extractXmltvText(programme?.category);
+
+				for (const channelInfo of channelInfos.values()) {
+					programs.push({
+						id: randomUUID(),
+						channelId: channelInfo.id,
+						externalChannelId: channelInfo.externalId,
+						accountId,
+						providerType: 'xstream',
+						title,
+						description: description ?? null,
+						category: category ?? null,
+						director: null,
+						actor: null,
+						startTime: programmeStart.toISOString(),
+						endTime: programmeEnd.toISOString(),
+						duration: Math.floor((programmeEnd.getTime() - programmeStart.getTime()) / 1000),
+						hasArchive: false,
+						cachedAt: new Date().toISOString(),
+						updatedAt: new Date().toISOString()
+					});
+				}
+			}
+
+			logger.info(
+				{
+					accountId,
+					programsFound: programs.length
+				},
+				'[XstreamProvider] Configured XMLTV EPG parsed successfully'
+			);
+
+			return programs;
+		} catch (error) {
+			logger.warn(
+				{
+					accountId,
+					epgUrl,
+					error: error instanceof Error ? error.message : String(error)
+				},
+				'[XstreamProvider] Configured XMLTV fetch failed'
+			);
+			return [];
+		}
+	}
+
+	private parseXmltvTime(timeStr: string): Date | null {
+		try {
+			const cleaned = timeStr.replace(/\s+/g, ' ').trim();
+			const match = cleaned.match(/^(\d{14})(?:\s*([+-]\d{4}|UTC))?$/);
+			if (!match) return null;
+
+			const dateStr = match[1];
+			const timezone = match[2];
+
+			const year = parseInt(dateStr.substring(0, 4), 10);
+			const month = parseInt(dateStr.substring(4, 6), 10) - 1;
+			const day = parseInt(dateStr.substring(6, 8), 10);
+			const hour = parseInt(dateStr.substring(8, 10), 10);
+			const minute = parseInt(dateStr.substring(10, 12), 10);
+			const second = parseInt(dateStr.substring(12, 14), 10);
+
+			const date = new Date(Date.UTC(year, month, day, hour, minute, second));
+			if (Number.isNaN(date.getTime())) return null;
+
+			if (timezone && timezone !== 'UTC') {
+				const tzOffsetHours = parseInt(timezone.substring(0, 3), 10);
+				const tzOffsetMinutes = parseInt(timezone.substring(3, 5), 10);
+				const totalOffsetMinutes =
+					tzOffsetHours * 60 + (tzOffsetHours < 0 ? -tzOffsetMinutes : tzOffsetMinutes);
+				date.setUTCMinutes(date.getUTCMinutes() - totalOffsetMinutes);
+			}
+
+			return date;
+		} catch {
+			return null;
+		}
+	}
+
+	private extractXmltvText(value: unknown): string | null {
+		if (!value) return null;
+		if (typeof value === 'string') return value;
+		if (typeof value === 'object' && value !== null) {
+			if ('#text' in value) {
+				return String((value as Record<string, unknown>)['#text']);
+			}
+			if (Array.isArray(value) && value.length > 0) {
+				return this.extractXmltvText(value[0]);
+			}
+		}
+		return null;
+	}
+
+	private normalizeChannelLookupKey(value: string | undefined): string | null {
+		if (!value) return null;
+		const normalized = value
+			.normalize('NFKD')
+			.replace(/[\u0300-\u036f]/g, '')
+			.toLowerCase()
+			.replace(/[^a-z0-9]+/g, '');
+		return normalized || null;
+	}
+
 	private async makeAuthRequest(account: LiveTvAccount): Promise<XstreamAuthResponse> {
 		const config = account.xstreamConfig;
 		if (!config) {
 			throw new Error('XStream config not found');
 		}
 
-		const baseUrl = config.baseUrl.replace(/\/$/, '');
-		const url = `${baseUrl}/player_api.php?username=${encodeURIComponent(config.username)}&password=${encodeURIComponent(config.password)}`;
+		const baseUrl = normalizeXstreamBaseUrl(config.baseUrl);
+		const url = buildXstreamPlayerApiUrl(config);
 
 		logger.debug({ url: baseUrl }, '[XstreamProvider] Making auth request');
 
@@ -868,8 +1212,8 @@ export class XstreamProvider implements LiveTvProvider {
 	}
 
 	private async fetchXstreamCategories(config: XstreamConfig): Promise<XstreamCategory[]> {
-		const baseUrl = config.baseUrl.replace(/\/$/, '');
-		const url = `${baseUrl}/player_api.php?username=${encodeURIComponent(config.username)}&password=${encodeURIComponent(config.password)}&action=get_live_categories`;
+		const baseUrl = normalizeXstreamBaseUrl(config.baseUrl);
+		const url = buildXstreamPlayerApiUrl(config, { action: 'get_live_categories' });
 
 		logger.debug({ serverUrl: baseUrl }, '[XstreamProvider] Fetching categories');
 
@@ -888,8 +1232,8 @@ export class XstreamProvider implements LiveTvProvider {
 	}
 
 	private async fetchXstreamStreams(config: XstreamConfig): Promise<XstreamStream[]> {
-		const baseUrl = config.baseUrl.replace(/\/$/, '');
-		const url = `${baseUrl}/player_api.php?username=${encodeURIComponent(config.username)}&password=${encodeURIComponent(config.password)}&action=get_live_streams`;
+		const baseUrl = normalizeXstreamBaseUrl(config.baseUrl);
+		const url = buildXstreamPlayerApiUrl(config, { action: 'get_live_streams' });
 
 		logger.info(
 			{ serverUrl: baseUrl },
@@ -914,8 +1258,10 @@ export class XstreamProvider implements LiveTvProvider {
 		config: XstreamConfig,
 		categoryId: string
 	): Promise<XstreamStream[]> {
-		const baseUrl = config.baseUrl.replace(/\/$/, '');
-		const url = `${baseUrl}/player_api.php?username=${encodeURIComponent(config.username)}&password=${encodeURIComponent(config.password)}&action=get_live_streams&category_id=${categoryId}`;
+		const url = buildXstreamPlayerApiUrl(config, {
+			action: 'get_live_streams',
+			category_id: categoryId
+		});
 
 		const response = await fetch(url, {
 			headers: {

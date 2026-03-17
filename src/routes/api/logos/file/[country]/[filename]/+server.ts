@@ -2,8 +2,7 @@ import type { RequestHandler } from './$types';
 import { readFile } from 'fs/promises';
 import { join } from 'path';
 import { logger } from '$lib/logging';
-
-const LOGOS_DIR = 'data/channel-logos';
+import { LOGOS_DIR } from '$lib/server/logos/constants.js';
 
 /**
  * GET /api/logos/file/[country]/[filename]

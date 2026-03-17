@@ -39,7 +39,11 @@ const liveTvAccountUpdateSchema = z.object({
 		.object({
 			baseUrl: z.string().url().optional(),
 			username: z.string().min(1).optional(),
-			password: z.string().min(1).optional()
+			password: z.string().min(1).optional(),
+			epgUrl: z.preprocess(
+				(value) => (typeof value === 'string' ? value.trim() : value),
+				z.union([z.string().url(), z.literal('')]).optional()
+			)
 		})
 		.optional(),
 	// M3U-specific config updates
@@ -85,9 +89,21 @@ function queueAccountEpgSync(accountId: string): void {
 		try {
 			const epgService = getEpgService();
 			liveTvEvents.emitEpgSyncStarted(accountId);
-			await epgService.syncAccount(accountId);
-			liveTvEvents.emitEpgSyncCompleted(accountId);
-			logger.info({ accountId }, '[API] Background EPG sync complete after account update');
+			const result = await epgService.syncAccount(accountId, {
+				shouldCancel: () => syncState.isCancelRequestedForAccount(accountId)
+			});
+
+			if (result.success) {
+				liveTvEvents.emitEpgSyncCompleted(accountId);
+				logger.info({ accountId }, '[API] Background EPG sync complete after account update');
+			} else {
+				const errorMessage = result.error ?? 'EPG sync failed';
+				liveTvEvents.emitEpgSyncFailed(accountId, errorMessage);
+				logger.warn(
+					{ accountId, error: errorMessage },
+					'[API] Background EPG sync finished with failure after account update'
+				);
+			}
 		} catch (error) {
 			const message = error instanceof Error ? error.message : 'Unknown error';
 			liveTvEvents.emitEpgSyncFailed(accountId, message);
@@ -155,24 +171,46 @@ export const PUT: RequestHandler = async ({ params, request }) => {
 		}
 
 		const updates = parsed.data;
-		const hasExplicitEpgField =
+		const hasExplicitM3uEpgField =
 			typeof body === 'object' &&
 			body !== null &&
 			'm3uConfig' in body &&
 			typeof body.m3uConfig === 'object' &&
 			body.m3uConfig !== null &&
 			Object.prototype.hasOwnProperty.call(body.m3uConfig, 'epgUrl');
-		const requestedEpgUrl =
-			hasExplicitEpgField &&
+		const requestedM3uEpgUrl =
+			hasExplicitM3uEpgField &&
 			typeof body.m3uConfig === 'object' &&
 			body.m3uConfig !== null &&
 			typeof body.m3uConfig.epgUrl === 'string'
 				? body.m3uConfig.epgUrl.trim()
 				: null;
 
+		const hasExplicitXstreamEpgField =
+			typeof body === 'object' &&
+			body !== null &&
+			'xstreamConfig' in body &&
+			typeof body.xstreamConfig === 'object' &&
+			body.xstreamConfig !== null &&
+			Object.prototype.hasOwnProperty.call(body.xstreamConfig, 'epgUrl');
+		const requestedXstreamEpgUrl =
+			hasExplicitXstreamEpgField &&
+			typeof body.xstreamConfig === 'object' &&
+			body.xstreamConfig !== null &&
+			typeof body.xstreamConfig.epgUrl === 'string'
+				? body.xstreamConfig.epgUrl.trim()
+				: null;
+
 		// Empty epgUrl in update payload means "clear existing epgUrl".
-		if (hasExplicitEpgField && updates.m3uConfig && updates.m3uConfig.epgUrl === '') {
+		if (hasExplicitM3uEpgField && updates.m3uConfig && updates.m3uConfig.epgUrl === '') {
 			updates.m3uConfig.epgUrl = undefined;
+		}
+		if (
+			hasExplicitXstreamEpgField &&
+			updates.xstreamConfig &&
+			updates.xstreamConfig.epgUrl === ''
+		) {
+			updates.xstreamConfig.epgUrl = undefined;
 		}
 
 		const manager = getLiveTvAccountManager();
@@ -187,12 +225,19 @@ export const PUT: RequestHandler = async ({ params, request }) => {
 			);
 		}
 
-		const previousEpgUrl = (existingAccount.m3uConfig?.epgUrl ?? '').trim();
-		const shouldTriggerAccountEpgSync =
-			hasExplicitEpgField &&
+		const previousM3uEpgUrl = (existingAccount.m3uConfig?.epgUrl ?? '').trim();
+		const shouldTriggerM3uEpgSync =
+			hasExplicitM3uEpgField &&
 			existingAccount.providerType === 'm3u' &&
-			requestedEpgUrl !== null &&
-			previousEpgUrl !== requestedEpgUrl;
+			requestedM3uEpgUrl !== null &&
+			previousM3uEpgUrl !== requestedM3uEpgUrl;
+		const previousXstreamEpgUrl = (existingAccount.xstreamConfig?.epgUrl ?? '').trim();
+		const shouldTriggerXstreamEpgSync =
+			hasExplicitXstreamEpgField &&
+			existingAccount.providerType === 'xstream' &&
+			requestedXstreamEpgUrl !== null &&
+			previousXstreamEpgUrl !== requestedXstreamEpgUrl;
+		const shouldTriggerAccountEpgSync = shouldTriggerM3uEpgSync || shouldTriggerXstreamEpgSync;
 		const account = await manager.updateAccount(params.id, updates);
 
 		if (!account) {

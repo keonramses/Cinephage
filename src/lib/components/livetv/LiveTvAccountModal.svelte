@@ -120,7 +120,7 @@
 			// Common fields
 			name = account?.name ?? '';
 			enabled = account?.enabled ?? true;
-			epgUrl = account?.m3uConfig?.epgUrl ?? '';
+			epgUrl = account?.m3uConfig?.epgUrl ?? account?.xstreamConfig?.epgUrl ?? '';
 
 			// Stalker fields
 			portalUrl = account?.stalkerConfig?.portalUrl ?? '';
@@ -223,6 +223,9 @@
 				config.baseUrl = baseUrl.trim();
 				config.username = username.trim();
 				config.password = password.trim() || account?.xstreamConfig?.password || '';
+				if (epgUrl.trim()) {
+					config.epgUrl = epgUrl.trim();
+				}
 				break;
 			case 'm3u':
 				if (epgUrl.trim()) {

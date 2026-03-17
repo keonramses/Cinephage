@@ -2906,6 +2906,7 @@ export const livetvAccounts = sqliteTable(
 			baseUrl: string;
 			username: string;
 			password: string;
+			epgUrl?: string;
 			authToken?: string;
 			tokenExpiry?: string;
 		}>(),
@@ -3010,6 +3011,7 @@ export const livetvChannels = sqliteTable(
 		xstreamData: text('xstream_data', { mode: 'json' }).$type<{
 			streamId: string;
 			streamType: string;
+			epgChannelId?: string;
 			directStreamUrl?: string;
 			containerExtension?: string;
 		}>(),
