@@ -1037,7 +1037,11 @@
 					: action === 'retry_failed'
 						? (queueId: string) => retryQueueItem(queueId, { refresh: false })
 						: (queueId: string) =>
-								removeQueueItem(queueId, { refresh: false, closeDetailModal: false });
+								removeQueueItem(queueId, {
+									refresh: false,
+									closeDetailModal: false,
+									removeFromClient: false
+								});
 
 		for (const queueId of queueIds) {
 			try {
@@ -1208,10 +1212,11 @@
 
 	async function removeQueueItem(
 		id: string,
-		options: { refresh?: boolean; closeDetailModal?: boolean } = {}
+		options: { refresh?: boolean; closeDetailModal?: boolean; removeFromClient?: boolean } = {}
 	): Promise<void> {
-		const { refresh = true, closeDetailModal = true } = options;
-		const response = await fetch(`/api/queue/${id}`, { method: 'DELETE' });
+		const { refresh = true, closeDetailModal = true, removeFromClient = true } = options;
+		const query = removeFromClient ? '' : '?removeFromClient=false';
+		const response = await fetch(`/api/queue/${id}${query}`, { method: 'DELETE' });
 		if (!response.ok) {
 			const message = await getQueueActionErrorMessage(response, 'Failed to remove');
 			throw new Error(message);
