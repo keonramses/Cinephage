@@ -23,7 +23,7 @@ export const POST: RequestHandler = async (event) => {
 		| {
 				host?: string;
 				apiKey?: string;
-				serverType?: 'jellyfin' | 'emby';
+				serverType?: 'jellyfin' | 'emby' | 'plex';
 				persist?: boolean;
 		  }
 		| undefined;
@@ -39,7 +39,11 @@ export const POST: RequestHandler = async (event) => {
 				overrides = {};
 				if (typeof candidate.host === 'string') overrides.host = candidate.host;
 				if (typeof candidate.apiKey === 'string') overrides.apiKey = candidate.apiKey;
-				if (candidate.serverType === 'jellyfin' || candidate.serverType === 'emby') {
+				if (
+					candidate.serverType === 'jellyfin' ||
+					candidate.serverType === 'emby' ||
+					candidate.serverType === 'plex'
+				) {
 					overrides.serverType = candidate.serverType;
 				}
 				if (typeof candidate.persist === 'boolean') overrides.persist = candidate.persist;

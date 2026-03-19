@@ -283,10 +283,10 @@ async function initializeServices(): Promise<void> {
 			const extractionCacheManager = getExtractionCacheManager();
 			serviceManager.register(extractionCacheManager);
 
-			// Initialize MediaBrowser notifier
+			// Initialize MediaBrowser notifier (Jellyfin/Emby/Plex library updates)
 			const mediaBrowserNotifier = getMediaBrowserNotifier();
 			serviceManager.register(mediaBrowserNotifier);
-			logger.info('MediaBrowser notifier initialized for Jellyfin/Emby integration');
+			logger.info('MediaBrowser notifier initialized for Jellyfin/Emby/Plex integration');
 
 			// Initialize Live TV services
 			const liveTvAccountManager = getLiveTvAccountManager();

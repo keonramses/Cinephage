@@ -1,6 +1,7 @@
 import { existsSync, mkdirSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import Database from 'better-sqlite3';
+import { env } from '$env/dynamic/private';
 
 const DATA_DIR = process.env.DATA_DIR || 'data';
 const DEFAULT_BASE_URL = 'http://localhost:5173';
@@ -73,7 +74,7 @@ function getConfiguredExternalUrl(): string | null {
  * encrypted API keys in the database permanently unrecoverable.
  */
 export function getAuthSecret(): string {
-	const secret = process.env.BETTER_AUTH_SECRET?.trim();
+	const secret = env.BETTER_AUTH_SECRET?.trim() || process.env.BETTER_AUTH_SECRET?.trim();
 	if (secret) {
 		return secret;
 	}

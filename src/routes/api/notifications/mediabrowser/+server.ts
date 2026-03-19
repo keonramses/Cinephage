@@ -11,7 +11,7 @@ import { requireAdmin } from '$lib/server/auth/authorization.js';
 
 /**
  * GET /api/notifications/mediabrowser
- * List all configured MediaBrowser (Jellyfin/Emby) servers.
+ * List all configured media servers (Jellyfin/Emby/Plex).
  */
 export const GET: RequestHandler = async () => {
 	const manager = getMediaBrowserManager();
