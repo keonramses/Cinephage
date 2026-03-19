@@ -635,7 +635,11 @@ export const movies = sqliteTable(
 		// Whether to search for subtitles for this movie
 		wantsSubtitles: integer('wants_subtitles', { mode: 'boolean' }).default(true),
 		// Last time this movie was searched for releases (ISO timestamp)
-		lastSearchTime: text('last_search_time')
+		lastSearchTime: text('last_search_time'),
+		// Adaptive subtitle searching: consecutive failed subtitle search count
+		failedSubtitleAttempts: integer('failed_subtitle_attempts').default(0),
+		// Adaptive subtitle searching: when subtitle searching first began (ISO timestamp)
+		firstSubtitleSearchAt: text('first_subtitle_search_at')
 	},
 	(table) => [index('idx_movies_monitored_hasfile').on(table.monitored, table.hasFile)]
 );
@@ -795,7 +799,11 @@ export const episodes = sqliteTable(
 		// Override series-level subtitle preference (null = inherit from series)
 		wantsSubtitlesOverride: integer('wants_subtitles_override', { mode: 'boolean' }),
 		// Last time this episode was searched for releases (ISO timestamp)
-		lastSearchTime: text('last_search_time')
+		lastSearchTime: text('last_search_time'),
+		// Adaptive subtitle searching: consecutive failed subtitle search count
+		failedSubtitleAttempts: integer('failed_subtitle_attempts').default(0),
+		// Adaptive subtitle searching: when subtitle searching first began (ISO timestamp)
+		firstSubtitleSearchAt: text('first_subtitle_search_at')
 	},
 	(table) => [
 		index('idx_episodes_series_season').on(table.seriesId, table.seasonNumber),

@@ -23,6 +23,14 @@ import { normalizeLanguageCode } from '$lib/shared/languages';
 import type { TaskResult } from '../MonitoringScheduler.js';
 import type { TaskExecutionContext } from '$lib/server/tasks/TaskExecutionContext.js';
 import { isMovieMonitored } from '$lib/server/monitoring/specifications/MonitoredSpecification.js';
+import {
+	isMovieSearchActive,
+	isEpisodeSearchActive,
+	recordMovieSearchFailure,
+	resetMovieSearchFailures,
+	recordEpisodeSearchFailure,
+	resetEpisodeSearchFailures
+} from '$lib/server/subtitles/adaptive-searching.js';
 
 /**
  * Default minimum score for auto-download (used if profile doesn't specify)
@@ -234,10 +242,22 @@ async function searchMissingMovieSubtitles(
 		'[MissingSubtitlesTask] Found movies to process'
 	);
 
+	// Get provider manager for per-batch health checks
+	const providerManager = getSubtitleProviderManager();
+
 	// Process movies in batches to limit concurrency
 	for (let i = 0; i < moviesWithProfiles.length; i += MAX_CONCURRENT_SEARCHES) {
 		// Check for cancellation between batches
 		ctx?.checkCancelled();
+
+		// Re-check provider availability each batch (Bazarr pattern: break when all throttled)
+		const currentProviders = await providerManager.getEnabledProviders();
+		if (currentProviders.length === 0) {
+			logger.warn(
+				'[MissingSubtitlesTask] All providers throttled or disabled mid-run, stopping movie search'
+			);
+			break;
+		}
 
 		const batch = moviesWithProfiles.slice(i, i + MAX_CONCURRENT_SEARCHES);
 
@@ -286,6 +306,11 @@ async function searchMissingMovieSubtitles(
 
 					if (status.satisfied || status.missing.length === 0) {
 						// Already has all required subtitles
+						return;
+					}
+
+					// Adaptive searching: skip if we've been failing for a long time
+					if (!isMovieSearchActive(movie)) {
 						return;
 					}
 
@@ -379,6 +404,13 @@ async function searchMissingMovieSubtitles(
 						}
 					}
 
+					// Update adaptive searching state
+					if (movieDownloaded > 0) {
+						await resetMovieSearchFailures(movie.id);
+					} else {
+						await recordMovieSearchFailure(movie.id);
+					}
+
 					// Record to monitoring history for activity tracking
 					await db.insert(monitoringHistory).values({
 						taskHistoryId,
@@ -452,7 +484,19 @@ async function searchMissingEpisodeSubtitles(
 		'[MissingSubtitlesTask] Found series to process'
 	);
 
+	// Get provider manager for per-batch health checks
+	const providerManager = getSubtitleProviderManager();
+
 	for (const show of seriesWithProfiles) {
+		// Re-check provider availability per series (break when all throttled)
+		const seriesProviders = await providerManager.getEnabledProviders();
+		if (seriesProviders.length === 0) {
+			logger.warn(
+				'[MissingSubtitlesTask] All providers throttled or disabled mid-run, stopping episode search'
+			);
+			break;
+		}
+
 		let profileId = show.languageProfileId ?? null;
 		if (!profileId) {
 			const defaultProfile = await profileService.getDefaultProfile();
@@ -481,6 +525,15 @@ async function searchMissingEpisodeSubtitles(
 			for (let i = 0; i < episodesMissing.length; i += MAX_CONCURRENT_SEARCHES) {
 				// Check for cancellation between batches
 				ctx?.checkCancelled();
+
+				// Re-check provider availability each batch (Bazarr pattern: break when all throttled)
+				const currentProviders = await providerManager.getEnabledProviders();
+				if (currentProviders.length === 0) {
+					logger.warn(
+						'[MissingSubtitlesTask] All providers throttled or disabled mid-run, stopping episode search'
+					);
+					break;
+				}
 
 				const batch = episodesMissing.slice(i, i + MAX_CONCURRENT_SEARCHES);
 
@@ -516,6 +569,11 @@ async function searchMissingEpisodeSubtitles(
 							}
 
 							if (!episodeData.monitored) {
+								return;
+							}
+
+							// Adaptive searching: skip if we've been failing for a long time
+							if (!isEpisodeSearchActive(episodeData)) {
 								return;
 							}
 
@@ -602,6 +660,13 @@ async function searchMissingEpisodeSubtitles(
 										);
 									}
 								}
+							}
+
+							// Update adaptive searching state
+							if (episodeDownloaded > 0) {
+								await resetEpisodeSearchFailures(episodeId);
+							} else {
+								await recordEpisodeSearchFailure(episodeId);
 							}
 
 							// Record to monitoring history for activity tracking

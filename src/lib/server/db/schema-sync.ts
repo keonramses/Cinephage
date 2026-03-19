@@ -100,7 +100,7 @@ interface MigrationDefinition {
  * Version 70: Drop unused activities scaffolding tables (activities, activity_details)
  * Version 71: Add download_queue_tombstones table for local-removal suppression window
  */
-export const CURRENT_SCHEMA_VERSION = 71;
+export const CURRENT_SCHEMA_VERSION = 72;
 
 const BETTER_AUTH_TABLE_DEFINITIONS = [
 	{
@@ -4836,6 +4836,32 @@ const MIGRATIONS: MigrationDefinition[] = [
 				.run();
 
 			logger.info('[SchemaSync] Ensured download_queue_tombstones table and indexes');
+		}
+	},
+	{
+		version: 72,
+		name: 'add_adaptive_subtitle_searching_columns',
+		apply: (sqlite) => {
+			ensureColumn(
+				sqlite,
+				'movies',
+				'failed_subtitle_attempts',
+				'"failed_subtitle_attempts" integer DEFAULT 0'
+			);
+			ensureColumn(sqlite, 'movies', 'first_subtitle_search_at', '"first_subtitle_search_at" text');
+			ensureColumn(
+				sqlite,
+				'episodes',
+				'failed_subtitle_attempts',
+				'"failed_subtitle_attempts" integer DEFAULT 0'
+			);
+			ensureColumn(
+				sqlite,
+				'episodes',
+				'first_subtitle_search_at',
+				'"first_subtitle_search_at" text'
+			);
+			logger.info('[SchemaSync] Added adaptive subtitle searching columns to movies and episodes');
 		}
 	}
 ];
