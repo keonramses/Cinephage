@@ -34,6 +34,7 @@ import type {
 	BlacklistReason
 } from '../types';
 import { getSubtitleProviderManager } from './SubtitleProviderManager';
+import { isThrottleableError } from '../errors/ProviderErrors';
 import AdmZip from 'adm-zip';
 
 /**
@@ -255,6 +256,19 @@ export class SubtitleDownloadService {
 				},
 				'Failed to download subtitle'
 			);
+
+			// Record the error for throttling (like Bazarr's throttle_callback)
+			// This ensures download-phase errors (e.g. DownloadLimitExceeded, TooManyRequests)
+			// trigger provider throttling, not just search-phase errors
+			if (isThrottleableError(error) || error instanceof Error) {
+				await providerManager.recordError(result.providerId, error as Error).catch((e) => {
+					logger.warn(
+						{ error: e instanceof Error ? e.message : String(e) },
+						'Failed to record download error for throttling'
+					);
+				});
+			}
+
 			throw error;
 		}
 

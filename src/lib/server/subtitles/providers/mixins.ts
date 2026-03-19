@@ -482,12 +482,15 @@ export const PunctuationMixin = {
 		// Remove country/year suffixes in parentheses
 		normalized = normalized.replace(/\s*\([^)]*\)\s*$/, '');
 
-		// Remove common suffixes
-		const suffixes = ['us', 'uk', 'au', '2019', '2020', '2021', '2022', '2023', '2024', '2025'];
-		for (const suffix of suffixes) {
+		// Remove common country suffixes
+		const countrySuffixes = ['us', 'uk', 'au'];
+		for (const suffix of countrySuffixes) {
 			const pattern = new RegExp(`\\s+${suffix}$`, 'i');
 			normalized = normalized.replace(pattern, '');
 		}
+
+		// Remove trailing year suffixes (e.g., "Home Town 2023" -> "Home Town")
+		normalized = normalized.replace(/\s+(?:19|20)\d{2}$/, '');
 
 		return normalized.trim();
 	},
