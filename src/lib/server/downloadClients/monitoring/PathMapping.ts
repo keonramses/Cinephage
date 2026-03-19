@@ -52,8 +52,8 @@ export interface PathMappingOptions {
 }
 
 function joinMappedPath(localBasePath: string, relativePath: string): string {
-	const normalizedLocal = localBasePath.replace(/\/+$/, '');
-	const normalizedRelative = relativePath.replace(/^\/+/, '');
+	const normalizedLocal = normalizePath(localBasePath, true);
+	const normalizedRelative = normalizeRelativePath(relativePath);
 
 	if (!normalizedRelative) {
 		return normalizedLocal;
@@ -78,6 +78,15 @@ function joinMappedPath(localBasePath: string, relativePath: string): string {
 	return `${normalizedLocal}/${normalizedRelative}`;
 }
 
+function normalizePath(path: string, trimTrailingSlash = false): string {
+	const normalized = path.replace(/\\/g, '/');
+	return trimTrailingSlash ? normalized.replace(/\/+$/, '') : normalized;
+}
+
+function normalizeRelativePath(path: string): string {
+	return normalizePath(path).replace(/^\/+/, '');
+}
+
 /**
  * Map a path from client's perspective to local filesystem path.
  * Supports dual folder mapping for SABnzbd (temp + completed folders).
@@ -97,12 +106,12 @@ export function mapClientPathToLocal(
 	tempRemotePath?: string | null
 ): string {
 	// Normalize client path
-	const normalizedClientPath = clientPath.replace(/\/+$/, '');
+	const normalizedClientPath = normalizePath(clientPath, true);
 
 	// Try completed folder mapping first
 	if (localBasePath && clientBasePath) {
-		const normalizedLocal = localBasePath.replace(/\/+$/, '');
-		const normalizedRemote = clientBasePath.replace(/\/+$/, '');
+		const normalizedLocal = normalizePath(localBasePath, true);
+		const normalizedRemote = normalizePath(clientBasePath, true);
 
 		if (normalizedClientPath.startsWith(normalizedRemote)) {
 			const relativePath = normalizedClientPath.slice(normalizedRemote.length);
@@ -124,8 +133,8 @@ export function mapClientPathToLocal(
 
 	// Try temp folder mapping (SABnzbd incomplete downloads)
 	if (tempLocalPath && tempRemotePath) {
-		const normalizedTempLocal = tempLocalPath.replace(/\/+$/, '');
-		const normalizedTempRemote = tempRemotePath.replace(/\/+$/, '');
+		const normalizedTempLocal = normalizePath(tempLocalPath, true);
+		const normalizedTempRemote = normalizePath(tempRemotePath, true);
 
 		if (normalizedClientPath.startsWith(normalizedTempRemote)) {
 			const relativePath = normalizedClientPath.slice(normalizedTempRemote.length);
@@ -150,7 +159,7 @@ export function mapClientPathToLocal(
 		return clientPath;
 	}
 
-	const normalizedLocal = localBasePath.replace(/\/+$/, '');
+	const normalizedLocal = normalizePath(localBasePath, true);
 
 	// Try to intelligently detect the common directory structure
 	// Look for common torrent client folder names
@@ -231,12 +240,12 @@ export function mapClientPathToLocalWithResult(
 	const { completeLocalPath, completeRemotePath, tempLocalPath, tempRemotePath } = options;
 
 	// Normalize client path
-	const normalizedClientPath = clientPath.replace(/\/+$/, '');
+	const normalizedClientPath = normalizePath(clientPath, true);
 
 	// Try completed folder mapping first
 	if (completeLocalPath && completeRemotePath) {
-		const normalizedLocal = completeLocalPath.replace(/\/+$/, '');
-		const normalizedRemote = completeRemotePath.replace(/\/+$/, '');
+		const normalizedLocal = normalizePath(completeLocalPath, true);
+		const normalizedRemote = normalizePath(completeRemotePath, true);
 
 		if (normalizedClientPath.startsWith(normalizedRemote)) {
 			const relativePath = normalizedClientPath.slice(normalizedRemote.length);
@@ -258,8 +267,8 @@ export function mapClientPathToLocalWithResult(
 
 	// Try temp folder mapping (SABnzbd incomplete downloads)
 	if (tempLocalPath && tempRemotePath) {
-		const normalizedTempLocal = tempLocalPath.replace(/\/+$/, '');
-		const normalizedTempRemote = tempRemotePath.replace(/\/+$/, '');
+		const normalizedTempLocal = normalizePath(tempLocalPath, true);
+		const normalizedTempRemote = normalizePath(tempRemotePath, true);
 
 		if (normalizedClientPath.startsWith(normalizedTempRemote)) {
 			const relativePath = normalizedClientPath.slice(normalizedTempRemote.length);
@@ -284,7 +293,7 @@ export function mapClientPathToLocalWithResult(
 		return { path: clientPath, exact: false, warning: 'No local path configured' };
 	}
 
-	const normalizedLocal = completeLocalPath.replace(/\/+$/, '');
+	const normalizedLocal = normalizePath(completeLocalPath, true);
 
 	// Try to intelligently detect the common directory structure
 	const commonPrefixes = ['/downloads', '/data', '/torrents', '/complete', '/finished', '/media'];
@@ -387,8 +396,11 @@ export function needsPathMapping(path: string, localBasePath: string | null | un
 		return false;
 	}
 
+	const normalizedPath = normalizePath(path);
+	const normalizedLocalBasePath = normalizePath(localBasePath);
+
 	// If the path already starts with the local base, no mapping needed
-	if (path.startsWith(localBasePath)) {
+	if (normalizedPath.startsWith(normalizedLocalBasePath)) {
 		return false;
 	}
 
