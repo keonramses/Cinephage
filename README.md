@@ -164,15 +164,9 @@ If you later access Cinephage through a hostname or reverse proxy, update
 
 ---
 
-## Documentation
+### Documentation
 
-Comprehensive documentation is available in the [`docs/`](docs/INDEX.md) folder:
-
-- **[Getting Started](docs/getting-started/installation.md)** — Installation and first setup
-- **[Features](docs/INDEX.md#features)** — Detailed feature guides
-- **[Configuration](docs/INDEX.md#configuration)** — Setup all integrations
-- **[Operations](docs/INDEX.md#operations)** — Deployment and maintenance
-- **[Development](docs/INDEX.md#development)** — Contributing guidelines
+Comprehensive documentation is available at **[docs.cinephage.net](https://docs.cinephage.net/)**.
 
 ---
 
