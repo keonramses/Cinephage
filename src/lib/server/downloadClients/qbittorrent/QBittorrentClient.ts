@@ -66,6 +66,12 @@ interface QBittorrentTorrent {
 	seeding_time?: number;
 }
 
+interface QBittorrentTorrentFile {
+	index: number;
+	name: string;
+	priority: number;
+}
+
 /**
  * Map QBittorrent state to our standard status.
  */
@@ -418,6 +424,83 @@ export class QBittorrentClient implements IDownloadClient {
 		return false;
 	}
 
+	private normalizeTorrentPath(path: string): string {
+		return path.replace(/\\/g, '/').trim();
+	}
+
+	private async getTorrentFiles(hash: string): Promise<QBittorrentTorrentFile[]> {
+		return this.request<QBittorrentTorrentFile[]>(
+			`/api/v2/torrents/files?hash=${encodeURIComponent(hash)}`
+		);
+	}
+
+	private async setFilePriority(hash: string, fileIds: number[], priority: number): Promise<void> {
+		if (fileIds.length === 0) {
+			return;
+		}
+
+		const formData = new URLSearchParams();
+		formData.append('hash', hash);
+		formData.append('id', fileIds.join('|'));
+		formData.append('priority', String(priority));
+
+		await this.requestText('/api/v2/torrents/filePrio', {
+			method: 'POST',
+			headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+			body: formData.toString()
+		});
+	}
+
+	private async applyFileSelection(
+		hash: string,
+		selection: NonNullable<AddDownloadOptions['fileSelection']>
+	): Promise<void> {
+		const files = await this.getTorrentFiles(hash);
+		if (files.length === 0) {
+			throw new Error('Torrent metadata has no file list yet');
+		}
+
+		const includeById = new Set<number>();
+		const fileIdsInTorrent = new Set(files.map((file) => file.index));
+		for (const index of selection.fileIndices) {
+			if (fileIdsInTorrent.has(index)) {
+				includeById.add(index);
+			}
+		}
+
+		if (selection.filePaths && selection.filePaths.length > 0) {
+			const idByPath = new Map(
+				files.map((file) => [this.normalizeTorrentPath(file.name), file.index] as const)
+			);
+			for (const path of selection.filePaths) {
+				const id = idByPath.get(this.normalizeTorrentPath(path));
+				if (id !== undefined) {
+					includeById.add(id);
+				}
+			}
+		}
+
+		const includedIds = Array.from(includeById).sort((a, b) => a - b);
+		if (includedIds.length === 0) {
+			throw new Error('No matched files found in torrent for episode pointer');
+		}
+
+		const allIds = files.map((file) => file.index);
+		const unwantedIds = allIds.filter((id) => !includeById.has(id));
+
+		await this.setFilePriority(hash, unwantedIds, 0);
+		await this.setFilePriority(hash, includedIds, 1);
+
+		logger.info(
+			{
+				hash,
+				keptFiles: includedIds.length,
+				totalFiles: files.length
+			},
+			'[QBittorrent] Applied file selection'
+		);
+	}
+
 	/**
 	 * Add a download.
 	 * Includes duplicate detection and graceful error handling.
@@ -604,6 +687,15 @@ export class QBittorrentClient implements IDownloadClient {
 
 		// Get the hash to return
 		const returnHash = infoHash || '';
+
+		// Apply file selection for episode pointers before force-starting.
+		if (returnHash && options.fileSelection && options.fileSelection.fileIndices.length > 0) {
+			const loaded = await this.waitForTorrent(returnHash, 60, 250);
+			if (!loaded) {
+				throw new Error('Unable to apply episode pointer file selection: torrent not available');
+			}
+			await this.applyFileSelection(returnHash, options.fileSelection);
+		}
 
 		// Wait for torrent to be loaded before applying additional settings (Radarr pattern)
 		if (returnHash && forceStart) {

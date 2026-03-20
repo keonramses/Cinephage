@@ -274,6 +274,12 @@
 			if (episodeInfo.seasons && episodeInfo.seasons.length > 1) return true;
 		}
 
+		// Title-based fallback for tracker formats where parser metadata may be incomplete
+		const title = release.title;
+		if (/\bS\d{1,2}[\s._-]*[-–—][\s._-]*S?\d{1,2}\b/i.test(title)) return true;
+		if (/\bSeasons?[\s:._-]*\d{1,2}\s*(?:[-–—]|to)\s*\d{1,2}(?:\s*(?:of|\/)\s*\d{1,2})?\b/i.test(title))
+			return true;
+
 		return false;
 	}
 

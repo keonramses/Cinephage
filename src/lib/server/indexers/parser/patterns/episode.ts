@@ -38,7 +38,7 @@ const EPISODE_PATTERNS: Array<{
 	// Multi-season pack patterns: S01-S05, Season 1-5, S01-05, Seasons 1-5
 	// These must come BEFORE generic "complete series" text patterns
 	{
-		pattern: /\bS(\d{1,2})[\s._-]?-[\s._-]?S?(\d{1,2})\b(?![\s._-]?E)/i,
+		pattern: /\bS(\d{1,2})[\s._-]*[-–—][\s._-]*S?(\d{1,2})\b(?![\s._-]?E)/i,
 		extract: (match) => {
 			const startSeason = parseInt(match[1], 10);
 			const endSeason = parseInt(match[2], 10);
@@ -53,7 +53,8 @@ const EPISODE_PATTERNS: Array<{
 		}
 	},
 	{
-		pattern: /\bSeasons?[\s._-]?(\d{1,2})[\s._-]?-[\s._-]?(\d{1,2})\b/i,
+		pattern:
+			/\bSeasons?[\s:._-]*(\d{1,2})\s*(?:[-–—]|to)\s*(\d{1,2})(?:\s*(?:of|\/)\s*\d{1,2})?\b/i,
 		extract: (match) => {
 			const startSeason = parseInt(match[1], 10);
 			const endSeason = parseInt(match[2], 10);
@@ -80,6 +81,65 @@ const EPISODE_PATTERNS: Array<{
 	{
 		pattern: /\ball[\s._-]?seasons?\b/i,
 		extract: () => ({ isCompleteSeries: true, isSeasonPack: true })
+	},
+
+	// Tracker pack format with explicit episode range:
+	// "Season: 2 / Episodes: 1-10 of 15"
+	{
+		pattern:
+			/\bSeason[\s:._-]*(\d{1,2})\b[\s/|,-]*Episodes?[\s:._-]*(\d{1,3})(?:\s*[-–]\s*(\d{1,3}))?(?:\s*(?:of|\/)\s*\d{1,3})?/i,
+		extract: (match) => {
+			const season = parseInt(match[1], 10);
+			const startEpisode = parseInt(match[2], 10);
+			const endEpisode = match[3] ? parseInt(match[3], 10) : startEpisode;
+
+			const episodes: number[] = [];
+			if (
+				!Number.isNaN(startEpisode) &&
+				!Number.isNaN(endEpisode) &&
+				endEpisode >= startEpisode &&
+				endEpisode - startEpisode < 300
+			) {
+				for (let ep = startEpisode; ep <= endEpisode; ep++) {
+					episodes.push(ep);
+				}
+			}
+
+			return {
+				season,
+				episodes: episodes.length > 0 ? episodes : [startEpisode],
+				isSeasonPack: true
+			};
+		}
+	},
+
+	// Explicit episode range using SxxExx-yy / SxxExx-Eyy:
+	// "S01E01-08", "S1E1-E8"
+	{
+		pattern: /\bS(\d{1,2})[\s._-]?E(\d{1,3})[\s._-]?-[\s._-]?E?(\d{1,3})\b/i,
+		extract: (match) => {
+			const season = parseInt(match[1], 10);
+			const startEpisode = parseInt(match[2], 10);
+			const endEpisode = parseInt(match[3], 10);
+			const episodes: number[] = [];
+
+			if (
+				!Number.isNaN(startEpisode) &&
+				!Number.isNaN(endEpisode) &&
+				endEpisode >= startEpisode &&
+				endEpisode - startEpisode < 300
+			) {
+				for (let ep = startEpisode; ep <= endEpisode; ep++) {
+					episodes.push(ep);
+				}
+			}
+
+			return {
+				season,
+				episodes: episodes.length > 0 ? episodes : [startEpisode],
+				isSeasonPack: true
+			};
+		}
 	},
 
 	// Standard S##E## format (most common, handles multi-episode)

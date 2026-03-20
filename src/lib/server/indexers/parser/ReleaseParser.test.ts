@@ -144,6 +144,28 @@ describe('ReleaseParser', () => {
 			expect(result.episode?.isSeasonPack).toBe(true);
 		});
 
+		it('should parse tracker season packs with explicit episode range', () => {
+			const result = parseRelease(
+				'The Pitt / Season: 2 / Episodes: 1-10 of 15 [2026, USA, WEB-DLRip]'
+			);
+
+			expect(result.episode?.season).toBe(2);
+			expect(result.episode?.isSeasonPack).toBe(true);
+			expect(result.episode?.episodes).toContain(1);
+			expect(result.episode?.episodes).toContain(10);
+			expect(result.episode?.episodes).not.toContain(11);
+		});
+
+		it('should parse SxxExx-yy episode range packs', () => {
+			const result = parseRelease('Stranger Things S1E1-8 [2016, HEVC, WEB-DL]');
+
+			expect(result.episode?.season).toBe(1);
+			expect(result.episode?.isSeasonPack).toBe(true);
+			expect(result.episode?.episodes).toContain(1);
+			expect(result.episode?.episodes).toContain(8);
+			expect(result.episode?.episodes).not.toContain(9);
+		});
+
 		it('should parse complete series packs', () => {
 			const result = parseRelease('Friends.Complete.Series.S01-S10.1080p.BluRay.x264-GROUP');
 
@@ -173,6 +195,26 @@ describe('ReleaseParser', () => {
 
 			expect(result.episode?.isSeasonPack).toBe(true);
 			expect(result.episode?.seasons).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9]);
+		});
+
+		it('should parse tracker multi-season packs with "Season: 1-8 of 8 / Episodes: 1-171 of 171" format', () => {
+			const result = parseRelease(
+				'The Vampire Diaries / Season: 1-8 of 8 / Episodes: 1-171 of 171 [2009-2017, USA, BDRip]'
+			);
+
+			expect(result.episode?.isSeasonPack).toBe(true);
+			expect(result.episode?.seasons).toEqual([1, 2, 3, 4, 5, 6, 7, 8]);
+			expect(result.episode?.isCompleteSeries).toBe(true);
+		});
+
+		it('should parse tracker multi-season ranges with "Season: X-Y of N" where start season is not 1', () => {
+			const result = parseRelease(
+				'Some Show / Season: 3-5 of 8 / Episodes: 1-60 of 171 [2012-2015, WEB-DL]'
+			);
+
+			expect(result.episode?.isSeasonPack).toBe(true);
+			expect(result.episode?.seasons).toEqual([3, 4, 5]);
+			expect(result.episode?.isCompleteSeries).toBe(false);
 		});
 
 		it('should parse 1x05 format', () => {

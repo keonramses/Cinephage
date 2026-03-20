@@ -338,6 +338,7 @@
 				method: 'POST',
 				headers: { 'Content-Type': 'application/json' },
 				body: JSON.stringify({
+					guid: release.guid,
 					downloadUrl: release.downloadUrl,
 					magnetUrl: release.magnetUrl,
 					infoHash: release.infoHash,

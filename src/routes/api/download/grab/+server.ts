@@ -7,6 +7,11 @@ import { ReleaseParser } from '$lib/server/indexers/parser/ReleaseParser';
 import { logger } from '$lib/logging';
 import type { GrabRequest, GrabResponse } from '$lib/types/queue';
 import { getDownloadResolutionService, releaseDecisionService } from '$lib/server/downloads';
+import {
+	buildEpisodePointerFileSelection,
+	parseEpisodePointerFromGuid,
+	parseEpisodePointerFromTitle
+} from '$lib/server/downloads/episode-pointer.js';
 import { checkNzbAvailability } from '$lib/server/downloads/nzb/NzbAvailabilityChecker.js';
 import { blocklistService } from '$lib/server/monitoring/specifications/BlocklistSpecification.js';
 import type { DownloadInfo } from '$lib/server/downloadClients/core/interfaces';
@@ -36,6 +41,59 @@ import { libraryMediaEvents } from '$lib/server/library/LibraryMediaEvents';
 const parser = new ReleaseParser();
 
 type EpisodeFileUpsertInput = Omit<typeof episodeFiles.$inferInsert, 'id'> & { id?: string };
+
+function deriveDetailsUrlFromDownloadUrl(downloadUrl: string | undefined): string | undefined {
+	if (!downloadUrl) {
+		return undefined;
+	}
+
+	try {
+		const parsed = new URL(downloadUrl);
+		const host = parsed.hostname.toLowerCase();
+		const topicId = parsed.searchParams.get('t');
+		const isRuTracker = host.includes('rutracker.');
+		const isDlEndpoint = /(?:\/forum)?\/dl\.php$/i.test(parsed.pathname);
+
+		if (isRuTracker && isDlEndpoint && topicId) {
+			const details = new URL(parsed.toString());
+			details.pathname = '/forum/viewtopic.php';
+			details.search = '';
+			details.searchParams.set('t', topicId);
+			return details.toString();
+		}
+	} catch {
+		// Best-effort only.
+	}
+
+	return undefined;
+}
+
+function normalizeRuTrackerForumUrl(url: string | undefined): string | undefined {
+	if (!url) {
+		return undefined;
+	}
+
+	try {
+		const parsed = new URL(url);
+		if (!parsed.hostname.toLowerCase().includes('rutracker.')) {
+			return url;
+		}
+
+		if (/^\/viewtopic\.php$/i.test(parsed.pathname)) {
+			parsed.pathname = '/forum/viewtopic.php';
+			return parsed.toString();
+		}
+
+		if (/^\/dl\.php$/i.test(parsed.pathname)) {
+			parsed.pathname = '/forum/dl.php';
+			return parsed.toString();
+		}
+	} catch {
+		// Best-effort only.
+	}
+
+	return url;
+}
 
 /**
  * Upsert episode file by (seriesId, relativePath) to avoid duplicate rows.
@@ -463,6 +521,10 @@ export const POST: RequestHandler = async ({ request }) => {
 			}
 		}
 
+		const effectiveCommentsUrl =
+			normalizeRuTrackerForumUrl(data.commentsUrl) ||
+			deriveDetailsUrlFromDownloadUrl(reconstructedDownloadUrl);
+
 		if (protocol === 'usenet') {
 			// Usenet: fetch NZB and run NNTP pre-flight check before sending to client
 			resolved = { success: true };
@@ -571,7 +633,7 @@ export const POST: RequestHandler = async ({ request }) => {
 				infoHash: data.infoHash,
 				indexerId: data.indexerId,
 				title: data.title,
-				commentsUrl: data.commentsUrl
+				commentsUrl: effectiveCommentsUrl
 			});
 
 			if (!resolved.success) {
@@ -596,10 +658,67 @@ export const POST: RequestHandler = async ({ request }) => {
 					title: data.title,
 					hasMagnet: !!resolved.magnetUrl,
 					hasTorrentFile: !!resolved.torrentFile,
-					infoHash: resolved.infoHash
+					infoHash: resolved.infoHash,
+					hasCommentsUrl: !!effectiveCommentsUrl
 				},
 				'Download resolved'
 			);
+		}
+
+		const episodePointerTarget =
+			parseEpisodePointerFromGuid(data.guid) ?? parseEpisodePointerFromTitle(data.title);
+		let pointerFileSelection:
+			| {
+					fileIndices: number[];
+					allFileIndices?: number[];
+					filePaths?: string[];
+			  }
+			| undefined;
+
+		if (episodePointerTarget) {
+			const supportsFileSelection =
+				clientInstance.implementation === 'qbittorrent' ||
+				clientInstance.implementation === 'transmission';
+			if (!supportsFileSelection) {
+				return json(
+					{
+						success: false,
+						error: `Download client "${clientInstance.implementation}" does not support episode pointer downloads`
+					} satisfies GrabResponse,
+					{ status: 422 }
+				);
+			}
+
+			if (!resolved.torrentFile) {
+				return json(
+					{
+						success: false,
+						error:
+							'Episode pointer download requires torrent metadata, but only a magnet/download URL was available'
+					} satisfies GrabResponse,
+					{ status: 422 }
+				);
+			}
+
+			const selection = await buildEpisodePointerFileSelection(
+				resolved.torrentFile,
+				episodePointerTarget
+			);
+			if (selection.fileIndices.length === 0) {
+				return json(
+					{
+						success: false,
+						error: `Could not map ${episodePointerTarget.token} to files inside this season pack`
+					} satisfies GrabResponse,
+					{ status: 422 }
+				);
+			}
+
+			pointerFileSelection = {
+				fileIndices: selection.fileIndices,
+				allFileIndices: selection.allFileIndices,
+				filePaths: selection.filePaths
+			};
 		}
 
 		// Send to download client
@@ -617,13 +736,25 @@ export const POST: RequestHandler = async ({ request }) => {
 				paused,
 				priority: clientConfig.recentPriority,
 				seedRatioLimit,
-				seedTimeLimit
+				seedTimeLimit,
+				fileSelection: pointerFileSelection
 			});
 		} catch (addError) {
 			// Check if this is a duplicate torrent error
 			const isDuplicate = (addError as Error & { isDuplicate?: boolean }).isDuplicate;
 			existingTorrent =
 				(addError as Error & { existingTorrent?: DownloadInfo }).existingTorrent || null;
+
+			if (isDuplicate && existingTorrent && episodePointerTarget) {
+				return json(
+					{
+						success: false,
+						error:
+							'Episode pointer already exists in the client. Remove the existing torrent and retry to apply episode-only file selection.'
+					} satisfies GrabResponse,
+					{ status: 409 }
+				);
+			}
 
 			if (isDuplicate && existingTorrent) {
 				logger.info(

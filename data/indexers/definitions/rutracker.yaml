@@ -22,10 +22,6 @@ settings:
     type: checkbox
     label: Strip Russian letters
     default: false
-  - name: addrussiantotitle
-    type: checkbox
-    label: Add RUS to titles
-    default: false
   - name: usemagnetlinks
     type: checkbox
     label: Use Magnet Links
@@ -423,25 +419,54 @@ search:
               ''
             ]
         - name: re_replace
-          args: ["(?i)(\\s*/\\s*[^/]+)$", '']
+          args: ["(?i)(\\s*/\\s*[A-Za-zА-Яа-яЁё0-9\\s\\.'\\-]{1,80})$", '']
         - name: re_replace
           args: ['(HDTVRip|HDRip|HDTV)', 'HDTV']
         - name: re_replace
           args: ['(WEBRip|WEB-DLRip|WEB-DL)', 'WEB-DL']
         - name: re_replace
           args: ["(BDRip|BD\\d|BD\\-?Rip)", 'BDRip']
-        - name: append
-          args: '{{ if .Config.addrussiantotitle }} RUS{{ end }}'
+        - name: re_replace
+          args: ['[А-Яа-яЁё]+', '{{ if .Config.stripcyrillic }}{{ else }}$&{{ end }}']
+        - name: re_replace
+          args: ['^\s*[-–—]+\s*/\s*', '']
+        - name: re_replace
+          args: ['^\s*/\s*', '']
+        - name: re_replace
+          args: ['\b(S\d+E\d+(?:-\d+)?)\s+(\d{1,2})(?=\s*\[)', '$1 of $2']
+        - name: re_replace
+          args: ['^(.*?)\s*/\s*(S\d+E\d+(?:-\d+)?(?:\s+of\s+\d+)?)', '$1: $2']
+        - name: re_replace
+          args: ['[(]\s*/\s*', '(']
+        - name: re_replace
+          args: ['(?:\s*,\s*){2,}', ', ']
+        - name: re_replace
+          args: ['[[]\s*,\s*', '[']
+        - name: re_replace
+          args: ['\s*,\s*[]]', ']']
+        - name: re_replace
+          args: ['[(]\s*,\s*', '(']
+        - name: re_replace
+          args: ['\s*,\s*[)]', ')']
+        - name: re_replace
+          args: ['[(]\s*[)]', '']
+        - name: re_replace
+          args: ['\s{2,}', ' ']
+        - name: trim
     download:
       selector: td.tor-size a.tr-dl
       attribute: href
       filters:
+        - name: re_replace
+          args: ['^/?dl\.php', '/forum/dl.php']
         - name: prepend
           args: '{{ .Config.sitelink }}'
     details:
       selector: td.t-title-col div.t-title a.tLink
       attribute: href
       filters:
+        - name: re_replace
+          args: ['^/?viewtopic\.php', '/forum/viewtopic.php']
         - name: prepend
           args: '{{ .Config.sitelink }}'
     category:
@@ -481,8 +506,7 @@ search:
 
 download:
   selectors:
+    - selector: a.dl-stub[href*="dl.php?t="], a.dl-link[href*="dl.php?t="], a[href*="/dl.php?t="]
+      attribute: href
     - selector: a.magnet-link[href^="magnet:?"]
       attribute: href
-      filters:
-        - name: prepend
-          args: 'magnet:'

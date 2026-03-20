@@ -531,8 +531,10 @@ export class RequestBuilder {
 			'author',
 			'title'
 		];
-		const hasInputSearchCriteria = Object.keys(filteredInputs).some((key) =>
-			meaningfulSearchParams.includes(key.toLowerCase())
+		const hasInputSearchCriteria = Object.entries(filteredInputs).some(
+			([key, value]) =>
+				meaningfulSearchParams.includes(key.toLowerCase()) &&
+				this.isMeaningfulSearchInputValue(key, value)
 		);
 		// Check if the path template contains keywords placeholder (e.g., {{ .Keywords }})
 		// This allows indexers that embed search in the URL path
@@ -681,6 +683,41 @@ export class RequestBuilder {
 		}
 
 		return expanded;
+	}
+
+	/**
+	 * Check if a search input value is meaningful enough to execute.
+	 *
+	 * Prevents degenerate TV queries where keyword filters strip the title and
+	 * leave only episode tokens (e.g. "%S01", "%S01E01", "%1x01", "%101"),
+	 * which can flood results with unrelated releases.
+	 */
+	private isMeaningfulSearchInputValue(key: string, value: string): boolean {
+		const trimmed = value.trim();
+		if (!trimmed) return false;
+
+		const lowerKey = key.toLowerCase();
+		const keywordKeys = new Set(['q', 'query', 'query_term', 'name', 'search', 'nm', 'mire']);
+		if (!keywordKeys.has(lowerKey)) {
+			return true;
+		}
+
+		const tokens = trimmed.match(/[\p{L}\p{N}x]+/giu) ?? [];
+		if (tokens.length === 0) {
+			return false;
+		}
+
+		const isEpisodeOnlyToken = (token: string): boolean => {
+			return (
+				/^s\d{1,2}$/i.test(token) ||
+				/^e\d{1,3}(?:-\d{1,3})?$/i.test(token) ||
+				/^s\d{1,2}e\d{1,3}$/i.test(token) ||
+				/^\d{1,2}x\d{1,3}$/i.test(token) ||
+				/^\d{3}$/.test(token)
+			);
+		};
+
+		return !tokens.every((token) => isEpisodeOnlyToken(token));
 	}
 
 	/**

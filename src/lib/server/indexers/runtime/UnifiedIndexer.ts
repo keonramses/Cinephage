@@ -126,6 +126,7 @@ export class UnifiedIndexer implements IIndexer {
 		// Create engines
 		this.filterEngine = createFilterEngine();
 		this.templateEngine = createTemplateEngine();
+		this.filterEngine.setTemplateEngine(this.templateEngine);
 		this.selectorEngine = createSelectorEngine(this.templateEngine, this.filterEngine);
 
 		// Create runtime components
@@ -474,7 +475,14 @@ export class UnifiedIndexer implements IIndexer {
 		// Build requests
 		const requests = this.requestBuilder.buildSearchRequests(criteria);
 		if (requests.length === 0) {
-			this.log.warn({ criteria }, 'No search requests generated');
+			if (criteria.searchSource === 'interactive' && criteria.searchType === 'tv') {
+				this.log.debug(
+					{ criteria },
+					'No search requests generated for this interactive TV criteria variant'
+				);
+			} else {
+				this.log.warn({ criteria }, 'No search requests generated');
+			}
 			return [];
 		}
 
