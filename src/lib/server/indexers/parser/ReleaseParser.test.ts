@@ -107,6 +107,12 @@ describe('ReleaseParser', () => {
 
 			expect(result.is3d).toBe(true);
 		});
+
+		it('should not treat generic movie collection titles as TV packs', () => {
+			const result = parseRelease('War Movies Complete Collection 2024 1080p BluRay x264');
+
+			expect(result.episode).toBeUndefined();
+		});
 	});
 
 	describe('TV Show Releases', () => {
@@ -197,6 +203,52 @@ describe('ReleaseParser', () => {
 			expect(result.episode?.seasons).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9]);
 		});
 
+		it('should parse SxxExx-SyyEzz multi-season range notation', () => {
+			const result = parseRelease('Show.Name.S01E01-S08E99.1080p.WEB-DL');
+
+			expect(result.episode?.isSeasonPack).toBe(true);
+			expect(result.episode?.seasons).toEqual([1, 2, 3, 4, 5, 6, 7, 8]);
+			expect(result.episode?.isCompleteSeries).toBe(true);
+		});
+
+		it('should parse 1x01-8x99 multi-season range notation', () => {
+			const result = parseRelease('Show Name 1x01-8x99 720p WEB-DL');
+
+			expect(result.episode?.isSeasonPack).toBe(true);
+			expect(result.episode?.seasons).toEqual([1, 2, 3, 4, 5, 6, 7, 8]);
+		});
+
+		it('should parse "Season X through Y" notation', () => {
+			const result = parseRelease('The Show / Season: 1 through 5 / Episodes: 1-60 of 100');
+
+			expect(result.episode?.isSeasonPack).toBe(true);
+			expect(result.episode?.seasons).toEqual([1, 2, 3, 4, 5]);
+			expect(result.episode?.isCompleteSeries).toBe(true);
+		});
+
+		it('should parse "Every Season" as complete series', () => {
+			const result = parseRelease('The Show Every Season 1080p WEB-DL');
+
+			expect(result.episode?.isSeasonPack).toBe(true);
+			expect(result.episode?.isCompleteSeries).toBe(true);
+		});
+
+		it('should parse "Season: 1 of 1" as single-season complete series', () => {
+			const result = parseRelease('One Season Show / Season: 1 of 1 / Episodes: 1-10 of 10');
+
+			expect(result.episode?.season).toBe(1);
+			expect(result.episode?.isSeasonPack).toBe(true);
+			expect(result.episode?.isCompleteSeries).toBe(true);
+		});
+
+		it('should parse russian season ranges used by trackers', () => {
+			const result = parseRelease('Сериал / Сезоны: 1-4 из 4 / Эпизоды: 1-40 из 40');
+
+			expect(result.episode?.isSeasonPack).toBe(true);
+			expect(result.episode?.seasons).toEqual([1, 2, 3, 4]);
+			expect(result.episode?.isCompleteSeries).toBe(true);
+		});
+
 		it('should parse tracker multi-season packs with "Season: 1-8 of 8 / Episodes: 1-171 of 171" format', () => {
 			const result = parseRelease(
 				'The Vampire Diaries / Season: 1-8 of 8 / Episodes: 1-171 of 171 [2009-2017, USA, BDRip]'
@@ -215,6 +267,26 @@ describe('ReleaseParser', () => {
 			expect(result.episode?.isSeasonPack).toBe(true);
 			expect(result.episode?.seasons).toEqual([3, 4, 5]);
 			expect(result.episode?.isCompleteSeries).toBe(false);
+		});
+
+		it('should infer complete series from large S1E1-XXX of XXX ranges', () => {
+			const result = parseRelease(
+				'The Vampire Diaries: S1E1-171 of 171 [2009-2017, BDRip] MVO (LostFilm)'
+			);
+
+			expect(result.episode?.isSeasonPack).toBe(true);
+			expect(result.episode?.isCompleteSeries).toBe(true);
+			expect(result.episode?.season).toBe(1);
+			expect(result.episode?.episodes?.length).toBe(171);
+		});
+
+		it('should not infer complete series for normal single-season ranges', () => {
+			const result = parseRelease('The Vampire Diaries: S1E1-22 of 22 [2009-2010, BDRip]');
+
+			expect(result.episode?.isSeasonPack).toBe(true);
+			expect(result.episode?.isCompleteSeries).toBe(false);
+			expect(result.episode?.season).toBe(1);
+			expect(result.episode?.episodes?.length).toBe(22);
 		});
 
 		it('should parse 1x05 format', () => {

@@ -57,6 +57,7 @@ export const GET: RequestHandler = async ({ url }) => {
 	const {
 		q,
 		searchType,
+		searchMode,
 		categories,
 		indexers,
 		limit,
@@ -73,10 +74,14 @@ export const GET: RequestHandler = async ({ url }) => {
 		minScore
 	} = result.data;
 	let effectiveScoringProfileId = scoringProfileId;
+	const isMultiSeasonPackTvSearch = searchType === 'tv' && searchMode === 'multiSeasonPack';
 
 	// Build typed search criteria based on searchType
 	// Auto-apply categories based on search type if none specified
-	const effectiveCategories = categories ?? getCategoriesForSearchType(searchType);
+	const effectiveCategories = isMultiSeasonPackTvSearch
+		? (categories ?? [])
+		: (categories ?? getCategoriesForSearchType(searchType));
+	const effectiveLimit = isMultiSeasonPackTvSearch ? (limit ?? 200) : limit;
 
 	let criteria: SearchCriteria;
 
@@ -86,7 +91,7 @@ export const GET: RequestHandler = async ({ url }) => {
 			query: q,
 			categories: effectiveCategories.length > 0 ? effectiveCategories : undefined,
 			indexerIds: indexers,
-			limit,
+			limit: effectiveLimit,
 			imdbId,
 			tmdbId,
 			year
@@ -97,7 +102,7 @@ export const GET: RequestHandler = async ({ url }) => {
 			query: q,
 			categories: effectiveCategories.length > 0 ? effectiveCategories : undefined,
 			indexerIds: indexers,
-			limit,
+			limit: effectiveLimit,
 			imdbId,
 			tmdbId,
 			tvdbId,
@@ -114,8 +119,19 @@ export const GET: RequestHandler = async ({ url }) => {
 			query: q,
 			categories: effectiveCategories.length > 0 ? effectiveCategories : undefined,
 			indexerIds: indexers,
-			limit
+			limit: effectiveLimit
 		};
+	}
+
+	if (isMultiSeasonPackTvSearch) {
+		logger.info(
+			{
+				query: criteria.query,
+				limit: criteria.limit,
+				categoriesApplied: !!(criteria.categories && criteria.categories.length > 0)
+			},
+			'[SearchAPI] Multi-season TV search mode enabled'
+		);
 	}
 
 	// Populate searchTitles from alternate titles in the library database

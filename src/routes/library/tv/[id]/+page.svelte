@@ -1819,6 +1819,7 @@
 	tmdbId={series.tmdbId}
 	imdbId={series.imdbId}
 	tvdbId={series.tvdbId}
+	expectedEpisodeCount={series.episodeCount}
 	year={series.year}
 	mediaType="tv"
 	scoringProfileId={effectiveScoringProfileId ?? undefined}
