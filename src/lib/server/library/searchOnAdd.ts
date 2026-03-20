@@ -24,7 +24,7 @@ import {
 import { logger } from '$lib/logging/index.js';
 import { db } from '$lib/server/db/index.js';
 import { movieFiles, series, episodes, episodeFiles } from '$lib/server/db/schema.js';
-import { eq, and, inArray } from 'drizzle-orm';
+import { eq, and, inArray, ne } from 'drizzle-orm';
 import type { SearchCriteria } from '$lib/server/indexers/types';
 import { evaluateIndexerSearchAvailability } from '$lib/server/indexers/search/availability';
 
@@ -1021,7 +1021,13 @@ class SearchOnAddService {
 			// Find all missing episodes. Automatic/background searches only include monitored
 			// episodes, while manual user-triggered searches can bypass monitoring.
 			const now = new Date().toISOString().split('T')[0]; // YYYY-MM-DD
-			const conditions = [eq(episodes.seriesId, seriesId), eq(episodes.hasFile, false)];
+			const conditions = [
+				eq(episodes.seriesId, seriesId),
+				eq(episodes.hasFile, false),
+				// Exclude specials (season 0) for missing-episode auto-search.
+				// This matches series episode counts and prevents oversized "missing" totals.
+				ne(episodes.seasonNumber, 0)
+			];
 			if (!bypassMonitoring) {
 				conditions.push(eq(episodes.monitored, true));
 			}

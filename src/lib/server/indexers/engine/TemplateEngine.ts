@@ -366,7 +366,7 @@ export class TemplateEngine {
 			if (keywordFormat) {
 				keywords.push(keywordFormat);
 			}
-		} else if (criteria.season !== undefined) {
+		} else if (criteria.season !== undefined && criteria.season > 0) {
 			// Season-only search (e.g., "S01")
 			const seasonOnlyFormat = generateEpisodeFormat(season, undefined, 'standard');
 			this.variables.set('.Query.Episode', seasonOnlyFormat);

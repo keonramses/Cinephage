@@ -190,6 +190,7 @@ export const enrichmentOptionsSchema = z.object({
 export const searchQuerySchema = z.object({
 	q: z.string().optional(),
 	searchType: searchTypeSchema.default('basic'),
+	searchMode: z.enum(['all', 'multiSeasonPack']).optional(),
 	categories: z
 		.string()
 		.optional()

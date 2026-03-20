@@ -107,6 +107,7 @@
 		tmdbId?: number;
 		imdbId?: string | null;
 		tvdbId?: number | null;
+		expectedEpisodeCount?: number | null;
 		year?: number | null;
 		mediaType: 'movie' | 'tv';
 		scoringProfileId?: string | null;
@@ -126,6 +127,7 @@
 		tmdbId,
 		imdbId,
 		tvdbId,
+		expectedEpisodeCount,
 		year,
 		mediaType,
 		scoringProfileId,
@@ -258,6 +260,10 @@
 
 	// Helper to check if a release is a multi-season pack
 	function isMultiSeasonPack(release: Release): boolean {
+		const largeEpisodeThreshold = expectedEpisodeCount
+			? Math.max(50, Math.floor(expectedEpisodeCount * 0.8))
+			: 70;
+
 		// Check episodeMatch first (from enhanced search results)
 		const episodeMatch = release.episodeMatch;
 		if (episodeMatch) {
@@ -265,6 +271,14 @@
 			if (episodeMatch.isCompleteSeries) return true;
 			// Multiple seasons in the array
 			if (episodeMatch.seasons && episodeMatch.seasons.length > 1) return true;
+			// Trackers may encode multi-season packs as S1E1-171 style ranges.
+			if (
+				episodeMatch.isSeasonPack &&
+				episodeMatch.season === 1 &&
+				(episodeMatch.episodes?.length ?? 0) >= largeEpisodeThreshold
+			) {
+				return true;
+			}
 		}
 
 		// Fall back to parsed.episode info
@@ -272,7 +286,51 @@
 		if (episodeInfo) {
 			if (episodeInfo.isCompleteSeries) return true;
 			if (episodeInfo.seasons && episodeInfo.seasons.length > 1) return true;
+			// Tracker fallback: some complete/multi-season packs are encoded as S1E1-171.
+			// Treat very large season-1 episode spans as multi-pack candidates.
+			if (
+				episodeInfo.isSeasonPack &&
+				episodeInfo.season === 1 &&
+				(episodeInfo.episodes?.length ?? 0) >= largeEpisodeThreshold
+			) {
+				return true;
+			}
 		}
+
+		// Title-based fallback for tracker formats where parser metadata may be incomplete
+		const title = release.title;
+		if (/\bS\d{1,2}[\s._-]*[-–—][\s._-]*S?\d{1,2}\b/i.test(title)) return true;
+		if (/\bS\d{1,2}[\s._-]?E\d{1,3}\s*[-–—]\s*S\d{1,2}[\s._-]?E\d{1,3}\b/i.test(title)) return true;
+		if (/\b\d{1,2}x\d{1,3}\s*[-–—]\s*\d{1,2}x\d{1,3}\b/i.test(title)) return true;
+		if (
+			/\bSeasons?[\s:._-]*\d{1,2}\s*(?:[-–—]|to|through|thru)\s*\d{1,2}(?:\s*(?:of|\/)\s*\d{1,2})?\b/i.test(
+				title
+			)
+		)
+			return true;
+		if (
+			/\bСезоны?[\s:._-]*\d{1,2}\s*(?:[-–—]|до)\s*\d{1,2}(?:\s*(?:из|of|\/)\s*\d{1,2})?\b/i.test(
+				title
+			)
+		)
+			return true;
+		if (
+			/\b(?:every[\s._-]?season|all[\s._-]?seasons?|полный[\s._-]*сериал|все[\s._-]*сезоны)\b/i.test(
+				title
+			)
+		)
+			return true;
+
+		// Guardrail for generic words like "collection"/"bundle": require TV context nearby.
+		const hasTvContext =
+			/\b(?:series|seasons?|episodes?|s\d{1,2}(?:e\d{1,3})?|(?:\d{1,2})x\d{1,3})\b/i.test(title);
+		if (
+			hasTvContext &&
+			/\b(?:complete[\s._-]?collection|full[\s._-]?collection|mega[\s._-]?pack|bundle)\b/i.test(
+				title
+			)
+		)
+			return true;
 
 		return false;
 	}
@@ -328,6 +386,8 @@
 		return releases;
 	});
 
+	const rawReleaseCount = $derived.by(() => releases.length);
+
 	const modeRejectedCount = $derived.by(() => modeBaseReleases.filter((r) => r.rejected).length);
 
 	const reportedIndexerResults = $derived.by(() => {
@@ -348,6 +408,7 @@
 		return Object.entries(meta.indexerResults).map(([indexerId, result]) => ({
 			indexerId,
 			...result,
+			rawCount: result.count,
 			displayCount:
 				searchMode === 'multiSeasonPack' ? (modeCountsByIndexer.get(indexerId) ?? 0) : result.count
 		}));
@@ -389,6 +450,8 @@
 				enrich: 'true',
 				filterRejected: 'false' // Keep rejected for display, but mark them
 			});
+
+			if (searchMode) params.set('searchMode', searchMode);
 
 			if (tmdbId) params.set('tmdbId', tmdbId.toString());
 			if (imdbId) params.set('imdbId', imdbId);
@@ -522,7 +585,8 @@
 			<div class="mb-4 space-y-2">
 				<div class="flex flex-wrap items-center gap-4 text-sm text-base-content/70">
 					{#if searchMode === 'multiSeasonPack'}
-						<span>{filteredReleases.length} of {modeBaseReleases.length} results</span>
+						<span>{filteredReleases.length} of {modeBaseReleases.length} multi-pack matches</span>
+						<span class="text-base-content/50">from {rawReleaseCount} raw results</span>
 						{#if modeRejectedCount}
 							<span class="text-warning">{modeRejectedCount} rejected</span>
 						{/if}
@@ -652,7 +716,7 @@
 							<div class="mb-2">
 								<span class="font-medium text-base-content/80"
 									>{searchMode === 'multiSeasonPack'
-										? 'Searched (multi-pack matches):'
+										? 'Searched (multi-pack matches / raw):'
 										: 'Searched:'}</span
 								>
 								<div class="mt-1 flex flex-wrap gap-2">
@@ -669,7 +733,11 @@
 											{:else if result.displayCount > 0}
 												<CheckCircle2 size={12} />
 											{/if}
-											{result.name}: {result.displayCount}
+											{#if searchMode === 'multiSeasonPack'}
+												{result.name}: {result.displayCount}/{result.rawCount}
+											{:else}
+												{result.name}: {result.displayCount}
+											{/if}
 											{#if result.error}
 												<span class="tooltip" data-tip={result.error}>
 													<AlertCircle size={12} />
@@ -810,6 +878,16 @@
 		{:else if filteredReleases.length === 0}
 			<div class="flex flex-col items-center justify-center py-12">
 				{#if searchMode === 'multiSeasonPack'}
+					{#if rawReleaseCount > 0}
+						<div
+							class="mb-4 max-w-xl rounded-lg border border-base-300 bg-base-200 p-3 text-center text-sm"
+						>
+							<p class="font-medium text-base-content/80">Raw results were found</p>
+							<p class="mt-1 text-base-content/60">
+								{rawReleaseCount} releases matched the title, but none matched complete/multi-season rules.
+							</p>
+						</div>
+					{/if}
 					<Package size={48} class="text-base-content/30" />
 					<p class="mt-4 text-base-content/60">No multi-season packs found</p>
 					<p class="mt-2 text-sm text-base-content/40">

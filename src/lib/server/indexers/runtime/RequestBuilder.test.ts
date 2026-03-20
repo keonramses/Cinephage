@@ -64,6 +64,46 @@ function createTestRequestBuilder(): RequestBuilder {
 	return new RequestBuilder(definition, createTemplateEngine(), createFilterEngine());
 }
 
+function createRutrackerLikeTvBuilder(): RequestBuilder {
+	const definition = {
+		id: 'rutracker-like',
+		name: 'RuTracker-like',
+		type: 'semi-private',
+		protocol: 'torrent',
+		links: ['https://example.test'],
+		caps: {
+			categories: {
+				'5000': 'TV'
+			},
+			categorymappings: [{ id: '5000', cat: 'TV', default: true }]
+		},
+		search: {
+			paths: [
+				{
+					path: '/forum/tracker.php',
+					method: 'get',
+					inputs: {
+						nm: '{{ .Keywords }}'
+					}
+				}
+			],
+			keywordsfilters: [
+				{
+					name: 're_replace',
+					args: ['[^a-zA-Zа-яА-ЯёЁ0-9]+', '%']
+				}
+			],
+			response: { type: 'html' },
+			rows: { selector: 'table#tor-tbl tbody tr' },
+			fields: {
+				title: { selector: 'a.tLink' }
+			}
+		}
+	} as any;
+
+	return new RequestBuilder(definition, createTemplateEngine(), createFilterEngine());
+}
+
 function getParam(url: string, key: string): string | null {
 	return new URL(url).searchParams.get(key);
 }
@@ -116,6 +156,20 @@ describe('RequestBuilder category defaults', () => {
 		expect(getParam(requests[0].url, 'q')).toBe('Smallville S01E01');
 	});
 
+	it('does not append S00 token for season 0 when no episode is specified', () => {
+		const builder = createTestRequestBuilder();
+		const criteria: SearchCriteria = {
+			searchType: 'tv',
+			query: 'One Piece',
+			season: 0
+		};
+
+		const requests = builder.buildSearchRequests(criteria);
+
+		expect(requests).toHaveLength(1);
+		expect(getParam(requests[0].url, 'q')).toBe('One Piece');
+	});
+
 	it('keeps generic path for basic search', () => {
 		const builder = createTestRequestBuilder();
 		const criteria: SearchCriteria = {
@@ -130,6 +184,36 @@ describe('RequestBuilder category defaults', () => {
 
 		expect(requests).toHaveLength(1);
 		expect(modes).toContain('search');
+	});
+
+	it('skips TV query variants when keyword filters collapse title to episode token only', () => {
+		const builder = createRutrackerLikeTvBuilder();
+		const criteria: SearchCriteria = {
+			searchType: 'tv',
+			query: '怪奇物语',
+			season: 1,
+			episode: 1,
+			preferredEpisodeFormat: 'standard'
+		};
+
+		const requests = builder.buildSearchRequests(criteria);
+		expect(requests).toHaveLength(0);
+	});
+
+	it('keeps TV query variants when title remains after keyword filtering', () => {
+		const builder = createRutrackerLikeTvBuilder();
+		const criteria: SearchCriteria = {
+			searchType: 'tv',
+			query: 'Stranger Things',
+			season: 1,
+			episode: 1,
+			preferredEpisodeFormat: 'standard'
+		};
+
+		const requests = builder.buildSearchRequests(criteria);
+		expect(requests).toHaveLength(1);
+		expect(getParam(requests[0].url, 'nm')).toContain('Stranger');
+		expect(getParam(requests[0].url, 'nm')).toContain('S01E01');
 	});
 });
 

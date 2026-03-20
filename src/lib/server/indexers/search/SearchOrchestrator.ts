@@ -1026,27 +1026,37 @@ export class SearchOrchestrator {
 		const allReleases: ReleaseResult[] = [];
 		const seenGuids = new Set<string>();
 
-		// Build list of titles to search
-		const titlesToSearch: string[] = [];
-		if (criteria.searchTitles && criteria.searchTitles.length > 0) {
-			titlesToSearch.push(...criteria.searchTitles);
-		} else if (criteria.query) {
-			titlesToSearch.push(criteria.query);
-		}
+		// Build list of titles to search and drop empty/noise variants.
+		const rawTitles: string[] =
+			criteria.searchTitles && criteria.searchTitles.length > 0
+				? criteria.searchTitles
+				: criteria.query
+					? [criteria.query]
+					: [];
+
+		const titlesToSearch = [...new Set(rawTitles.map((title) => title.trim()).filter(Boolean))];
 
 		if (titlesToSearch.length === 0) {
 			return [];
 		}
 
-		// Get episode formats to try based on indexer capabilities
+		// Get episode formats to try based on indexer capabilities.
+		// Do not force season-only tokens for season 0 (specials / unknown season),
+		// because many trackers return no results for S00-only keyword suffixes.
 		let episodeFormats: EpisodeFormat[] = [];
-		if (isTvSearch(criteria) && criteria.season !== undefined) {
-			// Get format types from indexer capabilities, or use all formats as fallback
-			const formatTypes = getEffectiveEpisodeFormats(
-				indexer.capabilities.searchFormats?.episode,
-				true // useAllFormats fallback for backwards compatibility
-			);
-			episodeFormats = getEpisodeFormats(criteria, formatTypes);
+		if (isTvSearch(criteria)) {
+			const hasEpisode = criteria.episode !== undefined;
+			const hasPositiveSeason = criteria.season !== undefined && criteria.season > 0;
+			if (!hasEpisode && !hasPositiveSeason) {
+				episodeFormats = [];
+			} else {
+				// Get format types from indexer capabilities, or use all formats as fallback
+				const formatTypes = getEffectiveEpisodeFormats(
+					indexer.capabilities.searchFormats?.episode,
+					true // useAllFormats fallback for backwards compatibility
+				);
+				episodeFormats = getEpisodeFormats(criteria, formatTypes);
+			}
 		}
 
 		let attemptedVariants = 0;
@@ -1056,6 +1066,11 @@ export class SearchOrchestrator {
 		// Search with each title variant (limit to 3 titles to avoid excessive queries)
 		for (const title of titlesToSearch.slice(0, 3)) {
 			if (episodeFormats.length > 0) {
+				const shouldTryInteractiveTvTitleOnlyFallback =
+					isTvSearch(criteria) &&
+					criteria.searchSource === 'interactive' &&
+					(criteria.season !== undefined || criteria.episode !== undefined);
+
 				// TV search: try each episode format
 				// Pass CLEAN query (just title) with preferredEpisodeFormat set
 				// TemplateEngine uses preferredEpisodeFormat to add the correct token
@@ -1088,6 +1103,43 @@ export class SearchOrchestrator {
 								indexer: indexer.name,
 								title,
 								format: format.type,
+								error: message
+							},
+							'Multi-title search variant failed'
+						);
+					}
+				}
+
+				// Interactive TV fallback: also try title-only (no season/episode token in query).
+				// Some trackers index packs as "Season X / Episodes 1-9" and miss SxxEyy forms.
+				if (shouldTryInteractiveTvTitleOnlyFallback) {
+					const titleOnlyCriteria = createTextOnlyCriteria({
+						...criteria,
+						query: title,
+						season: undefined,
+						episode: undefined,
+						preferredEpisodeFormat: undefined
+					});
+
+					attemptedVariants++;
+					try {
+						const releases = await indexer.search(titleOnlyCriteria);
+						successfulVariants++;
+
+						for (const release of releases) {
+							if (!seenGuids.has(release.guid)) {
+								seenGuids.add(release.guid);
+								allReleases.push(release);
+							}
+						}
+					} catch (error) {
+						const message = error instanceof Error ? error.message : String(error);
+						variantErrors.push(message);
+						logger.debug(
+							{
+								indexer: indexer.name,
+								title,
+								format: 'titleOnly',
 								error: message
 							},
 							'Multi-title search variant failed'
@@ -1337,69 +1389,194 @@ export class SearchOrchestrator {
 			return releases;
 		}
 
-		return releases.filter((release) => {
-			// Parse the release title to get episode info
-			// Cache parsed result on release to avoid re-parsing in ReleaseEnricher
-			const releaseWithCache = release as ReleaseResult & {
-				_parsedRelease?: ReturnType<typeof parseRelease>;
-			};
-			if (!releaseWithCache._parsedRelease) {
-				releaseWithCache._parsedRelease = parseRelease(release.title);
-			}
-			const parsed = releaseWithCache._parsedRelease;
-			const episodeInfo = parsed.episode;
+		const parsedReleases = releases
+			.map((release) => {
+				// Parse the release title to get episode info
+				// Cache parsed result on release to avoid re-parsing in ReleaseEnricher
+				const releaseWithCache = release as ReleaseResult & {
+					_parsedRelease?: ReturnType<typeof parseRelease>;
+				};
+				if (!releaseWithCache._parsedRelease) {
+					releaseWithCache._parsedRelease = parseRelease(release.title);
+				}
+				return {
+					release,
+					episodeInfo: releaseWithCache._parsedRelease.episode
+				};
+			})
+			.filter(
+				(
+					item
+				): item is {
+					release: ReleaseResult;
+					episodeInfo: NonNullable<ReturnType<typeof parseRelease>['episode']>;
+				} => Boolean(item.episodeInfo)
+			);
 
-			// Exclude releases that couldn't be parsed for episode info
-			if (!episodeInfo) {
+		const isSingleSeasonMatch = (
+			episodeInfo: NonNullable<ReturnType<typeof parseRelease>['episode']>
+		): boolean => {
+			// Reject complete series packs (e.g., "Complete Series", "All Seasons")
+			if (episodeInfo.isCompleteSeries) {
 				return false;
 			}
-
-			// Helper to check if the release is a single-season pack matching the target
-			const isSingleSeasonMatch = (): boolean => {
-				// Reject complete series packs (e.g., "Complete Series", "All Seasons")
-				if (episodeInfo.isCompleteSeries) {
-					return false;
-				}
-				// Reject multi-season packs (e.g., S01-S05, Seasons 1-5)
-				if (episodeInfo.seasons && episodeInfo.seasons.length > 1) {
-					return false;
-				}
-				// Single season: exact match
-				return episodeInfo.season === targetSeason;
-			};
-
-			// Season-only search: filter to single-season packs matching the target season
-			if (targetSeason !== undefined && targetEpisode === undefined) {
-				return episodeInfo.isSeasonPack && isSingleSeasonMatch();
+			// Reject multi-season packs (e.g., S01-S05, Seasons 1-5)
+			if (episodeInfo.seasons && episodeInfo.seasons.length > 1) {
+				return false;
 			}
+			// Single season: exact match
+			return targetSeason !== undefined && episodeInfo.season === targetSeason;
+		};
 
-			// Season + episode search:
-			// - interactive: exact episode matches only
-			// - automatic: allow single-season packs as candidates
-			if (targetSeason !== undefined && targetEpisode !== undefined) {
-				if (episodeInfo.isSeasonPack) {
-					return !isInteractiveSearch && isSingleSeasonMatch();
-				}
-				// Include individual episodes that match exactly
-				return (
-					episodeInfo.season === targetSeason &&
+		const seasonPackContainsEpisode = (
+			episodeInfo: NonNullable<ReturnType<typeof parseRelease>['episode']>,
+			episode: number
+		): boolean => {
+			if (!episodeInfo.isSeasonPack) return false;
+			if (episodeInfo.episodes && episodeInfo.episodes.length > 0) {
+				return episodeInfo.episodes.includes(episode);
+			}
+			// If pack episode boundaries are unknown, keep as a fallback candidate.
+			return true;
+		};
+
+		// Season-only search: filter to single-season packs matching the target season
+		if (targetSeason !== undefined && targetEpisode === undefined) {
+			return parsedReleases
+				.filter(({ episodeInfo }) => episodeInfo.isSeasonPack && isSingleSeasonMatch(episodeInfo))
+				.map(({ release }) => this.withFormattedSeasonPackTitle(release));
+		}
+
+		// Season + episode search:
+		// - interactive: prefer exact episodes, fallback to matching single-season packs
+		// - automatic: include exact episodes and matching single-season packs
+		if (targetSeason !== undefined && targetEpisode !== undefined) {
+			const exactEpisodeMatches = parsedReleases.filter(
+				({ episodeInfo }) =>
 					!episodeInfo.isSeasonPack &&
+					episodeInfo.season === targetSeason &&
 					episodeInfo.episodes?.includes(targetEpisode)
+			);
+			const seasonPackMatches = parsedReleases.filter(
+				({ episodeInfo }) =>
+					episodeInfo.isSeasonPack &&
+					isSingleSeasonMatch(episodeInfo) &&
+					seasonPackContainsEpisode(episodeInfo, targetEpisode)
+			);
+
+			if (isInteractiveSearch) {
+				if (exactEpisodeMatches.length > 0) {
+					return exactEpisodeMatches.map(({ release }) => release);
+				}
+				return seasonPackMatches.map(({ release, episodeInfo }) =>
+					this.createEpisodePointerRelease(release, targetEpisode, targetSeason, episodeInfo)
 				);
 			}
 
-			// Episode-only search (rare):
-			// - interactive: exact episode match only
-			// - automatic: include season packs as broad candidates
-			if (targetEpisode !== undefined) {
-				if (episodeInfo.isSeasonPack) {
-					return !isInteractiveSearch;
+			const allowed = new Set(
+				[...exactEpisodeMatches, ...seasonPackMatches].map(({ release }) => release)
+			);
+			return parsedReleases
+				.filter(({ release }) => allowed.has(release))
+				.map(({ release }) => release);
+		}
+
+		// Episode-only search (rare):
+		// - interactive: prefer exact episode match, fallback to season packs containing episode
+		// - automatic: include exact episodes and season packs
+		if (targetEpisode !== undefined) {
+			const exactEpisodeMatches = parsedReleases.filter(
+				({ episodeInfo }) =>
+					!episodeInfo.isSeasonPack && episodeInfo.episodes?.includes(targetEpisode)
+			);
+			const seasonPackMatches = parsedReleases.filter(({ episodeInfo }) =>
+				seasonPackContainsEpisode(episodeInfo, targetEpisode)
+			);
+
+			if (isInteractiveSearch) {
+				if (exactEpisodeMatches.length > 0) {
+					return exactEpisodeMatches.map(({ release }) => release);
 				}
-				return episodeInfo.episodes?.includes(targetEpisode);
+				return seasonPackMatches.map(({ release, episodeInfo }) =>
+					this.createEpisodePointerRelease(release, targetEpisode, undefined, episodeInfo)
+				);
 			}
 
-			return true;
-		});
+			const allowed = new Set(
+				[...exactEpisodeMatches, ...seasonPackMatches].map(({ release }) => release)
+			);
+			return parsedReleases
+				.filter(({ release }) => allowed.has(release))
+				.map(({ release }) => release);
+		}
+
+		return releases;
+	}
+
+	/**
+	 * Build an interactive episode pointer from a season pack release.
+	 * The pointer keeps the original download URL, but presents an episode-focused title.
+	 */
+	private createEpisodePointerRelease(
+		release: ReleaseResult,
+		targetEpisode: number,
+		targetSeason: number | undefined,
+		episodeInfo: NonNullable<ReturnType<typeof parseRelease>['episode']>
+	): ReleaseResult {
+		const season = targetSeason ?? episodeInfo.season;
+		const episodeToken = this.formatEpisodeToken(season, targetEpisode);
+		const readablePointer =
+			season === undefined
+				? `Episode ${targetEpisode}`
+				: `Season ${season} Episode ${targetEpisode}`;
+		const cleanedTitle = this.formatPointerDisplayTitle(release.title);
+
+		// Estimate per-episode size for display when pack episode count is known.
+		const episodeCount = episodeInfo.episodes?.length ?? 0;
+		const pointerSize =
+			episodeCount > 0 && release.size > 0
+				? Math.max(1, Math.round(release.size / episodeCount))
+				: release.size;
+
+		return {
+			...release,
+			guid: `${release.guid}::episode-pointer::${episodeToken.toLowerCase()}`,
+			title: `${readablePointer} - ${cleanedTitle}`,
+			size: pointerSize,
+			season,
+			episode: targetEpisode
+		};
+	}
+
+	private formatPointerDisplayTitle(title: string): string {
+		let normalized = title.trim();
+		normalized = normalized.replace(/^\s*[-–—]+\s*\/\s*/u, '');
+		normalized = normalized.replace(/^\s*\/\s*/u, '');
+		normalized = normalized.replace(/\b(S\d+E\d+(?:-\d+)?)\s+(\d{1,2})(?=\s*\[)/iu, '$1 of $2');
+		normalized = normalized.replace(
+			/^(.+?)\s*\/\s*(S\d+E\d+(?:-\d+)?(?:\s+of\s+\d+)?\b)/iu,
+			'$1: $2'
+		);
+		normalized = normalized.replace(/\s{2,}/g, ' ');
+		return normalized.trim();
+	}
+
+	private withFormattedSeasonPackTitle(release: ReleaseResult): ReleaseResult {
+		const formatted = this.formatPointerDisplayTitle(release.title);
+		if (formatted === release.title) {
+			return release;
+		}
+		return {
+			...release,
+			title: formatted
+		};
+	}
+
+	private formatEpisodeToken(season: number | undefined, episode: number): string {
+		if (season === undefined || season < 0) {
+			return `E${String(episode).padStart(2, '0')}`;
+		}
+		return `S${String(season).padStart(2, '0')}E${String(episode).padStart(2, '0')}`;
 	}
 
 	/**
@@ -1449,6 +1626,15 @@ export class SearchOrchestrator {
 		releases: ReleaseResult[],
 		criteria: SearchCriteria
 	): ReleaseResult[] {
+		const isTvSearchCriteria = criteria.searchType === 'tv';
+		const hasEpisodeTarget = isTvSearchCriteria && criteria.episode !== undefined;
+		const hasSeasonTarget = isTvSearchCriteria && criteria.season !== undefined;
+		const allowInteractiveTvFallback =
+			isTvSearchCriteria &&
+			criteria.searchSource === 'interactive' &&
+			!hasEpisodeTarget &&
+			!hasSeasonTarget;
+
 		// Collect all expected titles: query + searchTitles
 		const expectedTitles: string[] = [];
 		if (criteria.query) expectedTitles.push(criteria.query);
@@ -1482,13 +1668,26 @@ export class SearchOrchestrator {
 		const beforeCount = releases.length;
 		const filtered = releases.filter((release) => {
 			const releaseName = normalize(extractReleaseName(release.title));
-			if (releaseName.length === 0) return true; // Can't parse, keep it
+			// If we cannot derive a comparable ASCII title token, keep only for
+			// interactive show-level browsing; episode/season lookups stay strict.
+			if (releaseName.length === 0) return allowInteractiveTvFallback;
 
 			// Check if any expected title is similar enough to the release name
 			// Using Levenshtein distance-based similarity instead of substring matching
 			// to prevent false positives like "TransformersOne" matching "Transformers"
 			const matches = normalizedExpected.some((expected) => {
-				return this.calculateTitleSimilarity(releaseName, expected) >= 0.7;
+				const similarity = this.calculateTitleSimilarity(releaseName, expected);
+				if (similarity >= 0.7) {
+					return true;
+				}
+
+				// Accept strong containment matches for tracker titles that append
+				// extensive metadata after the base title (common on RuTracker).
+				return (
+					releaseName.length >= 5 &&
+					expected.length >= 5 &&
+					(releaseName.includes(expected) || expected.includes(releaseName))
+				);
 			});
 
 			if (!matches) {
@@ -1511,10 +1710,29 @@ export class SearchOrchestrator {
 					before: beforeCount,
 					after: filtered.length,
 					removed: beforeCount - filtered.length,
-					expectedTitles: expectedTitles.slice(0, 3)
+					expectedTitles: expectedTitles.slice(0, 3),
+					searchType: criteria.searchType,
+					searchSource: criteria.searchSource
 				},
 				'[SearchOrchestrator] Title relevance filter removed irrelevant results'
 			);
+		}
+
+		// For interactive TV, avoid a hard zero-result failure mode caused by
+		// localization/transliteration mismatches in tracker titles.
+		if (allowInteractiveTvFallback && beforeCount > 0 && filtered.length === 0) {
+			logger.info(
+				{
+					before: beforeCount,
+					expectedTitles: expectedTitles.slice(0, 3),
+					searchType: criteria.searchType,
+					searchSource: criteria.searchSource,
+					season: isTvSearchCriteria ? criteria.season : undefined,
+					episode: isTvSearchCriteria ? criteria.episode : undefined
+				},
+				'[SearchOrchestrator] Title relevance fallback applied for interactive TV search'
+			);
+			return releases;
 		}
 
 		return filtered;
@@ -1686,19 +1904,50 @@ export class SearchOrchestrator {
 
 			// PRIORITY 2: Title + Year Fallback (if no ID match possible)
 			if (hasSearchTitles && hasSearchYear) {
+				const isInteractiveSearch = criteria.searchSource === 'interactive';
+
 				// Parse release title
 				const parsedRelease = getParsed();
 
-				// Check title similarity
-				const releaseName = this.normalizeForComparison(parsedRelease.cleanTitle);
-				const titleMatch = criteria.searchTitles!.some((expectedTitle) => {
-					const expectedName = this.normalizeForComparison(expectedTitle);
-					const similarity = this.calculateTitleSimilarity(releaseName, expectedName);
-					return similarity >= 0.7;
-				});
+				// Check title similarity. Include query as a fallback candidate in case
+				// alternate-title storage is incomplete for this language.
+				const titleCandidates = [
+					...criteria.searchTitles!,
+					...(criteria.query ? [criteria.query] : [])
+				];
+				const normalizedCandidates = titleCandidates
+					.map((candidate) => this.normalizeForComparison(candidate))
+					.filter((candidate) => candidate.length > 0);
 
-				// Check year (allow 1 year difference for release/production year differences)
-				const yearMatch = parsedRelease.year && Math.abs(parsedRelease.year - searchYear!) <= 1;
+				const releaseName = this.normalizeForComparison(parsedRelease.cleanTitle);
+				const hasAnyLetterOrNumber = /[\p{L}\p{N}]/u.test(parsedRelease.cleanTitle);
+				const isUnmappableLocalizedTitle = releaseName.length === 0 && hasAnyLetterOrNumber;
+
+				let titleMatch = true;
+				if (normalizedCandidates.length > 0 && releaseName.length > 0) {
+					titleMatch = normalizedCandidates.some((expectedName) => {
+						const similarity = this.calculateTitleSimilarity(releaseName, expectedName);
+						if (similarity >= 0.7) {
+							return true;
+						}
+						// Accept strong containment matches (e.g. release title has extra descriptors).
+						return (
+							releaseName.length >= 5 &&
+							expectedName.length >= 5 &&
+							(releaseName.includes(expectedName) || expectedName.includes(releaseName))
+						);
+					});
+				} else if (isUnmappableLocalizedTitle) {
+					// Interactive searches should not blank out results when title validation
+					// is impossible due to script mismatch (e.g. Cyrillic-only tracker titles).
+					titleMatch = isInteractiveSearch;
+				}
+
+				// Check year (allow 1 year difference for release/production year differences).
+				// If year is absent in title, allow interactive fallback.
+				const yearMatch = parsedRelease.year
+					? Math.abs(parsedRelease.year - searchYear!) <= 1
+					: isInteractiveSearch;
 
 				if (!titleMatch || !yearMatch) {
 					logger.debug(
@@ -1708,7 +1957,8 @@ export class SearchOrchestrator {
 							parsedYear: parsedRelease.year,
 							criteriaYear: searchYear,
 							titleMatch,
-							yearMatch
+							yearMatch,
+							isInteractiveSearch
 						},
 						'[SearchOrchestrator] Title/Year mismatch - removing release'
 					);

@@ -204,6 +204,7 @@ export interface HistoryItemWithMedia extends HistoryItem {
  */
 export interface GrabRequest {
 	// Release info
+	guid?: string;
 	downloadUrl?: string;
 	magnetUrl?: string;
 	infoHash?: string;

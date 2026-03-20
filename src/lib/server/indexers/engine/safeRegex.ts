@@ -8,6 +8,18 @@ import { createChildLogger } from '$lib/logging';
 const logger = createChildLogger({ logDomain: 'indexers' as const });
 
 /**
+ * Inline regex flags commonly found in Cardigann/Prowlarr definitions.
+ * JavaScript does not support PCRE-style inline groups like `(?i)` directly,
+ * so we normalize leading flag groups into RegExp flags.
+ */
+const INLINE_FLAG_MAP: Record<string, string> = {
+	i: 'i',
+	m: 'm',
+	s: 's',
+	u: 'u'
+};
+
+/**
  * Maximum input length to process with regex.
  */
 const MAX_INPUT_LENGTH = 100000;
@@ -58,16 +70,73 @@ export function isPatternSafe(pattern: string): boolean {
 }
 
 /**
+ * Normalize leading PCRE-style inline flag groups (e.g. `(?i)` / `(?-i)`).
+ * Returns a JavaScript-compatible pattern + merged flag string.
+ */
+function normalizePatternAndFlags(
+	pattern: string,
+	flags?: string
+): { pattern: string; flags: string } {
+	let normalizedPattern = pattern;
+	let normalizedFlags = flags ?? '';
+
+	const addFlag = (flag: string): void => {
+		if (!normalizedFlags.includes(flag)) {
+			normalizedFlags += flag;
+		}
+	};
+
+	const removeFlag = (flag: string): void => {
+		normalizedFlags = normalizedFlags
+			.split('')
+			.filter((existing) => existing !== flag)
+			.join('');
+	};
+
+	while (true) {
+		const inlineMatch = normalizedPattern.match(/^\(\?([a-zA-Z-]+)\)/);
+		if (!inlineMatch) break;
+
+		const inlineFlags = inlineMatch[1];
+		normalizedPattern = normalizedPattern.slice(inlineMatch[0].length);
+
+		let removeMode = false;
+		for (const char of inlineFlags) {
+			if (char === '-') {
+				removeMode = true;
+				continue;
+			}
+
+			const mapped = INLINE_FLAG_MAP[char.toLowerCase()];
+			if (!mapped) continue;
+
+			if (removeMode) {
+				removeFlag(mapped);
+			} else {
+				addFlag(mapped);
+			}
+		}
+	}
+
+	return {
+		pattern: normalizedPattern,
+		flags: normalizedFlags
+	};
+}
+
+/**
  * Safely create a RegExp, returning null if the pattern is invalid or dangerous.
  */
 export function createSafeRegex(pattern: string, flags?: string): RegExp | null {
+	const normalized = normalizePatternAndFlags(pattern, flags);
+
 	// Validate pattern safety
-	if (!isPatternSafe(pattern)) {
+	if (!isPatternSafe(normalized.pattern)) {
 		return null;
 	}
 
 	try {
-		return new RegExp(pattern, flags);
+		return new RegExp(normalized.pattern, normalized.flags);
 	} catch (err) {
 		logger.warn(
 			{

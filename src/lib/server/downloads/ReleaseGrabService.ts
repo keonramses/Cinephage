@@ -15,6 +15,11 @@ import { getDownloadClientManager } from '$lib/server/downloadClients/DownloadCl
 import { downloadMonitor } from '$lib/server/downloadClients/monitoring/index.js';
 import { ReleaseParser } from '$lib/server/indexers/parser/ReleaseParser.js';
 import { getDownloadResolutionService } from './DownloadResolutionService.js';
+import {
+	buildEpisodePointerFileSelection,
+	parseEpisodePointerFromGuid,
+	parseEpisodePointerFromTitle
+} from './episode-pointer.js';
 import { getNzbValidationService } from './nzb/index.js';
 import { checkNzbAvailability } from './nzb/NzbAvailabilityChecker.js';
 import { strmService, StrmService, getStreamingBaseUrl } from '$lib/server/streaming/index.js';
@@ -330,6 +335,53 @@ class ReleaseGrabService {
 			'[ReleaseGrab] Download resolved'
 		);
 
+		const episodePointerTarget =
+			parseEpisodePointerFromGuid(release.guid) ?? parseEpisodePointerFromTitle(release.title);
+		let pointerFileSelection:
+			| {
+					fileIndices: number[];
+					allFileIndices?: number[];
+					filePaths?: string[];
+			  }
+			| undefined;
+
+		if (episodePointerTarget) {
+			const supportsFileSelection =
+				clientInstance.implementation === 'qbittorrent' ||
+				clientInstance.implementation === 'transmission';
+			if (!supportsFileSelection) {
+				return {
+					success: false,
+					error: `Download client "${clientInstance.implementation}" does not support episode pointer downloads`
+				};
+			}
+
+			if (!resolved.torrentFile) {
+				return {
+					success: false,
+					error:
+						'Episode pointer download requires torrent metadata, but only a magnet/download URL was available'
+				};
+			}
+
+			const selection = await buildEpisodePointerFileSelection(
+				resolved.torrentFile,
+				episodePointerTarget
+			);
+			if (selection.fileIndices.length === 0) {
+				return {
+					success: false,
+					error: `Could not map ${episodePointerTarget.token} to files inside this season pack`
+				};
+			}
+
+			pointerFileSelection = {
+				fileIndices: selection.fileIndices,
+				allFileIndices: selection.allFileIndices,
+				filePaths: selection.filePaths
+			};
+		}
+
 		// Send to download client
 		let hash: string;
 		let existingTorrent: DownloadInfo | null = null;
@@ -343,13 +395,22 @@ class ReleaseGrabService {
 				paused,
 				priority: clientConfig.recentPriority,
 				seedRatioLimit,
-				seedTimeLimit
+				seedTimeLimit,
+				fileSelection: pointerFileSelection
 			});
 		} catch (addError) {
 			// Check if this is a duplicate torrent error
 			const isDuplicate = (addError as Error & { isDuplicate?: boolean }).isDuplicate;
 			existingTorrent =
 				(addError as Error & { existingTorrent?: DownloadInfo }).existingTorrent || null;
+
+			if (isDuplicate && existingTorrent && episodePointerTarget) {
+				return {
+					success: false,
+					error:
+						'Episode pointer already exists in the client. Remove the existing torrent and retry to apply episode-only file selection.'
+				};
+			}
 
 			if (isDuplicate && existingTorrent) {
 				logger.info(

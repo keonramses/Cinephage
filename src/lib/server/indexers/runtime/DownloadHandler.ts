@@ -359,6 +359,30 @@ export class DownloadHandler {
 		}
 
 		const method = download.method?.toUpperCase() === 'POST' ? 'POST' : 'GET';
+		const candidateUrls: string[] = [downloadUrl];
+		if (context.releaseDetailsUrl && context.releaseDetailsUrl !== downloadUrl) {
+			candidateUrls.push(context.releaseDetailsUrl);
+		}
+		const contentCache = new Map<string, string>();
+
+		const getPageContent = async (url: string): Promise<string | null> => {
+			const cached = contentCache.get(url);
+			if (cached !== undefined) {
+				return cached;
+			}
+			try {
+				const response = await cloudflareFetch(url, {
+					method: 'GET',
+					headers,
+					timeout: 30000,
+					encoding: context.encoding
+				});
+				contentCache.set(url, response.body);
+				return response.body;
+			} catch {
+				return null;
+			}
+		};
 
 		for (const selector of selectors) {
 			try {
@@ -420,41 +444,50 @@ export class DownloadHandler {
 				}
 
 				let content: string;
-
-				// Use before response if selector specifies it
 				if (selector.usebeforeresponse && beforeResponse) {
 					content = beforeResponse.content;
-				} else {
-					const response = await cloudflareFetch(downloadUrl, {
-						method: 'GET',
-						headers,
-						timeout: 30000,
-						encoding: context.encoding
-					});
-					content = response.body;
-				}
+					const $ = cheerio.load(content);
+					const result = this.selectorEngine.selectHtml(
+						$,
+						$.root(),
+						selector as SelectorBlock,
+						false
+					);
+					if (!result.value) {
+						continue;
+					}
 
-				const $ = cheerio.load(content);
+					const resolvedUrl = this.resolveUrl(result.value, downloadUrl);
+					if (resolvedUrl.startsWith('magnet:')) {
+						return {
+							success: true,
+							magnetUrl: resolvedUrl,
+							request: {
+								url: resolvedUrl,
+								method: method as 'GET' | 'POST',
+								headers
+							}
+						};
+					}
 
-				// Extract URL using selector
-				const result = this.selectorEngine.selectHtml(
-					$,
-					$.root(),
-					selector as SelectorBlock,
-					false
-				);
-				if (!result.value) {
-					continue; // Try next selector
-				}
+					if (this.definition.testlinktorrent !== false) {
+						const testResult = await this.testTorrentLink(resolvedUrl, headers);
+						if (!testResult.valid) {
+							continue;
+						}
+						return {
+							success: true,
+							torrentData: testResult.data,
+							request: {
+								url: resolvedUrl,
+								method: method as 'GET' | 'POST',
+								headers
+							}
+						};
+					}
 
-				// Resolve the extracted URL
-				const resolvedUrl = this.resolveUrl(result.value, downloadUrl);
-
-				// Check if it's a magnet link
-				if (resolvedUrl.startsWith('magnet:')) {
 					return {
 						success: true,
-						magnetUrl: resolvedUrl,
 						request: {
 							url: resolvedUrl,
 							method: method as 'GET' | 'POST',
@@ -463,15 +496,54 @@ export class DownloadHandler {
 					};
 				}
 
-				// Optionally verify it's a valid torrent
-				if (this.definition.testlinktorrent !== false) {
-					const testResult = await this.testTorrentLink(resolvedUrl, headers);
-					if (!testResult.valid) {
-						continue; // Try next selector
+				for (const candidateUrl of candidateUrls) {
+					const candidateContent = await getPageContent(candidateUrl);
+					if (!candidateContent) {
+						continue;
 					}
+
+					const $ = cheerio.load(candidateContent);
+					const result = this.selectorEngine.selectHtml(
+						$,
+						$.root(),
+						selector as SelectorBlock,
+						false
+					);
+					if (!result.value) {
+						continue;
+					}
+
+					const resolvedUrl = this.resolveUrl(result.value, candidateUrl);
+					if (resolvedUrl.startsWith('magnet:')) {
+						return {
+							success: true,
+							magnetUrl: resolvedUrl,
+							request: {
+								url: resolvedUrl,
+								method: method as 'GET' | 'POST',
+								headers
+							}
+						};
+					}
+
+					if (this.definition.testlinktorrent !== false) {
+						const testResult = await this.testTorrentLink(resolvedUrl, headers);
+						if (!testResult.valid) {
+							continue;
+						}
+						return {
+							success: true,
+							torrentData: testResult.data,
+							request: {
+								url: resolvedUrl,
+								method: method as 'GET' | 'POST',
+								headers
+							}
+						};
+					}
+
 					return {
 						success: true,
-						torrentData: testResult.data,
 						request: {
 							url: resolvedUrl,
 							method: method as 'GET' | 'POST',
@@ -479,15 +551,6 @@ export class DownloadHandler {
 						}
 					};
 				}
-
-				return {
-					success: true,
-					request: {
-						url: resolvedUrl,
-						method: method as 'GET' | 'POST',
-						headers
-					}
-				};
 			} catch {
 				// Try next selector on error
 				continue;
