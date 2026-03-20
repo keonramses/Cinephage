@@ -167,7 +167,8 @@ class DownloadResolutionService {
 	): Promise<ResolvedDownload> {
 		const normalizedCommentsUrl = this.normalizeRuTrackerForumUrl(commentsUrl);
 		const normalizedDownloadUrl = this.normalizeRuTrackerForumUrl(downloadUrl) ?? downloadUrl;
-		const fallbackDetailsUrl = normalizedCommentsUrl ?? this.deriveDetailsUrl(normalizedDownloadUrl);
+		const fallbackDetailsUrl =
+			normalizedCommentsUrl ?? this.deriveDetailsUrl(normalizedDownloadUrl);
 
 		logger.debug(
 			{
@@ -287,7 +288,11 @@ class DownloadResolutionService {
 				return primaryResult;
 			}
 
-			if (fallbackDetailsUrl && fallbackDetailsUrl !== normalizedDownloadUrl && !preferDetailsFirst) {
+			if (
+				fallbackDetailsUrl &&
+				fallbackDetailsUrl !== normalizedDownloadUrl &&
+				!preferDetailsFirst
+			) {
 				logger.debug(
 					{
 						indexerId,

@@ -31,9 +31,7 @@ function inferCompleteFromEpisodeRange(
 	const COMPLETE_EPISODE_THRESHOLD = 70;
 	const includesFullRange = totalEpisodes ? endEpisode === totalEpisodes : true;
 	const largeEpisodeSpan =
-		startEpisode === 1 &&
-		endEpisode >= COMPLETE_EPISODE_THRESHOLD &&
-		includesFullRange;
+		startEpisode === 1 && endEpisode >= COMPLETE_EPISODE_THRESHOLD && includesFullRange;
 
 	if (season === 1 && largeEpisodeSpan) {
 		return {
@@ -133,8 +131,7 @@ const EPISODE_PATTERNS: Array<{
 		}
 	},
 	{
-		pattern:
-			/Сезоны?[\s:._-]*(\d{1,2})\s*(?:[-–—]|до)\s*(\d{1,2})(?:\s*(?:из|of|\/)\s*\d{1,2})?/i,
+		pattern: /Сезоны?[\s:._-]*(\d{1,2})\s*(?:[-–—]|до)\s*(\d{1,2})(?:\s*(?:из|of|\/)\s*\d{1,2})?/i,
 		extract: (match) => {
 			const startSeason = parseInt(match[1], 10);
 			const endSeason = parseInt(match[2], 10);
@@ -264,12 +261,7 @@ const EPISODE_PATTERNS: Array<{
 				season,
 				episodes: episodes.length > 0 ? episodes : [startEpisode],
 				isSeasonPack: true,
-				...inferCompleteFromEpisodeRange(
-					season,
-					startEpisode,
-					endEpisode,
-					totalEpisodes
-				)
+				...inferCompleteFromEpisodeRange(season, startEpisode, endEpisode, totalEpisodes)
 			};
 		}
 	},

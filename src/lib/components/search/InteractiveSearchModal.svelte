@@ -300,10 +300,7 @@
 		// Title-based fallback for tracker formats where parser metadata may be incomplete
 		const title = release.title;
 		if (/\bS\d{1,2}[\s._-]*[-–—][\s._-]*S?\d{1,2}\b/i.test(title)) return true;
-		if (
-			/\bS\d{1,2}[\s._-]?E\d{1,3}\s*[-–—]\s*S\d{1,2}[\s._-]?E\d{1,3}\b/i.test(title)
-		)
-			return true;
+		if (/\bS\d{1,2}[\s._-]?E\d{1,3}\s*[-–—]\s*S\d{1,2}[\s._-]?E\d{1,3}\b/i.test(title)) return true;
 		if (/\b\d{1,2}x\d{1,3}\s*[-–—]\s*\d{1,2}x\d{1,3}\b/i.test(title)) return true;
 		if (
 			/\bSeasons?[\s:._-]*\d{1,2}\s*(?:[-–—]|to|through|thru)\s*\d{1,2}(?:\s*(?:of|\/)\s*\d{1,2})?\b/i.test(
@@ -311,16 +308,22 @@
 			)
 		)
 			return true;
-		if (/\bСезоны?[\s:._-]*\d{1,2}\s*(?:[-–—]|до)\s*\d{1,2}(?:\s*(?:из|of|\/)\s*\d{1,2})?\b/i.test(title))
+		if (
+			/\bСезоны?[\s:._-]*\d{1,2}\s*(?:[-–—]|до)\s*\d{1,2}(?:\s*(?:из|of|\/)\s*\d{1,2})?\b/i.test(
+				title
+			)
+		)
 			return true;
-		if (/\b(?:every[\s._-]?season|all[\s._-]?seasons?|полный[\s._-]*сериал|все[\s._-]*сезоны)\b/i.test(title))
+		if (
+			/\b(?:every[\s._-]?season|all[\s._-]?seasons?|полный[\s._-]*сериал|все[\s._-]*сезоны)\b/i.test(
+				title
+			)
+		)
 			return true;
 
 		// Guardrail for generic words like "collection"/"bundle": require TV context nearby.
 		const hasTvContext =
-			/\b(?:series|seasons?|episodes?|s\d{1,2}(?:e\d{1,3})?|(?:\d{1,2})x\d{1,3})\b/i.test(
-				title
-			);
+			/\b(?:series|seasons?|episodes?|s\d{1,2}(?:e\d{1,3})?|(?:\d{1,2})x\d{1,3})\b/i.test(title);
 		if (
 			hasTvContext &&
 			/\b(?:complete[\s._-]?collection|full[\s._-]?collection|mega[\s._-]?pack|bundle)\b/i.test(
@@ -582,9 +585,7 @@
 			<div class="mb-4 space-y-2">
 				<div class="flex flex-wrap items-center gap-4 text-sm text-base-content/70">
 					{#if searchMode === 'multiSeasonPack'}
-						<span
-							>{filteredReleases.length} of {modeBaseReleases.length} multi-pack matches</span
-						>
+						<span>{filteredReleases.length} of {modeBaseReleases.length} multi-pack matches</span>
 						<span class="text-base-content/50">from {rawReleaseCount} raw results</span>
 						{#if modeRejectedCount}
 							<span class="text-warning">{modeRejectedCount} rejected</span>
@@ -878,11 +879,12 @@
 			<div class="flex flex-col items-center justify-center py-12">
 				{#if searchMode === 'multiSeasonPack'}
 					{#if rawReleaseCount > 0}
-						<div class="mb-4 max-w-xl rounded-lg border border-base-300 bg-base-200 p-3 text-center text-sm">
+						<div
+							class="mb-4 max-w-xl rounded-lg border border-base-300 bg-base-200 p-3 text-center text-sm"
+						>
 							<p class="font-medium text-base-content/80">Raw results were found</p>
 							<p class="mt-1 text-base-content/60">
-								{rawReleaseCount} releases matched the title, but none matched
-								complete/multi-season rules.
+								{rawReleaseCount} releases matched the title, but none matched complete/multi-season rules.
 							</p>
 						</div>
 					{/if}

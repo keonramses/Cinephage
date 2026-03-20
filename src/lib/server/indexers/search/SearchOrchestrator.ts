@@ -1443,9 +1443,7 @@ export class SearchOrchestrator {
 		// Season-only search: filter to single-season packs matching the target season
 		if (targetSeason !== undefined && targetEpisode === undefined) {
 			return parsedReleases
-				.filter(
-					({ episodeInfo }) => episodeInfo.isSeasonPack && isSingleSeasonMatch(episodeInfo)
-				)
+				.filter(({ episodeInfo }) => episodeInfo.isSeasonPack && isSingleSeasonMatch(episodeInfo))
 				.map(({ release }) => this.withFormattedSeasonPackTitle(release));
 		}
 
@@ -1536,7 +1534,9 @@ export class SearchOrchestrator {
 		// Estimate per-episode size for display when pack episode count is known.
 		const episodeCount = episodeInfo.episodes?.length ?? 0;
 		const pointerSize =
-			episodeCount > 0 && release.size > 0 ? Math.max(1, Math.round(release.size / episodeCount)) : release.size;
+			episodeCount > 0 && release.size > 0
+				? Math.max(1, Math.round(release.size / episodeCount))
+				: release.size;
 
 		return {
 			...release,
@@ -1552,10 +1552,7 @@ export class SearchOrchestrator {
 		let normalized = title.trim();
 		normalized = normalized.replace(/^\s*[-–—]+\s*\/\s*/u, '');
 		normalized = normalized.replace(/^\s*\/\s*/u, '');
-		normalized = normalized.replace(
-			/\b(S\d+E\d+(?:-\d+)?)\s+(\d{1,2})(?=\s*\[)/iu,
-			'$1 of $2'
-		);
+		normalized = normalized.replace(/\b(S\d+E\d+(?:-\d+)?)\s+(\d{1,2})(?=\s*\[)/iu, '$1 of $2');
 		normalized = normalized.replace(
 			/^(.+?)\s*\/\s*(S\d+E\d+(?:-\d+)?(?:\s+of\s+\d+)?\b)/iu,
 			'$1: $2'

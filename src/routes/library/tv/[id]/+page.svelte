@@ -404,6 +404,7 @@
 		const now = new Date().toISOString().split('T')[0];
 		let count = 0;
 		for (const season of seasons) {
+			if (season.seasonNumber === 0) continue;
 			for (const episode of season.episodes) {
 				if (!episode.file && episode.airDate && episode.airDate <= now) {
 					// Don't count as missing if it's downloading

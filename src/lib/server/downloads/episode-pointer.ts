@@ -97,10 +97,7 @@ function includesEpisodeToken(path: string, season: number | undefined, episode:
 		const seasonPadded = String(season).padStart(2, '0');
 		const seasonPatterns = [
 			new RegExp(`(?:^|[^a-z0-9])s0?${season}[^a-z0-9]?e0?${episode}(?:[^a-z0-9]|$)`, 'i'),
-			new RegExp(
-				`(?:^|[^a-z0-9])s${seasonPadded}[^a-z0-9]*e${episodePadded}(?:[^a-z0-9]|$)`,
-				'i'
-			),
+			new RegExp(`(?:^|[^a-z0-9])s${seasonPadded}[^a-z0-9]*e${episodePadded}(?:[^a-z0-9]|$)`, 'i'),
 			new RegExp(`(?:^|[^a-z0-9])${season}x0?${episode}(?:[^a-z0-9]|$)`, 'i'),
 			new RegExp(`(?:^|[^a-z0-9])${seasonPadded}x${episodePadded}(?:[^a-z0-9]|$)`, 'i')
 		];
@@ -183,7 +180,9 @@ export function buildEpisodePointerFileSelectionFromPaths(
 	return matchEpisodeFiles(files, target);
 }
 
-export function parseEpisodePointerFromTitle(title: string | undefined): EpisodePointerTarget | null {
+export function parseEpisodePointerFromTitle(
+	title: string | undefined
+): EpisodePointerTarget | null {
 	if (!title) {
 		return null;
 	}
@@ -234,7 +233,12 @@ export async function buildEpisodePointerFileSelection(
 	target: EpisodePointerTarget
 ): Promise<EpisodePointerFileSelection> {
 	const parsed = await parseTorrent(Buffer.from(torrentFile));
-	if (!parsed || !('files' in parsed) || !Array.isArray(parsed.files) || parsed.files.length === 0) {
+	if (
+		!parsed ||
+		!('files' in parsed) ||
+		!Array.isArray(parsed.files) ||
+		parsed.files.length === 0
+	) {
 		return { fileIndices: [], allFileIndices: [], filePaths: [] };
 	}
 
