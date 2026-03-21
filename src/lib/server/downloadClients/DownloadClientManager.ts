@@ -25,7 +25,6 @@ import { RTorrentClient } from './rtorrent/RTorrentClient';
 import { Aria2Client } from './aria2/Aria2Client';
 import { SABnzbdClient, type SABnzbdConfig } from './sabnzbd';
 import { NZBGetClient } from './nzbget';
-import { NZBMountClient } from './nzbmount/NZBMountClient';
 
 /**
  * Protocol type for download clients.
@@ -541,13 +540,23 @@ export class DownloadClientManager {
 			case 'aria2':
 				return new Aria2Client(config);
 
-			case 'sabnzbd':
-				return new SABnzbdClient(config as SABnzbdConfig);
+			case 'sabnzbd': {
+				const sabConfig = config as SABnzbdConfig;
+				const isMountMode = sabConfig.mountMode === 'nzbdav' || sabConfig.mountMode === 'altmount';
+				return new SABnzbdClient({
+					...sabConfig,
+					normalizeCategoryDir: sabConfig.normalizeCategoryDir ?? isMountMode
+				});
+			}
 
 			case 'nzbget':
 				return new NZBGetClient(config);
 			case 'nzb-mount':
-				return new NZBMountClient(config);
+				return new SABnzbdClient({
+					...(config as SABnzbdConfig),
+					implementation: 'nzb-mount',
+					normalizeCategoryDir: true
+				});
 
 			// Future implementations
 

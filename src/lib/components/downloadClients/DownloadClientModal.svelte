@@ -86,7 +86,7 @@
 	let useSsl = $state(false);
 	let urlBase = $state('');
 	let urlBaseEnabled = $state(false);
-	let mountMode = $state<'nzbdav' | 'altmount'>('nzbdav');
+	let mountMode = $state<'nzbdav' | 'altmount' | ''>('');
 	let username = $state('');
 	let password = $state('');
 
@@ -127,6 +127,9 @@
 	const visibleClientDefinitions = $derived(
 		allowNntp ? clientDefinitions : clientDefinitions.filter((d) => d.id !== 'nntp')
 	);
+	const pickerClientDefinitions = $derived(
+		visibleClientDefinitions.filter((d) => d.id !== 'nzb-mount')
+	);
 	// Check if selected client uses API key auth (SABnzbd)
 	const usesApiKey = $derived(
 		selectedDefinition?.protocol === 'usenet' &&
@@ -134,7 +137,12 @@
 	);
 	// Check if this is an NNTP server
 	const isNntpServer = $derived(implementation === 'nntp');
+	const isSabnzbd = $derived(implementation === 'sabnzbd');
 	const isNzbMount = $derived(implementation === 'nzb-mount');
+	const isSabCompatibleMountClient = $derived(isSabnzbd || isNzbMount);
+	const isMountModeClient = $derived(
+		isSabCompatibleMountClient && (mountMode === 'nzbdav' || mountMode === 'altmount')
+	);
 	const MAX_NAME_LENGTH = 20;
 	const nameTooLong = $derived(name.length > MAX_NAME_LENGTH);
 	const urlBasePlaceholder = $derived(
@@ -180,7 +188,8 @@
 			const clientUrlBase = (client as DownloadClient | undefined)?.urlBase ?? '';
 			urlBase = clientUrlBase;
 			urlBaseEnabled = !!clientUrlBase;
-			mountMode = (client as DownloadClient | undefined)?.mountMode ?? 'nzbdav';
+			const storedMountMode = (client as DownloadClient | undefined)?.mountMode ?? null;
+			mountMode = storedMountMode === 'altmount' || storedMountMode === 'nzbdav' ? 'nzbdav' : '';
 			username = client?.username ?? '';
 			password = '';
 
@@ -230,6 +239,8 @@
 				}
 				if (newImpl === 'nzb-mount') {
 					mountMode = 'nzbdav';
+				} else if (newImpl === 'sabnzbd') {
+					mountMode = '';
 				}
 			}
 		}
@@ -274,7 +285,14 @@
 			port,
 			useSsl,
 			urlBase: urlBaseEnabled ? normalizedUrlBase || null : null,
-			mountMode: implementation === 'nzb-mount' ? mountMode : null,
+			mountMode:
+				implementation === 'nzb-mount'
+					? mountMode || 'nzbdav'
+					: implementation === 'sabnzbd'
+						? mountMode
+							? 'nzbdav'
+							: null
+						: null,
 			username: normalizedUsername || null,
 			password: password || null,
 			movieCategory,
@@ -383,7 +401,7 @@
 			<p class="text-base-content/70">Select the type of download client you want to add:</p>
 
 			<div class="grid grid-cols-1 gap-2 sm:grid-cols-2 sm:gap-3">
-				{#each visibleClientDefinitions as def (def.id)}
+				{#each pickerClientDefinitions as def (def.id)}
 					<button
 						type="button"
 						class="card cursor-pointer border-2 border-transparent bg-base-200 text-left transition-all hover:border-primary hover:bg-primary/10"
@@ -506,7 +524,7 @@
 							bind:urlBaseEnabled
 							bind:urlBase
 							{urlBasePlaceholder}
-							showMountMode={isNzbMount}
+							showMountMode={isSabCompatibleMountClient}
 							bind:mountMode
 						/>
 					{/if}
@@ -608,7 +626,7 @@
 							bind:tempPathLocal
 							bind:tempPathRemote
 							isSabnzbd={usesApiKey}
-							{isNzbMount}
+							isNzbMount={isMountModeClient}
 							onBrowse={openFolderBrowser}
 						/>
 					{/if}

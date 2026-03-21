@@ -24,7 +24,7 @@
 		urlBaseDescription?: string;
 		urlBasePlaceholder?: string;
 		showMountMode?: boolean;
-		mountMode?: 'nzbdav' | 'altmount';
+		mountMode?: 'nzbdav' | 'altmount' | '';
 	}
 
 	let {
@@ -95,17 +95,17 @@
 		{#if showMountMode}
 			<div class="mt-3">
 				<label class="label py-1" for="mountMode">
-					<span class="label-text">API Variant</span>
+					<span class="label-text">Client Behavior</span>
 				</label>
 				<select id="mountMode" class="select-bordered select select-sm" bind:value={mountMode}>
-					<option value="nzbdav">NZBDav</option>
-					<option value="altmount">Altmount</option>
+					<option value="">Standard SABnzbd</option>
+					<option value="nzbdav">Altmount / NZBDav (Mount Mode)</option>
 				</select>
-				<div class="label py-1">
-					<span class="label-text-alt text-xs text-base-content/60">
-						Select the API variant to tailor the connection test.
-					</span>
-				</div>
+				<p
+					class="mt-1 text-xs leading-relaxed wrap-break-word whitespace-normal text-base-content/60"
+				>
+					Mount Mode enables .strm imports.
+				</p>
 			</div>
 		{/if}
 	</div>

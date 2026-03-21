@@ -1101,10 +1101,13 @@ export class DownloadMonitorService extends EventEmitter implements BackgroundSe
 				}
 			}
 
-			// Fallback for SABnzbd: try matching by title
+			// Fallback for SABnzbd-compatible clients: try matching by title
 			// SABnzbd generates new nzo_id when downloads are re-added,
 			// unlike torrent hashes which are persistent
-			if (!download && client.implementation === 'sabnzbd') {
+			if (
+				!download &&
+				(client.implementation === 'sabnzbd' || client.implementation === 'nzb-mount')
+			) {
 				download = downloads.find((d) => d.name.toLowerCase() === queueItem.title.toLowerCase());
 				if (download) matchedBy = 'title';
 			}

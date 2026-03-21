@@ -20,7 +20,9 @@ import type {
 	SabnzbdQueueItem,
 	SabnzbdHistoryItem,
 	SabnzbdDownloadStatus,
-	SabnzbdConfig as SabnzbdConfigResponse
+	SabnzbdConfig as SabnzbdConfigResponse,
+	SabnzbdFullStatus,
+	SabnzbdWarning
 } from './types';
 import { mapPriorityToSabnzbd } from './types';
 
@@ -37,6 +39,7 @@ const NZB_FETCH_USER_AGENT =
 export interface SABnzbdConfig extends DownloadClientConfig {
 	apiKey?: string | null;
 	urlBase?: string;
+	mountMode?: 'nzbdav' | 'altmount' | null;
 	normalizeCategoryDir?: boolean;
 }
 
@@ -52,7 +55,7 @@ interface ConfigCache {
  * SABnzbd download client implementation.
  */
 export class SABnzbdClient implements IDownloadClient {
-	readonly implementation = 'sabnzbd';
+	readonly implementation: 'sabnzbd' | 'nzb-mount';
 
 	private proxy: SABnzbdProxy;
 	private config: SABnzbdConfig;
@@ -61,6 +64,43 @@ export class SABnzbdClient implements IDownloadClient {
 	constructor(config: SABnzbdConfig) {
 		this.config = config;
 		this.proxy = new SABnzbdProxy(this.buildSettings());
+		this.implementation = this.isNzbMountVariant() ? 'nzb-mount' : 'sabnzbd';
+	}
+
+	/**
+	 * Whether this client should use NZB-Mount compatibility behavior.
+	 */
+	private isNzbMountVariant(): boolean {
+		return this.config.implementation === 'nzb-mount';
+	}
+
+	/**
+	 * Whether category paths should be normalized against complete_dir.
+	 * NZB-Mount variants need this behavior by default.
+	 */
+	private shouldNormalizeCategoryDir(): boolean {
+		return this.config.normalizeCategoryDir ?? this.isNzbMountVariant();
+	}
+
+	/**
+	 * Some SAB-compatible backends don't implement optional diagnostic endpoints
+	 * (fullstatus/warnings) and return 400/404 or "unknown mode" errors.
+	 */
+	private isOptionalDiagnosticsError(error: unknown): boolean {
+		if (!(error instanceof SabnzbdApiError)) {
+			return false;
+		}
+
+		if (error.statusCode === 400 || error.statusCode === 404) {
+			return true;
+		}
+
+		const message = error.message.toLowerCase();
+		return (
+			message.includes('unknown mode') ||
+			message.includes('bad request') ||
+			message.includes('not found')
+		);
 	}
 
 	/**
@@ -221,7 +261,7 @@ export class SABnzbdClient implements IDownloadClient {
 			// Category may have relative or absolute path
 			if (category.dir.startsWith('/')) {
 				outputDir = category.dir;
-			} else if (this.config.normalizeCategoryDir) {
+			} else if (this.shouldNormalizeCategoryDir()) {
 				const normalizedBase = baseDir.replace(/\/+$/, '');
 				const baseName = normalizedBase.split('/').pop();
 				let relativeDir = category.dir.replace(/^\/+/, '');
@@ -274,7 +314,8 @@ export class SABnzbdClient implements IDownloadClient {
 				{
 					host: this.config.host,
 					port: this.config.port,
-					urlBase: this.config.urlBase ?? ''
+					urlBase: this.config.urlBase ?? '',
+					mountMode: this.config.mountMode ?? undefined
 				},
 				'[SABnzbd] Testing connection'
 			);
@@ -286,18 +327,44 @@ export class SABnzbdClient implements IDownloadClient {
 			const sabConfig = await this.proxy.getConfig();
 			const categories = sabConfig.categories.map((c) => c.name);
 
-			// Get full status for disk space info
-			const fullStatus = await this.proxy.getFullStatus();
+			let fullStatus: SabnzbdFullStatus | null = null;
+			try {
+				fullStatus = await this.proxy.getFullStatus();
+			} catch (statusError) {
+				if (!this.isOptionalDiagnosticsError(statusError)) {
+					throw statusError;
+				}
 
-			// Get warnings
-			const sabWarnings = await this.proxy.getWarnings();
+				logger.warn(
+					{
+						error: statusError instanceof Error ? statusError.message : String(statusError)
+					},
+					'[SABnzbd] fullstatus not supported, skipping disk info'
+				);
+			}
+
+			let sabWarnings: SabnzbdWarning[] = [];
+			try {
+				sabWarnings = await this.proxy.getWarnings();
+			} catch (warningError) {
+				if (!this.isOptionalDiagnosticsError(warningError)) {
+					throw warningError;
+				}
+
+				logger.warn(
+					{
+						error: warningError instanceof Error ? warningError.message : String(warningError)
+					},
+					'[SABnzbd] warnings endpoint not supported, skipping'
+				);
+			}
 			const warnings = sabWarnings.map((w) => `[${w.type}] ${w.text}`);
 
 			logger.info(
 				{
 					version,
-					diskSpace1: fullStatus.diskspace1,
-					diskSpace2: fullStatus.diskspace2,
+					diskSpace1: fullStatus?.diskspace1,
+					diskSpace2: fullStatus?.diskspace2,
 					warningCount: warnings.length
 				},
 				'[SABnzbd] Connection test successful'
@@ -310,10 +377,10 @@ export class SABnzbdClient implements IDownloadClient {
 					version,
 					savePath: sabConfig.misc.complete_dir,
 					categories,
-					diskSpace1: fullStatus.diskspace1,
-					diskSpace2: fullStatus.diskspace2,
-					diskSpaceTotal1: fullStatus.diskspacetotal1,
-					diskSpaceTotal2: fullStatus.diskspacetotal2
+					diskSpace1: fullStatus?.diskspace1,
+					diskSpace2: fullStatus?.diskspace2,
+					diskSpaceTotal1: fullStatus?.diskspacetotal1,
+					diskSpaceTotal2: fullStatus?.diskspacetotal2
 				}
 			};
 		} catch (error) {
@@ -915,7 +982,7 @@ export class SABnzbdClient implements IDownloadClient {
 		const hasValidStorage = this.isValidStoragePath(item.storage, baseDir);
 		const outputPath = await this.resolveOutputPath(item, sabConfig);
 
-		if (this.config.normalizeCategoryDir) {
+		if (this.shouldNormalizeCategoryDir()) {
 			logger.debug(
 				{
 					nzo_id: item.nzo_id,

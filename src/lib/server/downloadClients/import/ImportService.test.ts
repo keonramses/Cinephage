@@ -13,7 +13,7 @@ async function createSizedFile(filePath: string, sizeBytes: number) {
 	await truncate(filePath, sizeBytes);
 }
 
-describe('ImportService NZB-Mount selection', () => {
+describe('ImportService SAB-compatible STRM selection', () => {
 	beforeEach(() => {
 		ImportService.resetInstance();
 	});
@@ -130,6 +130,46 @@ describe('ImportService NZB-Mount selection', () => {
 		});
 
 		expect(options.allowStrmSmall).toBe(true);
+		expect(options.preferNonStrm).toBe(false);
+	});
+
+	it('treats SABnzbd mount mode as STRM-capable (parity with legacy nzb-mount)', () => {
+		const service = ImportService.getInstance() as unknown as {
+			getImportOptions: (
+				client?: { implementation?: string; mountMode?: string | null },
+				queueItem?: { outputPath?: string | null; clientDownloadPath?: string | null }
+			) => { allowStrmSmall: boolean; preferNonStrm: boolean };
+		};
+
+		const options = service.getImportOptions(
+			{
+				implementation: 'sabnzbd',
+				mountMode: 'nzbdav'
+			},
+			undefined
+		);
+
+		expect(options.allowStrmSmall).toBe(true);
+		expect(options.preferNonStrm).toBe(true);
+	});
+
+	it('keeps regular SABnzbd behavior unchanged when mount mode is not configured', () => {
+		const service = ImportService.getInstance() as unknown as {
+			getImportOptions: (
+				client?: { implementation?: string; mountMode?: string | null },
+				queueItem?: { outputPath?: string | null; clientDownloadPath?: string | null }
+			) => { allowStrmSmall: boolean; preferNonStrm: boolean };
+		};
+
+		const options = service.getImportOptions(
+			{
+				implementation: 'sabnzbd',
+				mountMode: null
+			},
+			undefined
+		);
+
+		expect(options.allowStrmSmall).toBe(false);
 		expect(options.preferNonStrm).toBe(false);
 	});
 });
