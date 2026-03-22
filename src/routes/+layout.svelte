@@ -33,7 +33,10 @@
 		ScrollText,
 		LogOut,
 		Server,
-		Download
+		Download,
+		Wifi,
+		WifiOff,
+		Loader2
 	} from 'lucide-svelte';
 
 	let { children } = $props();
@@ -152,6 +155,11 @@
 	});
 
 	$effect(() => {
+		void $page.url.pathname;
+		layoutState.clearMobileSseStatus();
+	});
+
+	$effect(() => {
 		if (!browser) return;
 
 		void refreshAppVersion();
@@ -213,8 +221,23 @@
 						</span>
 					</div>
 				</div>
-				<div class="flex flex-none items-center gap-2">
-					<ThemeSelector showLabel={false} />
+				<div class="flex flex-none items-center gap-2 pr-2">
+					{#if layoutState.mobileSseStatus === 'connected'}
+						<span class="badge shrink-0 gap-1 badge-success">
+							<Wifi class="h-3 w-3" />
+							Live
+						</span>
+					{:else if layoutState.mobileSseStatus === 'error'}
+						<span class="badge shrink-0 gap-1 badge-error">
+							<WifiOff class="h-3 w-3" />
+							Reconnecting...
+						</span>
+					{:else if layoutState.mobileSseStatus === 'connecting'}
+						<span class="badge shrink-0 gap-1 badge-warning">
+							<Loader2 class="h-3 w-3 animate-spin" />
+							Connecting...
+						</span>
+					{/if}
 				</div>
 			</header>
 

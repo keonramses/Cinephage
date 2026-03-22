@@ -13,6 +13,7 @@
 		UpdateChannelRequest
 	} from '$lib/types/livetv';
 	import { createSSE } from '$lib/sse';
+	import { layoutState, deriveMobileSseStatus } from '$lib/layout.svelte';
 	import { resolvePath } from '$lib/utils/routing';
 	import type { EpgStreamEvents } from '$lib/types/sse/events/livetv-epg-events.js';
 	import type { NowNextEntry } from '$lib/types/sse/events/livetv-channel-events.js';
@@ -118,6 +119,13 @@
 				lineup = payload.lineup;
 			}
 		}
+	});
+
+	$effect(() => {
+		layoutState.setMobileSseStatus(deriveMobileSseStatus(sse));
+		return () => {
+			layoutState.clearMobileSseStatus();
+		};
 	});
 
 	$effect(() => {

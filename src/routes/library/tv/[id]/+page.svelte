@@ -22,6 +22,7 @@
 	import { resolvePath } from '$lib/utils/routing';
 	import { createDynamicSSE } from '$lib/sse';
 	import { createSearchProgress } from '$lib/stores/searchProgress.svelte';
+	import { layoutState, deriveMobileSseStatus } from '$lib/layout.svelte';
 
 	let { data }: { data: PageData } = $props();
 
@@ -260,6 +261,13 @@
 		'search:completed': () => {
 			searchingMissing = false;
 		}
+	});
+
+	$effect(() => {
+		layoutState.setMobileSseStatus(deriveMobileSseStatus(sse));
+		return () => {
+			layoutState.clearMobileSseStatus();
+		};
 	});
 
 	// State

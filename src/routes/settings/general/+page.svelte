@@ -15,6 +15,7 @@
 		PathValidationResult
 	} from '$lib/types/downloadClient';
 	import { createSSE } from '$lib/sse';
+	import { layoutState, deriveMobileSseStatus } from '$lib/layout.svelte';
 
 	import { RootFolderModal, RootFolderList } from '$lib/components/rootFolders';
 	import { toasts } from '$lib/stores/toast.svelte';
@@ -42,7 +43,7 @@
 	let scanSuccess = $state<{ message: string; unmatchedCount: number } | null>(null);
 
 	// SSE Connection for library scan progress
-	createSSE<{
+	const sse = createSSE<{
 		status: {
 			fullScan?: boolean;
 			activeScans?: unknown[];
@@ -81,6 +82,13 @@
 			scanning = false;
 			scanProgress = null;
 		}
+	});
+
+	$effect(() => {
+		layoutState.setMobileSseStatus(deriveMobileSseStatus(sse));
+		return () => {
+			layoutState.clearMobileSseStatus();
+		};
 	});
 
 	async function triggerLibraryScan(rootFolderId?: string) {

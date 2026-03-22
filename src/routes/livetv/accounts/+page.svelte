@@ -9,6 +9,7 @@
 	import { resolvePath } from '$lib/utils/routing';
 	import { toasts } from '$lib/stores/toast.svelte';
 	import type { AccountStreamEvents } from '$lib/types/sse/events/livetv-account-events.js';
+	import { layoutState, deriveMobileSseStatus } from '$lib/layout.svelte';
 
 	// State
 	let accounts = $state<LiveTvAccount[]>([]);
@@ -58,6 +59,13 @@
 				syncingId = null;
 			}
 		}
+	});
+
+	$effect(() => {
+		layoutState.setMobileSseStatus(deriveMobileSseStatus(sse));
+		return () => {
+			layoutState.clearMobileSseStatus();
+		};
 	});
 
 	// Load accounts on mount

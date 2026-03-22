@@ -21,6 +21,7 @@
 	import { goto } from '$app/navigation';
 	import { resolvePath } from '$lib/utils/routing';
 	import { createDynamicSSE } from '$lib/sse';
+	import { layoutState, deriveMobileSseStatus } from '$lib/layout.svelte';
 
 	let { data }: { data: PageData } = $props();
 
@@ -124,6 +125,13 @@
 			movie.files = movie.files.filter((f) => f.id !== payload.fileId);
 			movie.hasFile = movie.files.length > 0;
 		}
+	});
+
+	$effect(() => {
+		layoutState.setMobileSseStatus(deriveMobileSseStatus(sse));
+		return () => {
+			layoutState.clearMobileSseStatus();
+		};
 	});
 
 	const prefetchProfileId = $derived.by(
