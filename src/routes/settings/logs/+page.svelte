@@ -19,6 +19,7 @@
 		CapturedLogLevel
 	} from '$lib/logging/log-capture';
 	import { createDynamicSSE } from '$lib/sse';
+	import { layoutState, deriveMobileSseStatus } from '$lib/layout.svelte';
 	import { toasts } from '$lib/stores/toast.svelte';
 
 	interface LogSeedEvent {
@@ -198,6 +199,13 @@
 			heartbeatInterval: 30000
 		}
 	);
+
+	$effect(() => {
+		layoutState.setMobileSseStatus(deriveMobileSseStatus(sse));
+		return () => {
+			layoutState.clearMobileSseStatus();
+		};
+	});
 
 	// ── Auto-scroll on new entries ──────────────────────────────
 	$effect(() => {

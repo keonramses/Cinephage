@@ -101,11 +101,21 @@ const TEST_INDEXER_CAPABILITIES = {
 };
 
 function createIndexerManagerMock() {
+	const configs = [TEST_INDEXER_CONFIG];
+	return createIndexerManagerMockWith(configs);
+}
+
+function createIndexerManagerMockWith(configs: Array<Record<string, any>>) {
+	const capabilitiesByDefinition = new Map<string, typeof TEST_INDEXER_CAPABILITIES>();
+	for (const config of configs) {
+		capabilitiesByDefinition.set(config.definitionId, TEST_INDEXER_CAPABILITIES);
+	}
+
 	return {
 		searchEnhanced: mocks.searchEnhanced,
-		getIndexers: vi.fn().mockResolvedValue([TEST_INDEXER_CONFIG]),
+		getIndexers: vi.fn().mockResolvedValue(configs),
 		getDefinitionCapabilities: vi.fn((definitionId: string) =>
-			definitionId === TEST_INDEXER_CONFIG.definitionId ? TEST_INDEXER_CAPABILITIES : undefined
+			capabilitiesByDefinition.get(definitionId)
 		)
 	};
 }
@@ -600,6 +610,9 @@ describe('SearchOnAddService.searchForMissingEpisodes monitoring behavior', () =
 		expect(mocks.searchWithMultiSeasonPriority).toHaveBeenCalledWith(
 			expect.objectContaining({
 				searchSource: 'interactive',
+				completeSeriesThreshold: 100,
+				multiSeasonThreshold: 100,
+				singleSeasonThreshold: 100,
 				episodes: [
 					expect.objectContaining({
 						id: 'ep-1',
@@ -614,7 +627,7 @@ describe('SearchOnAddService.searchForMissingEpisodes monitoring behavior', () =
 		);
 	});
 
-	it('uses episode-only strategy when requested for manual missing auto-grab', async () => {
+	it('keeps default pack thresholds for non-bypassed missing searches', async () => {
 		mocks.seriesFindFirst.mockResolvedValue({
 			id: 'series-1',
 			title: 'Afro Samurai',
@@ -630,19 +643,203 @@ describe('SearchOnAddService.searchForMissingEpisodes monitoring behavior', () =
 				seasonNumber: 1,
 				episodeNumber: 1,
 				hasFile: false,
-				monitored: false,
-				airDate: '2007-01-03'
-			},
-			{
-				id: 'ep-2',
-				seriesId: 'series-1',
-				seasonNumber: 1,
-				episodeNumber: 2,
-				hasFile: false,
 				monitored: true,
-				airDate: '2007-01-10'
+				airDate: '2007-01-03'
 			}
 		]);
+
+		await searchOnAdd.searchForMissingEpisodes('series-1');
+
+		expect(mocks.searchWithMultiSeasonPriority).toHaveBeenCalledWith(
+			expect.objectContaining({
+				searchSource: 'interactive',
+				completeSeriesThreshold: undefined,
+				multiSeasonThreshold: undefined,
+				singleSeasonThreshold: undefined
+			})
+		);
+	});
+
+	it('uses episode-only strategy in auto mode when RuTracker is the only eligible TV indexer', async () => {
+		const ruTrackerOnlyIndexerManager = createIndexerManagerMockWith([
+			{
+				...TEST_INDEXER_CONFIG,
+				id: 'indexer-rutracker',
+				name: 'RuTracker.org',
+				definitionId: 'rutracker',
+				protocol: 'torrent',
+				baseUrl: 'https://rutracker.org/forum'
+			}
+		]);
+		mocks.getIndexerManager.mockResolvedValue(ruTrackerOnlyIndexerManager);
+		mocks.seriesFindFirst.mockResolvedValue({
+			id: 'series-1',
+			title: 'Afro Samurai',
+			tmdbId: 19544,
+			tvdbId: 79755,
+			imdbId: 'tt0465316',
+			scoringProfileId: 'balanced'
+		});
+		mocks.episodesFindMany
+			.mockResolvedValueOnce([
+				{
+					id: 'ep-1',
+					seriesId: 'series-1',
+					seasonNumber: 1,
+					episodeNumber: 1,
+					hasFile: false,
+					monitored: true,
+					airDate: '2007-01-03'
+				}
+			])
+			.mockResolvedValueOnce([
+				{
+					id: 'ep-1',
+					seriesId: 'series-1',
+					seasonNumber: 1,
+					episodeNumber: 1,
+					hasFile: false,
+					monitored: true,
+					airDate: '2007-01-03'
+				},
+				{
+					id: 'ep-2',
+					seriesId: 'series-1',
+					seasonNumber: 1,
+					episodeNumber: 2,
+					hasFile: true,
+					monitored: true,
+					airDate: '2007-01-10'
+				}
+			]);
+
+		const searchForEpisodeSpy = vi
+			.spyOn(searchOnAdd, 'searchForEpisode')
+			.mockResolvedValue({ success: false, error: 'No suitable releases found' });
+		const searchForSeasonSpy = vi.spyOn(searchOnAdd, 'searchForSeason');
+
+		await searchOnAdd.searchForMissingEpisodes('series-1', undefined, {
+			bypassMonitoring: true,
+			searchStrategy: 'auto'
+		});
+
+		expect(mocks.searchWithMultiSeasonPriority).not.toHaveBeenCalled();
+		expect(searchForSeasonSpy).not.toHaveBeenCalled();
+		expect(searchForEpisodeSpy).toHaveBeenCalledTimes(1);
+	});
+
+	it('keeps pack-first strategy in auto mode when non-RuTracker TV indexers are also eligible', async () => {
+		const mixedIndexerManager = createIndexerManagerMockWith([
+			{
+				...TEST_INDEXER_CONFIG,
+				id: 'indexer-rutracker',
+				name: 'RuTracker.org',
+				definitionId: 'rutracker',
+				protocol: 'torrent',
+				baseUrl: 'https://rutracker.org/forum'
+			},
+			{
+				...TEST_INDEXER_CONFIG,
+				id: 'indexer-hydra',
+				name: 'NZBHydra2',
+				definitionId: 'nzbhydra2',
+				protocol: 'usenet',
+				baseUrl: 'https://hydra.example.test'
+			}
+		]);
+		mocks.getIndexerManager.mockResolvedValue(mixedIndexerManager);
+		mocks.seriesFindFirst.mockResolvedValue({
+			id: 'series-1',
+			title: 'Afro Samurai',
+			tmdbId: 19544,
+			tvdbId: 79755,
+			imdbId: 'tt0465316',
+			scoringProfileId: 'balanced'
+		});
+		mocks.episodesFindMany.mockResolvedValue([
+			{
+				id: 'ep-1',
+				seriesId: 'series-1',
+				seasonNumber: 1,
+				episodeNumber: 1,
+				hasFile: false,
+				monitored: true,
+				airDate: '2007-01-03'
+			}
+		]);
+
+		const searchForEpisodeSpy = vi.spyOn(searchOnAdd, 'searchForEpisode');
+		const searchForSeasonSpy = vi.spyOn(searchOnAdd, 'searchForSeason');
+
+		await searchOnAdd.searchForMissingEpisodes('series-1', undefined, {
+			bypassMonitoring: true,
+			searchStrategy: 'auto'
+		});
+
+		expect(mocks.searchWithMultiSeasonPriority).toHaveBeenCalledTimes(1);
+		expect(searchForEpisodeSpy).not.toHaveBeenCalled();
+		expect(searchForSeasonSpy).not.toHaveBeenCalled();
+	});
+
+	it('uses episode-only strategy when requested for manual missing auto-grab', async () => {
+		mocks.seriesFindFirst.mockResolvedValue({
+			id: 'series-1',
+			title: 'Afro Samurai',
+			tmdbId: 19544,
+			tvdbId: 79755,
+			imdbId: 'tt0465316',
+			scoringProfileId: 'streamer'
+		});
+		mocks.episodesFindMany
+			.mockResolvedValueOnce([
+				{
+					id: 'ep-1',
+					seriesId: 'series-1',
+					seasonNumber: 1,
+					episodeNumber: 1,
+					hasFile: false,
+					monitored: false,
+					airDate: '2007-01-03'
+				},
+				{
+					id: 'ep-2',
+					seriesId: 'series-1',
+					seasonNumber: 1,
+					episodeNumber: 2,
+					hasFile: false,
+					monitored: true,
+					airDate: '2007-01-10'
+				}
+			])
+			.mockResolvedValueOnce([
+				{
+					id: 'ep-1',
+					seriesId: 'series-1',
+					seasonNumber: 1,
+					episodeNumber: 1,
+					hasFile: false,
+					monitored: false,
+					airDate: '2007-01-03'
+				},
+				{
+					id: 'ep-2',
+					seriesId: 'series-1',
+					seasonNumber: 1,
+					episodeNumber: 2,
+					hasFile: false,
+					monitored: true,
+					airDate: '2007-01-10'
+				},
+				{
+					id: 'ep-3',
+					seriesId: 'series-1',
+					seasonNumber: 1,
+					episodeNumber: 3,
+					hasFile: true,
+					monitored: true,
+					airDate: '2007-01-17'
+				}
+			]);
 
 		const searchForEpisodeSpy = vi
 			.spyOn(searchOnAdd, 'searchForEpisode')
@@ -654,6 +851,7 @@ describe('SearchOnAddService.searchForMissingEpisodes monitoring behavior', () =
 				success: false,
 				error: 'No suitable releases found'
 			});
+		const searchForSeasonSpy = vi.spyOn(searchOnAdd, 'searchForSeason');
 
 		const result = await searchOnAdd.searchForMissingEpisodes('series-1', undefined, {
 			bypassMonitoring: true,
@@ -661,6 +859,7 @@ describe('SearchOnAddService.searchForMissingEpisodes monitoring behavior', () =
 		});
 
 		expect(mocks.searchWithMultiSeasonPriority).not.toHaveBeenCalled();
+		expect(searchForSeasonSpy).not.toHaveBeenCalled();
 		expect(searchForEpisodeSpy).toHaveBeenCalledTimes(2);
 		expect(searchForEpisodeSpy).toHaveBeenNthCalledWith(1, {
 			episodeId: 'ep-1',
@@ -693,6 +892,187 @@ describe('SearchOnAddService.searchForMissingEpisodes monitoring behavior', () =
 				grabbed: false,
 				releaseName: undefined,
 				error: 'No suitable releases found'
+			}
+		]);
+	});
+
+	it('counts successful episode grabs even when releaseName is missing', async () => {
+		mocks.seriesFindFirst.mockResolvedValue({
+			id: 'series-1',
+			title: 'Afro Samurai',
+			tmdbId: 19544,
+			tvdbId: 79755,
+			imdbId: 'tt0465316',
+			scoringProfileId: 'streamer'
+		});
+		mocks.episodesFindMany
+			.mockResolvedValueOnce([
+				{
+					id: 'ep-1',
+					seriesId: 'series-1',
+					seasonNumber: 1,
+					episodeNumber: 1,
+					hasFile: false,
+					monitored: true,
+					airDate: '2007-01-03'
+				},
+				{
+					id: 'ep-2',
+					seriesId: 'series-1',
+					seasonNumber: 1,
+					episodeNumber: 2,
+					hasFile: false,
+					monitored: true,
+					airDate: '2007-01-10'
+				}
+			])
+			.mockResolvedValueOnce([
+				{
+					id: 'ep-1',
+					seriesId: 'series-1',
+					seasonNumber: 1,
+					episodeNumber: 1,
+					hasFile: false,
+					monitored: true,
+					airDate: '2007-01-03'
+				},
+				{
+					id: 'ep-2',
+					seriesId: 'series-1',
+					seasonNumber: 1,
+					episodeNumber: 2,
+					hasFile: false,
+					monitored: true,
+					airDate: '2007-01-10'
+				}
+			]);
+
+		vi.spyOn(searchOnAdd, 'searchForSeason');
+		const searchForEpisodeSpy = vi
+			.spyOn(searchOnAdd, 'searchForEpisode')
+			.mockResolvedValueOnce({
+				success: true
+			})
+			.mockResolvedValueOnce({
+				success: false,
+				error: 'No suitable releases found'
+			});
+
+		const result = await searchOnAdd.searchForMissingEpisodes('series-1', undefined, {
+			bypassMonitoring: true,
+			searchStrategy: 'episode-only'
+		});
+
+		expect(searchForEpisodeSpy).toHaveBeenCalledTimes(2);
+		expect(result.summary).toEqual({
+			searched: 2,
+			found: 1,
+			grabbed: 1,
+			seasonPacksGrabbed: 0,
+			individualEpisodesGrabbed: 1
+		});
+		expect(result.results).toEqual([
+			{
+				itemId: 'ep-1',
+				itemLabel: 'S01E01',
+				found: true,
+				grabbed: true,
+				releaseName: undefined,
+				error: undefined
+			},
+			{
+				itemId: 'ep-2',
+				itemLabel: 'S01E02',
+				found: false,
+				grabbed: false,
+				releaseName: undefined,
+				error: 'No suitable releases found'
+			}
+		]);
+	});
+
+	it('uses season-pack grab in episode-only mode when the full aired season is missing', async () => {
+		mocks.seriesFindFirst.mockResolvedValue({
+			id: 'series-1',
+			title: 'Afro Samurai',
+			tmdbId: 19544,
+			tvdbId: 79755,
+			imdbId: 'tt0465316',
+			scoringProfileId: 'streamer'
+		});
+		const missingSeasonEpisodes = [
+			{
+				id: 'ep-1',
+				seriesId: 'series-1',
+				seasonNumber: 1,
+				episodeNumber: 1,
+				hasFile: false,
+				monitored: true,
+				airDate: '2007-01-03'
+			},
+			{
+				id: 'ep-2',
+				seriesId: 'series-1',
+				seasonNumber: 1,
+				episodeNumber: 2,
+				hasFile: false,
+				monitored: true,
+				airDate: '2007-01-10'
+			}
+		];
+		mocks.episodesFindMany
+			.mockResolvedValueOnce(missingSeasonEpisodes)
+			.mockResolvedValueOnce(missingSeasonEpisodes);
+
+		const searchForSeasonSpy = vi.spyOn(searchOnAdd, 'searchForSeason').mockResolvedValue({
+			success: true,
+			releaseName: 'Afro.Samurai.S01.Complete.1080p.BluRay-GROUP'
+		});
+		const searchForEpisodeSpy = vi.spyOn(searchOnAdd, 'searchForEpisode');
+
+		const result = await searchOnAdd.searchForMissingEpisodes('series-1', undefined, {
+			bypassMonitoring: true,
+			searchStrategy: 'episode-only'
+		});
+
+		expect(mocks.searchWithMultiSeasonPriority).not.toHaveBeenCalled();
+		expect(searchForSeasonSpy).toHaveBeenCalledTimes(1);
+		expect(searchForSeasonSpy).toHaveBeenCalledWith({
+			seriesId: 'series-1',
+			seasonNumber: 1,
+			bypassMonitoring: true
+		});
+		expect(searchForEpisodeSpy).not.toHaveBeenCalled();
+		expect(result.summary).toEqual({
+			searched: 2,
+			found: 2,
+			grabbed: 2,
+			seasonPacksGrabbed: 1,
+			individualEpisodesGrabbed: 0
+		});
+		expect(result.results).toEqual([
+			{
+				itemId: 'ep-1',
+				itemLabel: 'S01E01',
+				found: true,
+				grabbed: true,
+				releaseName: 'Afro.Samurai.S01.Complete.1080p.BluRay-GROUP',
+				wasPackGrab: true
+			},
+			{
+				itemId: 'ep-2',
+				itemLabel: 'S01E02',
+				found: true,
+				grabbed: true,
+				releaseName: 'Afro.Samurai.S01.Complete.1080p.BluRay-GROUP',
+				wasPackGrab: true
+			}
+		]);
+		expect(result.seasonPacks).toEqual([
+			{
+				seasonNumber: 1,
+				releaseName: 'Afro.Samurai.S01.Complete.1080p.BluRay-GROUP',
+				episodesCovered: ['ep-1', 'ep-2']
 			}
 		]);
 	});

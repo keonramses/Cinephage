@@ -6,6 +6,7 @@
 	import CreateTaskPlaceholder from '$lib/components/tasks/CreateTaskPlaceholder.svelte';
 	import { Wifi } from 'lucide-svelte';
 	import { createSSE } from '$lib/sse';
+	import { layoutState, deriveMobileSseStatus } from '$lib/layout.svelte';
 
 	let { data }: { data: PageData } = $props();
 
@@ -122,6 +123,13 @@
 			if (event.nextRunTime !== undefined) updates.nextRunTime = event.nextRunTime;
 			updateTask(event.taskId, updates);
 		}
+	});
+
+	$effect(() => {
+		layoutState.setMobileSseStatus(deriveMobileSseStatus(sse));
+		return () => {
+			layoutState.clearMobileSseStatus();
+		};
 	});
 
 	/**

@@ -586,7 +586,6 @@
 				<div class="flex flex-wrap items-center gap-4 text-sm text-base-content/70">
 					{#if searchMode === 'multiSeasonPack'}
 						<span>{filteredReleases.length} of {modeBaseReleases.length} multi-pack matches</span>
-						<span class="text-base-content/50">from {rawReleaseCount} raw results</span>
 						{#if modeRejectedCount}
 							<span class="text-warning">{modeRejectedCount} rejected</span>
 						{/if}
@@ -882,7 +881,6 @@
 						<div
 							class="mb-4 max-w-xl rounded-lg border border-base-300 bg-base-200 p-3 text-center text-sm"
 						>
-							<p class="font-medium text-base-content/80">Raw results were found</p>
 							<p class="mt-1 text-base-content/60">
 								{rawReleaseCount} releases matched the title, but none matched complete/multi-season rules.
 							</p>

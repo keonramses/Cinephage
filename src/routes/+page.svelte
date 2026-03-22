@@ -29,6 +29,7 @@
 	import { resolvePath } from '$lib/utils/routing';
 	import type { UnifiedActivity } from '$lib/types/activity';
 	import { createSSE } from '$lib/sse';
+	import { layoutState, deriveMobileSseStatus } from '$lib/layout.svelte';
 
 	let { data } = $props();
 
@@ -161,6 +162,13 @@
 		'dashboard:recentActivity': (newRecentActivity) => {
 			recentActivityState = newRecentActivity as UnifiedActivity[];
 		}
+	});
+
+	$effect(() => {
+		layoutState.setMobileSseStatus(deriveMobileSseStatus(sse));
+		return () => {
+			layoutState.clearMobileSseStatus();
+		};
 	});
 
 	// Format relative time
@@ -442,13 +450,13 @@
 				<div class="mt-2 flex gap-2 text-xs">
 					{#if stats.storage.movieBytes > 0}
 						<span class="badge badge-sm whitespace-nowrap badge-primary">
-							<Clapperboard class="mr-1 h-3 w-3" />
+							<Clapperboard class="mr-0 h-3 w-3" />
 							{formatBytes(stats.storage.movieBytes)}
 						</span>
 					{/if}
 					{#if stats.storage.tvBytes > 0}
 						<span class="badge badge-sm whitespace-nowrap badge-secondary">
-							<Tv class="mr-1 h-3 w-3" />
+							<Tv class="mr-0 h-3 w-3" />
 							{formatBytes(stats.storage.tvBytes)}
 						</span>
 					{/if}

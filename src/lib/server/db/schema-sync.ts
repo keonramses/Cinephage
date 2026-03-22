@@ -101,8 +101,9 @@ interface MigrationDefinition {
  * Version 71: Add download_queue_tombstones table for local-removal suppression window
  * Version 72: Add adaptive subtitle searching columns for movies and episodes
  * Version 73: Allow Plex in media_browser_servers server_type constraint
+ * Version 74: Consolidate legacy nzb-mount clients into sabnzbd mount mode
  */
-export const CURRENT_SCHEMA_VERSION = 73;
+export const CURRENT_SCHEMA_VERSION = 74;
 
 const BETTER_AUTH_TABLE_DEFINITIONS = [
 	{
@@ -4934,6 +4935,44 @@ const MIGRATIONS: MigrationDefinition[] = [
 			})();
 
 			logger.info('[SchemaSync] Updated media_browser_servers to allow plex');
+		}
+	},
+	{
+		version: 74,
+		name: 'consolidate_nzb_mount_clients_into_sab_mount_mode',
+		apply: (sqlite) => {
+			if (!tableExists(sqlite, 'download_clients')) {
+				return;
+			}
+
+			const updateLegacyClients = sqlite.prepare(`
+				UPDATE "download_clients"
+				SET
+					"implementation" = 'sabnzbd',
+					"mount_mode" = CASE
+						WHEN "mount_mode" IS NULL OR TRIM("mount_mode") = '' THEN 'nzbdav'
+						WHEN "mount_mode" = 'altmount' THEN 'nzbdav'
+						ELSE "mount_mode"
+					END
+				WHERE "implementation" = 'nzb-mount'
+			`);
+
+			const normalizeAltmount = sqlite.prepare(`
+				UPDATE "download_clients"
+				SET "mount_mode" = 'nzbdav'
+				WHERE "mount_mode" = 'altmount'
+			`);
+
+			const convertedClients = updateLegacyClients.run().changes;
+			const normalizedMountModes = normalizeAltmount.run().changes;
+
+			logger.info(
+				{
+					convertedClients,
+					normalizedMountModes
+				},
+				'[SchemaSync] Consolidated legacy nzb-mount clients into sabnzbd mount mode'
+			);
 		}
 	}
 ];

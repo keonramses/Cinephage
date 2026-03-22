@@ -172,6 +172,14 @@ describe('ReleaseParser', () => {
 			expect(result.episode?.episodes).not.toContain(9);
 		});
 
+		it('should not treat clock time episode titles as season-pack ranges', () => {
+			const result = parseRelease('The Pitt S02E01 - 7:00 A.M. [Streaming]');
+
+			expect(result.episode?.season).toBe(2);
+			expect(result.episode?.episodes).toEqual([1]);
+			expect(result.episode?.isSeasonPack).toBe(false);
+		});
+
 		it('should parse complete series packs', () => {
 			const result = parseRelease('Friends.Complete.Series.S01-S10.1080p.BluRay.x264-GROUP');
 

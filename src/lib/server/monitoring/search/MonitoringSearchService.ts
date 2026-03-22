@@ -21,6 +21,10 @@ import {
 import { eq, and, lte, gte, inArray } from 'drizzle-orm';
 import { getIndexerManager } from '$lib/server/indexers/IndexerManager.js';
 import { getReleaseGrabService } from '$lib/server/downloads/ReleaseGrabService.js';
+import {
+	parseEpisodePointerFromGuid,
+	parseEpisodePointerFromTitle
+} from '$lib/server/downloads/episode-pointer.js';
 import { ReleaseParser } from '$lib/server/indexers/parser/ReleaseParser.js';
 import { logger } from '$lib/logging/index.js';
 import type { SearchCriteria, EnhancedReleaseResult } from '$lib/server/indexers/types';
@@ -644,6 +648,8 @@ export class MonitoringSearchService {
 			// Preload all season episode counts in a single query to avoid N+1
 			const allSeriesIds = Array.from(episodesBySeriesAndSeason.keys());
 			await this.preloadSeasonEpisodeCounts(allSeriesIds);
+			const useRuTrackerEpisodePointerPolicy =
+				await this.shouldApplyRuTrackerEpisodePointerPolicy();
 
 			// Process each series with cascading strategy
 			for (const [currentSeriesId, seasonMap] of episodesBySeriesAndSeason) {
@@ -659,7 +665,8 @@ export class MonitoringSearchService {
 				const seriesResults = await this.searchSeriesWithCascadingStrategy(
 					seriesData,
 					seasonMap,
-					signal
+					signal,
+					useRuTrackerEpisodePointerPolicy
 				);
 				results.push(...seriesResults);
 			}
@@ -683,7 +690,8 @@ export class MonitoringSearchService {
 			typeof series.$inferSelect & { scoringProfile?: typeof scoringProfiles.$inferSelect | null }
 		>,
 		seasonMap: Map<number, Array<typeof episodes.$inferSelect>>,
-		signal?: AbortSignal
+		signal?: AbortSignal,
+		useRuTrackerEpisodePointerPolicy: boolean = false
 	): Promise<ItemSearchResult[]> {
 		const results: ItemSearchResult[] = [];
 		const grabbedEpisodeIds = new Set<string>();
@@ -708,8 +716,8 @@ export class MonitoringSearchService {
 			seasonEpisodeCounts.set(seasonNumber, count);
 		}
 
-		// Strategy 1: Try season pack search for seasons with many missing episodes
-		// Only try pack search if >= 50% of season is missing
+		// Strategy 1: Try season pack search for seasons with many missing episodes.
+		// RuTracker-specific completeness restrictions are enforced later per release candidate.
 		for (const [seasonNumber, missingEpisodes] of seasonMap) {
 			// Check for cancellation before each season
 			if (signal?.aborted) {
@@ -718,6 +726,23 @@ export class MonitoringSearchService {
 
 			const totalEpisodes = seasonEpisodeCounts.get(seasonNumber) ?? missingEpisodes.length;
 			const missingPercent = (missingEpisodes.length / totalEpisodes) * 100;
+			const isEntireSeasonMissing = totalEpisodes > 0 && missingEpisodes.length >= totalEpisodes;
+
+			// When RuTracker is the only automatic TV source, avoid season-pack requests unless
+			// the full season is missing. Partial seasons should use episode-pointer flow.
+			if (useRuTrackerEpisodePointerPolicy && !isEntireSeasonMissing) {
+				logger.debug(
+					{
+						seriesTitle: seriesData.title,
+						season: seasonNumber,
+						missingEpisodes: missingEpisodes.length,
+						totalEpisodes,
+						missingPercent: missingPercent.toFixed(1)
+					},
+					'[MonitoringSearch] Skipping season pack search - RuTracker pointer policy (partial season)'
+				);
+				continue;
+			}
 
 			// Skip if less than 50% missing - not worth a pack
 			if (missingPercent < 50) {
@@ -821,11 +846,17 @@ export class MonitoringSearchService {
 				// Pack bonus scoring will naturally prioritize packs if they're of similar quality
 				const searchResult = await this.searchAndGrabEpisode(seriesData, episode);
 
-				// If we grabbed a pack, mark all episodes in that season as handled
+				// If we grabbed a pack, mark all episodes in that season as handled.
+				// Episode pointers intentionally look like packs in title shape, but only grab one episode.
+				if (searchResult.grabbed) {
+					grabbedEpisodeIds.add(episode.id);
+				}
 				if (searchResult.grabbed && searchResult.grabbedRelease) {
-					// Check if the grabbed release is a season pack
+					const isEpisodePointer = Boolean(
+						parseEpisodePointerFromTitle(searchResult.grabbedRelease)
+					);
 					const parsed = parser.parse(searchResult.grabbedRelease);
-					if (parsed.episode?.isSeasonPack) {
+					if (!isEpisodePointer && parsed.episode?.isSeasonPack) {
 						// Mark all episodes in this season as handled
 						for (const ep of missingEpisodes) {
 							grabbedEpisodeIds.add(ep.id);
@@ -947,7 +978,24 @@ export class MonitoringSearchService {
 				profile = await qualityFilter.getDefaultScoringProfile();
 			}
 
+			const isEntireSeasonMissing =
+				seasonEpisodeCount > 0 && missingEpisodes.length >= seasonEpisodeCount;
+
 			for (const release of seasonPacks) {
+				if (this.isRuTrackerIndexerName(release.indexerName) && !isEntireSeasonMissing) {
+					logger.debug(
+						{
+							seriesId: seriesData.id,
+							season: seasonNumber,
+							title: release.title,
+							missingEpisodes: missingEpisodes.length,
+							seasonEpisodeCount
+						},
+						'[MonitoringSearch] Skipping RuTracker season pack for partial-missing season'
+					);
+					continue;
+				}
+
 				const releaseCandidate: ReleaseCandidate = {
 					title: release.title,
 					score: release.totalScore ?? 0,
@@ -2640,6 +2688,24 @@ export class MonitoringSearchService {
 			}
 
 			for (const release of searchResult.releases) {
+				const parsedEpisode = release.parsed.episode ?? release.episodeMatch;
+				const isSeasonPack = parsedEpisode?.isSeasonPack ?? false;
+				const isEpisodePointer = this.isEpisodePointerRelease(release);
+
+				// RuTracker episode-targeted missing-content search should not grab full season packs.
+				// Allow virtual episode pointers because they resolve to per-episode file selection.
+				if (this.isRuTrackerIndexerName(release.indexerName) && isSeasonPack && !isEpisodePointer) {
+					logger.debug(
+						{
+							seriesId: seriesData.id,
+							episodeId: episode.id,
+							title: release.title
+						},
+						'[MonitoringSearch] Skipping RuTracker season pack in episode-targeted search'
+					);
+					continue;
+				}
+
 				const releaseCandidate: ReleaseCandidate = {
 					title: release.title,
 					score: release.totalScore ?? 0,
@@ -2663,20 +2729,18 @@ export class MonitoringSearchService {
 
 				// Validate release against scoring profile (defense-in-depth check)
 				if (profile) {
-					// Check if this is a season pack and get episode count for proper size validation
-					const isSeasonPack =
-						release.parsed.episode?.isSeasonPack ?? release.episodeMatch?.isSeasonPack ?? false;
+					const treatAsSeasonPack = isSeasonPack && !isEpisodePointer;
 					let episodeCount: number | undefined;
-					if (isSeasonPack) {
+					if (treatAsSeasonPack) {
 						// For season packs, we need episode count for per-episode size calculation
-						const releaseSeasons = release.parsed.episode?.seasons ?? release.episodeMatch?.seasons;
+						const releaseSeasons = parsedEpisode?.seasons;
 						const targetSeason = releaseSeasons?.[0] ?? episode.seasonNumber;
 						episodeCount = await this.getSeasonEpisodeCount(seriesData.id, targetSeason);
 					}
 
 					const scoreResult = scoreRelease(release.title, profile, undefined, release.size, {
 						mediaType: 'tv',
-						isSeasonPack,
+						isSeasonPack: treatAsSeasonPack,
 						episodeCount
 					});
 					if (!scoreResult.meetsMinimum || scoreResult.isBanned || scoreResult.sizeRejected) {
@@ -2689,7 +2753,8 @@ export class MonitoringSearchService {
 								meetsMinimum: scoreResult.meetsMinimum,
 								isBanned: scoreResult.isBanned,
 								sizeRejected: scoreResult.sizeRejected,
-								isSeasonPack,
+								isSeasonPack: treatAsSeasonPack,
+								isEpisodePointer,
 								episodeCount,
 								reason: scoreResult.isBanned
 									? 'banned'
@@ -2739,6 +2804,69 @@ export class MonitoringSearchService {
 				grabbed: false,
 				error: message
 			};
+		}
+	}
+
+	private isEpisodePointerRelease(release: Pick<EnhancedReleaseResult, 'guid' | 'title'>): boolean {
+		return Boolean(
+			parseEpisodePointerFromGuid(release.guid) ?? parseEpisodePointerFromTitle(release.title)
+		);
+	}
+
+	private isRuTrackerIndexerName(indexerName: string | undefined): boolean {
+		return typeof indexerName === 'string' && indexerName.toLowerCase().includes('rutracker');
+	}
+
+	private isRuTrackerHost(baseUrl: string | undefined): boolean {
+		if (!baseUrl) {
+			return false;
+		}
+		try {
+			return new URL(baseUrl).hostname.toLowerCase().includes('rutracker.');
+		} catch {
+			return baseUrl.toLowerCase().includes('rutracker.');
+		}
+	}
+
+	private async shouldApplyRuTrackerEpisodePointerPolicy(): Promise<boolean> {
+		try {
+			const indexerManager = await getIndexerManager();
+			const maybeGetIndexers = (indexerManager as { getIndexers?: () => Promise<unknown[]> })
+				.getIndexers;
+			if (typeof maybeGetIndexers !== 'function') {
+				return false;
+			}
+
+			const configuredIndexers = await maybeGetIndexers.call(indexerManager);
+			const automaticTvIndexers = configuredIndexers.filter((indexer) => {
+				const config = indexer as {
+					enabled?: boolean;
+					enableAutomaticSearch?: boolean;
+					capabilities?: { tvSearch?: { available?: boolean }; search?: { available?: boolean } };
+				};
+				return Boolean(
+					config.enabled &&
+					config.enableAutomaticSearch &&
+					(config.capabilities?.tvSearch?.available ?? config.capabilities?.search?.available)
+				);
+			});
+
+			if (automaticTvIndexers.length === 0) {
+				return false;
+			}
+
+			const hasRuTracker = automaticTvIndexers.some((indexer) => {
+				const config = indexer as { name?: string; baseUrl?: string };
+				return this.isRuTrackerIndexerName(config.name) || this.isRuTrackerHost(config.baseUrl);
+			});
+			const hasNonRuTracker = automaticTvIndexers.some((indexer) => {
+				const config = indexer as { name?: string; baseUrl?: string };
+				return !(this.isRuTrackerIndexerName(config.name) || this.isRuTrackerHost(config.baseUrl));
+			});
+
+			return hasRuTracker && !hasNonRuTracker;
+		} catch {
+			return false;
 		}
 	}
 

@@ -15,9 +15,13 @@ const {
 	findManyEpisodeFilesMock,
 	updateEpisodeMock,
 	findManyDownloadQueueMock,
-	mockIsSatisfied
+	mockIsSatisfied,
+	searchAllMock,
+	searchEnhancedMock
 } = vi.hoisted(() => {
 	const mockIsSatisfied = vi.fn().mockResolvedValue({ accepted: true });
+	const searchAllMock = vi.fn().mockResolvedValue([]);
+	const searchEnhancedMock = vi.fn().mockResolvedValue({ releases: [], rejections: [] });
 	return {
 		findManyEpisodesMock: vi.fn(),
 		findManyEpisodeFilesMock: vi.fn(),
@@ -27,7 +31,9 @@ const {
 			})
 		}),
 		findManyDownloadQueueMock: vi.fn().mockResolvedValue([]),
-		mockIsSatisfied
+		mockIsSatisfied,
+		searchAllMock,
+		searchEnhancedMock
 	};
 });
 
@@ -106,9 +112,23 @@ vi.mock('../specifications/index.js', () => ({
 // Mock IndexerManager — return no search results to keep things simple
 vi.mock('$lib/server/indexers/IndexerManager.js', () => ({
 	getIndexerManager: vi.fn(async () => ({
-		searchAll: vi.fn().mockResolvedValue([]),
-		searchEnhanced: vi.fn().mockResolvedValue({ releases: [], rejections: [] })
+		searchAll: searchAllMock,
+		searchEnhanced: searchEnhancedMock
 	}))
+}));
+
+vi.mock('$lib/server/downloads/episode-pointer.js', () => ({
+	parseEpisodePointerFromGuid: vi.fn(),
+	parseEpisodePointerFromTitle: vi.fn((title: string | undefined) => {
+		if (typeof title !== 'string') return null;
+		const match = title.match(/^Season\s+(\d+)\s+Episode\s+(\d+)\s*-/i);
+		if (!match) return null;
+		return {
+			season: Number.parseInt(match[1], 10),
+			episode: Number.parseInt(match[2], 10),
+			token: `S${match[1].padStart(2, '0')}E${match[2].padStart(2, '0')}`
+		};
+	})
 }));
 
 // Mock ReleaseGrabService
@@ -261,6 +281,8 @@ describe('MonitoringSearchService - searchEpisodeUpgrades', () => {
 		mockIsSatisfied.mockReset().mockResolvedValue({ accepted: true });
 
 		service = new MonitoringSearchService();
+		searchAllMock.mockReset().mockResolvedValue([]);
+		searchEnhancedMock.mockReset().mockResolvedValue({ releases: [], rejections: [] });
 	});
 
 	it('should use the correct episode file as upgrade baseline, not an arbitrary series file (issue #213)', async () => {
@@ -376,5 +398,133 @@ describe('MonitoringSearchService - searchEpisodeUpgrades', () => {
 		for (const ctx of [...ep1Contexts, ...ep2Contexts]) {
 			expect(ctx.existingFile.id).toBe('file-multi');
 		}
+	});
+});
+
+describe('MonitoringSearchService - RuTracker missing-episode behavior', () => {
+	let service: InstanceType<typeof MonitoringSearchService>;
+
+	beforeEach(() => {
+		findManyDownloadQueueMock.mockReset().mockResolvedValue([]);
+		updateEpisodeMock.mockReset().mockImplementation(() => ({
+			set: vi.fn().mockImplementation(() => ({
+				where: vi.fn().mockResolvedValue(undefined)
+			}))
+		}));
+		searchEnhancedMock.mockReset().mockResolvedValue({ releases: [], rejections: [] });
+		service = new MonitoringSearchService();
+	});
+
+	it('does not treat an episode pointer as a full-season pack grab', async () => {
+		const getSeasonEpisodeCountSpy = vi
+			.spyOn(service as any, 'getSeasonEpisodeCount')
+			.mockResolvedValue(10);
+		const searchSeasonPackSpy = vi
+			.spyOn(service as any, 'searchAndGrabSeasonPack')
+			.mockResolvedValue({
+				itemId: 'ep-1',
+				itemType: 'episode',
+				title: 'Test Show Season 1',
+				searched: true,
+				releasesFound: 0,
+				grabbed: false
+			});
+		const searchEpisodeSpy = vi
+			.spyOn(service as any, 'searchAndGrabEpisode')
+			.mockResolvedValueOnce({
+				itemId: 'ep-1',
+				itemType: 'episode',
+				title: 'Test Show S01E01',
+				searched: true,
+				releasesFound: 1,
+				grabbed: true,
+				grabbedRelease: 'Season 1 Episode 1 - Test Show: S1E1-10 of 10 [2025]'
+			})
+			.mockResolvedValueOnce({
+				itemId: 'ep-2',
+				itemType: 'episode',
+				title: 'Test Show S01E02',
+				searched: true,
+				releasesFound: 0,
+				grabbed: false
+			});
+
+		const seriesData = { id: 'series-1', title: 'Test Show' } as any;
+		const seasonMap = new Map<number, Array<any>>([
+			[
+				1,
+				[
+					{ id: 'ep-1', seasonNumber: 1, episodeNumber: 1 },
+					{ id: 'ep-2', seasonNumber: 1, episodeNumber: 2 }
+				]
+			]
+		]);
+
+		await (service as any).searchSeriesWithCascadingStrategy(seriesData, seasonMap);
+
+		expect(getSeasonEpisodeCountSpy).toHaveBeenCalled();
+		expect(searchSeasonPackSpy).not.toHaveBeenCalled();
+		expect(searchEpisodeSpy).toHaveBeenCalledTimes(2);
+	});
+
+	it('skips RuTracker season-pack grabs when the season is only partially missing', async () => {
+		vi.spyOn(service as any, 'getSeasonEpisodeCount').mockResolvedValue(10);
+		const grabReleaseSpy = vi.spyOn(service as any, 'grabRelease').mockResolvedValue({
+			success: true,
+			releaseName: 'Should not grab'
+		});
+
+		searchEnhancedMock.mockResolvedValue({
+			releases: [
+				{
+					title: 'Test Show: S1E1-10 of 10 [2025]',
+					guid: 'https://rutracker.org/forum/viewtopic.php?t=123',
+					size: 10_000_000_000,
+					indexerId: 'idx-rutracker',
+					indexerName: 'RuTracker.org',
+					parsed: {
+						episode: {
+							isSeasonPack: true,
+							season: 1,
+							seasons: [1],
+							episodes: Array.from({ length: 10 }, (_, i) => i + 1),
+							isCompleteSeries: false,
+							isDaily: false
+						}
+					},
+					episodeMatch: {
+						isSeasonPack: true,
+						season: 1,
+						seasons: [1],
+						episodes: Array.from({ length: 10 }, (_, i) => i + 1),
+						isCompleteSeries: false,
+						isDaily: false
+					},
+					totalScore: 100,
+					infoHash: 'abc'
+				}
+			],
+			rejections: []
+		});
+
+		const seriesData = {
+			id: 'series-1',
+			title: 'Test Show',
+			tmdbId: 1,
+			tvdbId: 2,
+			imdbId: 'tt123',
+			scoringProfileId: null
+		} as any;
+
+		const result = await (service as any).searchAndGrabSeasonPack(seriesData, 1, [
+			{ id: 'ep-1' },
+			{ id: 'ep-2' },
+			{ id: 'ep-3' },
+			{ id: 'ep-4' },
+			{ id: 'ep-5' }
+		]);
+
+		expect(result.grabbed).toBe(false);
+		expect(grabReleaseSpy).not.toHaveBeenCalled();
 	});
 });

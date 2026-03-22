@@ -1055,9 +1055,7 @@ export class DownloadMonitorService extends EventEmitter implements BackgroundSe
 		// Get all downloads from this client
 		const downloads = await instance.getDownloads();
 		const clientProtocol =
-			client.implementation === 'sabnzbd' ||
-			client.implementation === 'nzbget' ||
-			client.implementation === 'nzb-mount'
+			client.implementation === 'sabnzbd' || client.implementation === 'nzbget'
 				? 'usenet'
 				: 'torrent';
 		await extendQueueTombstonesFromDownloads({
@@ -1101,7 +1099,7 @@ export class DownloadMonitorService extends EventEmitter implements BackgroundSe
 				}
 			}
 
-			// Fallback for SABnzbd: try matching by title
+			// Fallback for SABnzbd-compatible clients: try matching by title
 			// SABnzbd generates new nzo_id when downloads are re-added,
 			// unlike torrent hashes which are persistent
 			if (!download && client.implementation === 'sabnzbd') {

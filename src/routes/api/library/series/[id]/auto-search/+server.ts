@@ -155,16 +155,16 @@ export const POST: RequestHandler = async ({ params, request }) => {
 									{
 										itemId: episodeId,
 										itemLabel: 'Episode',
-										found: result.success && !!result.releaseName,
-										grabbed: result.success && !!result.releaseName,
+										found: result.success,
+										grabbed: result.success,
 										releaseName: result.releaseName,
 										error: result.error
 									}
 								],
 								summary: {
 									searched: 1,
-									found: result.success && result.releaseName ? 1 : 0,
-									grabbed: result.success && result.releaseName ? 1 : 0
+									found: result.success ? 1 : 0,
+									grabbed: result.success ? 1 : 0
 								}
 							});
 							break;
@@ -191,16 +191,16 @@ export const POST: RequestHandler = async ({ params, request }) => {
 									{
 										itemId: `${seriesId}-s${seasonNumber}`,
 										itemLabel: `Season ${seasonNumber}`,
-										found: result.success && !!result.releaseName,
-										grabbed: result.success && !!result.releaseName,
+										found: result.success,
+										grabbed: result.success,
 										releaseName: result.releaseName,
 										error: result.error
 									}
 								],
 								summary: {
 									searched: 1,
-									found: result.success && result.releaseName ? 1 : 0,
-									grabbed: result.success && result.releaseName ? 1 : 0
+									found: result.success ? 1 : 0,
+									grabbed: result.success ? 1 : 0
 								}
 							});
 							break;
@@ -209,8 +209,9 @@ export const POST: RequestHandler = async ({ params, request }) => {
 						case 'missing': {
 							const result = await searchOnAdd.searchForMissingEpisodes(seriesId, onProgress, {
 								bypassMonitoring: true,
-								// Manual Auto Grab should avoid season-pack pulls to prevent duplicate full-season grabs.
-								searchStrategy: 'episode-only'
+								// RuTracker-only setups use episode-only workflow.
+								// Mixed/non-RuTracker setups stay on pack-first behavior.
+								searchStrategy: 'auto'
 							});
 
 							sendEvent('search:completed', {

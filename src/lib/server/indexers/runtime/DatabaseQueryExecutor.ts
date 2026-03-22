@@ -259,7 +259,7 @@ export class DatabaseQueryExecutor {
 	 * Execute default TV query when no YAML query is defined.
 	 * Generates releases based on search criteria:
 	 * - Episode specified → single episode release
-	 * - Season specified (no episode) → season pack + individual episodes
+	 * - Season specified (no episode) → season pack only
 	 * - Neither specified → complete series + season packs
 	 *
 	 * Quality is determined at playback time by the streaming proxy.
@@ -340,18 +340,14 @@ export class DatabaseQueryExecutor {
 					releaseResults.push(this.createEpisodeRelease(show, episode, context));
 				}
 			} else if (hasSeasonFilter) {
-				// Specific season requested → season pack + individual episodes
+				// Specific season requested → season pack only.
+				// Episode-level selection is handled by explicit episode searches.
 				const seasonNum = criteria.season!;
 				const seasonEps = seasonMap.get(seasonNum) || [];
 
 				if (seasonEps.length > 0) {
 					// Add season pack release
 					releaseResults.push(this.createSeasonPackRelease(show, seasonNum, seasonEps, context));
-
-					// Also add individual episode releases for flexibility
-					for (const episode of seasonEps) {
-						releaseResults.push(this.createEpisodeRelease(show, episode, context));
-					}
 				}
 			} else {
 				// No season/episode filter → complete series + season packs + episodes

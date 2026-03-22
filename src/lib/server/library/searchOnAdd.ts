@@ -25,7 +25,13 @@ import { logger } from '$lib/logging/index.js';
 import { db } from '$lib/server/db/index.js';
 import { movieFiles, series, episodes, episodeFiles } from '$lib/server/db/schema.js';
 import { eq, and, inArray, ne } from 'drizzle-orm';
-import type { SearchCriteria } from '$lib/server/indexers/types';
+import {
+	CINEPHAGE_STREAM_DEFINITION_ID,
+	indexerHasCategoriesForSearchType,
+	type IndexerCapabilities,
+	type IndexerConfig,
+	type SearchCriteria
+} from '$lib/server/indexers/types';
 import { evaluateIndexerSearchAvailability } from '$lib/server/indexers/search/availability';
 import {
 	getMovieSearchTitles,
@@ -99,9 +105,11 @@ interface SearchForMissingEpisodesOptions {
 	/**
 	 * Search strategy for missing episodes.
 	 * - 'pack-first': complete/multi-season/single-season packs, then episodes
-	 * - 'episode-only': only targeted episode searches (no pack queries)
+	 * - 'episode-only': targeted episode searches, but if an entire aired season is missing
+	 *   we attempt a single-season pack grab first
+	 * - 'auto': use episode-only only when RuTracker is the sole eligible TV indexer
 	 */
-	searchStrategy?: 'pack-first' | 'episode-only';
+	searchStrategy?: 'pack-first' | 'episode-only' | 'auto';
 }
 
 /** Result for a single item in multi-search operations */
@@ -1106,16 +1114,14 @@ class SearchOnAddService {
 			}
 
 			const indexerManager = await getIndexerManager();
-			const indexerAvailability = evaluateIndexerSearchAvailability(
-				await indexerManager.getIndexers(),
-				{
-					searchType: 'tv',
-					searchSource: 'interactive',
-					scoringProfileId: seriesData.scoringProfileId ?? undefined,
-					getDefinitionCapabilities: (definitionId) =>
-						indexerManager.getDefinitionCapabilities(definitionId)
-				}
-			);
+			const indexerConfigs = await indexerManager.getIndexers();
+			const indexerAvailability = evaluateIndexerSearchAvailability(indexerConfigs, {
+				searchType: 'tv',
+				searchSource: 'interactive',
+				scoringProfileId: seriesData.scoringProfileId ?? undefined,
+				getDefinitionCapabilities: (definitionId) =>
+					indexerManager.getDefinitionCapabilities(definitionId)
+			});
 
 			if (!indexerAvailability.ok) {
 				const errorMessage = indexerAvailability.message || 'No indexers are available';
@@ -1133,6 +1139,16 @@ class SearchOnAddService {
 					error: errorMessage
 				};
 			}
+
+			const effectiveSearchStrategy =
+				searchStrategy === 'auto'
+					? this.resolveAutoMissingSearchStrategy(indexerConfigs, {
+							searchSource: 'interactive',
+							scoringProfileId: seriesData.scoringProfileId,
+							getDefinitionCapabilities: (definitionId) =>
+								indexerManager.getDefinitionCapabilities(definitionId)
+						})
+					: searchStrategy;
 
 			// Find all missing episodes. Automatic/background searches only include monitored
 			// episodes, while manual user-triggered searches can bypass monitoring.
@@ -1162,7 +1178,8 @@ class SearchOnAddService {
 				{
 					seriesId,
 					total: missingEpisodes.length,
-					aired: airedMissingEpisodes.length
+					aired: airedMissingEpisodes.length,
+					searchStrategy: effectiveSearchStrategy
 				},
 				'[SearchOnAdd] Found missing episodes'
 			);
@@ -1184,10 +1201,39 @@ class SearchOnAddService {
 				monitored: ep.monitored
 			}));
 
-			if (searchStrategy === 'episode-only') {
+			if (effectiveSearchStrategy === 'episode-only') {
 				const sortedEpisodes = [...episodesToSearch].sort(
 					(a, b) => a.seasonNumber - b.seasonNumber || a.episodeNumber - b.episodeNumber
 				);
+				const episodesBySeason = new Map<number, EpisodeToSearch[]>();
+				for (const episode of sortedEpisodes) {
+					const seasonEpisodes = episodesBySeason.get(episode.seasonNumber) ?? [];
+					seasonEpisodes.push(episode);
+					episodesBySeason.set(episode.seasonNumber, seasonEpisodes);
+				}
+
+				// Determine aired + eligible episode totals per season to decide whether
+				// a season is fully missing and should use a season-pack grab.
+				const eligibleSeasonConditions = [
+					eq(episodes.seriesId, seriesId),
+					ne(episodes.seasonNumber, 0)
+				];
+				if (!bypassMonitoring) {
+					eligibleSeasonConditions.push(eq(episodes.monitored, true));
+				}
+				const eligibleSeasonEpisodes = await db.query.episodes.findMany({
+					where: and(...eligibleSeasonConditions)
+				});
+				const eligibleAiredSeasonEpisodeCounts = new Map<number, number>();
+				for (const seasonEpisode of eligibleSeasonEpisodes) {
+					if (!seasonEpisode.airDate || seasonEpisode.airDate > now) {
+						continue;
+					}
+					eligibleAiredSeasonEpisodeCounts.set(
+						seasonEpisode.seasonNumber,
+						(eligibleAiredSeasonEpisodeCounts.get(seasonEpisode.seasonNumber) ?? 0) + 1
+					);
+				}
 
 				onProgress?.({
 					phase: 'initializing',
@@ -1202,47 +1248,120 @@ class SearchOnAddService {
 				const results: AutoSearchItemResult[] = [];
 				let foundCount = 0;
 				let grabbedCount = 0;
+				let individualEpisodesGrabbed = 0;
+				let seasonPacksGrabbed = 0;
+				const seasonPacks: NonNullable<MultiSearchResult['seasonPacks']> = [];
+				let processedEpisodes = 0;
 
-				for (let i = 0; i < sortedEpisodes.length; i++) {
-					const episode = sortedEpisodes[i];
-					const episodeLabel = `S${episode.seasonNumber.toString().padStart(2, '0')}E${episode.episodeNumber
-						.toString()
-						.padStart(2, '0')}`;
+				const sortedSeasons = [...episodesBySeason.keys()].sort((a, b) => a - b);
+				for (const seasonNumber of sortedSeasons) {
+					const seasonEpisodes = episodesBySeason.get(seasonNumber) ?? [];
+					if (seasonEpisodes.length === 0) {
+						continue;
+					}
 
-					onProgress?.({
-						phase: 'individual_episode_search',
-						message: `Searching ${episodeLabel}...`,
-						percentComplete: Math.min(95, 10 + Math.round(((i + 1) / sortedEpisodes.length) * 80)),
-						currentItem: episodeLabel,
-						details: {
-							releaseType: 'episode',
-							decision: 'pending'
+					const eligibleAiredSeasonCount = eligibleAiredSeasonEpisodeCounts.get(seasonNumber) ?? 0;
+					const isEntireSeasonMissing =
+						eligibleAiredSeasonCount > 0 && seasonEpisodes.length === eligibleAiredSeasonCount;
+
+					if (isEntireSeasonMissing) {
+						onProgress?.({
+							phase: 'single_season_search',
+							message: `Searching season pack for Season ${seasonNumber}...`,
+							percentComplete: Math.min(
+								95,
+								10 + Math.round((processedEpisodes / sortedEpisodes.length) * 80)
+							),
+							currentItem: `Season ${seasonNumber}`,
+							details: {
+								releaseType: 'single_season',
+								decision: 'pending'
+							}
+						});
+
+						const seasonSearchResult = await this.searchForSeason({
+							seriesId,
+							seasonNumber,
+							bypassMonitoring
+						});
+						const seasonPackWasGrabbed = seasonSearchResult.success;
+
+						if (seasonPackWasGrabbed) {
+							seasonPacksGrabbed++;
+							const seasonPackReleaseName = seasonSearchResult.releaseName;
+							if (seasonPackReleaseName) {
+								seasonPacks.push({
+									seasonNumber,
+									releaseName: seasonPackReleaseName,
+									episodesCovered: seasonEpisodes.map((episode) => episode.id)
+								});
+							}
+
+							for (const episode of seasonEpisodes) {
+								const episodeLabel = `S${episode.seasonNumber.toString().padStart(2, '0')}E${episode.episodeNumber
+									.toString()
+									.padStart(2, '0')}`;
+								foundCount++;
+								grabbedCount++;
+								results.push({
+									itemId: episode.id,
+									itemLabel: episodeLabel,
+									found: true,
+									grabbed: true,
+									releaseName: seasonSearchResult.releaseName,
+									wasPackGrab: true
+								});
+							}
+							processedEpisodes += seasonEpisodes.length;
+							continue;
 						}
-					});
-
-					const searchResult = await this.searchForEpisode({
-						episodeId: episode.id,
-						bypassMonitoring
-					});
-
-					const wasGrabbed = searchResult.success && !!searchResult.releaseName;
-					const wasFound = wasGrabbed;
-
-					if (wasFound) {
-						foundCount++;
-					}
-					if (wasGrabbed) {
-						grabbedCount++;
 					}
 
-					results.push({
-						itemId: episode.id,
-						itemLabel: episodeLabel,
-						found: wasFound,
-						grabbed: wasGrabbed,
-						releaseName: searchResult.releaseName,
-						error: wasGrabbed ? undefined : (searchResult.error ?? 'No suitable releases found')
-					});
+					for (const episode of seasonEpisodes) {
+						const episodeLabel = `S${episode.seasonNumber.toString().padStart(2, '0')}E${episode.episodeNumber
+							.toString()
+							.padStart(2, '0')}`;
+
+						onProgress?.({
+							phase: 'individual_episode_search',
+							message: `Searching ${episodeLabel}...`,
+							percentComplete: Math.min(
+								95,
+								10 + Math.round(((processedEpisodes + 1) / sortedEpisodes.length) * 80)
+							),
+							currentItem: episodeLabel,
+							details: {
+								releaseType: 'episode',
+								decision: 'pending'
+							}
+						});
+
+						const searchResult = await this.searchForEpisode({
+							episodeId: episode.id,
+							bypassMonitoring
+						});
+
+						const wasGrabbed = searchResult.success;
+						const wasFound = wasGrabbed;
+
+						if (wasFound) {
+							foundCount++;
+						}
+						if (wasGrabbed) {
+							grabbedCount++;
+							individualEpisodesGrabbed++;
+						}
+
+						results.push({
+							itemId: episode.id,
+							itemLabel: episodeLabel,
+							found: wasFound,
+							grabbed: wasGrabbed,
+							releaseName: searchResult.releaseName,
+							error: wasGrabbed ? undefined : (searchResult.error ?? 'No suitable releases found')
+						});
+						processedEpisodes++;
+					}
 				}
 
 				onProgress?.({
@@ -1256,7 +1375,8 @@ class SearchOnAddService {
 						seriesId,
 						searched: sortedEpisodes.length,
 						found: foundCount,
-						grabbed: grabbedCount
+						grabbed: grabbedCount,
+						seasonPacksGrabbed
 					},
 					'[SearchOnAdd] Missing episodes targeted search completed'
 				);
@@ -1267,9 +1387,10 @@ class SearchOnAddService {
 						searched: sortedEpisodes.length,
 						found: foundCount,
 						grabbed: grabbedCount,
-						seasonPacksGrabbed: 0,
-						individualEpisodesGrabbed: grabbedCount
-					}
+						seasonPacksGrabbed,
+						individualEpisodesGrabbed
+					},
+					seasonPacks: seasonPacks.length > 0 ? seasonPacks : undefined
 				};
 			}
 
@@ -1277,6 +1398,9 @@ class SearchOnAddService {
 			const { getMultiSeasonSearchStrategy } =
 				await import('$lib/server/downloads/MultiSeasonSearchStrategy.js');
 			const multiSeasonStrategy = getMultiSeasonSearchStrategy();
+			// Manual missing auto-grab should avoid re-downloading existing episodes.
+			// Require 100% missing coverage before attempting any pack type.
+			const packThreshold = bypassMonitoring ? 100 : undefined;
 
 			const searchResult = await multiSeasonStrategy.searchWithMultiSeasonPriority({
 				seriesData: {
@@ -1290,7 +1414,10 @@ class SearchOnAddService {
 				episodes: episodesToSearch,
 				scoringProfileId: seriesData.scoringProfileId ?? undefined,
 				searchSource: 'interactive',
-				onProgress
+				onProgress,
+				completeSeriesThreshold: packThreshold,
+				multiSeasonThreshold: packThreshold,
+				singleSeasonThreshold: packThreshold
 			});
 
 			// Convert results to AutoSearchItemResult format
@@ -1565,6 +1692,63 @@ class SearchOnAddService {
 				summary: { searched: 0, found: 0, grabbed: 0 },
 				error: message
 			};
+		}
+	}
+
+	private resolveAutoMissingSearchStrategy(
+		indexerConfigs: IndexerConfig[],
+		options: {
+			searchSource: 'interactive' | 'automatic';
+			scoringProfileId?: string | null;
+			getDefinitionCapabilities: (definitionId: string) => IndexerCapabilities | undefined;
+		}
+	): 'pack-first' | 'episode-only' {
+		const isStreamerProfile = options.scoringProfileId === 'streamer';
+		const profileScoped = isStreamerProfile
+			? indexerConfigs.filter((config) => config.definitionId === CINEPHAGE_STREAM_DEFINITION_ID)
+			: indexerConfigs;
+
+		const eligibleTvIndexers = profileScoped.filter((config) => {
+			if (!config.enabled) {
+				return false;
+			}
+			if (options.searchSource === 'interactive' && config.enableInteractiveSearch === false) {
+				return false;
+			}
+			if (options.searchSource === 'automatic' && config.enableAutomaticSearch === false) {
+				return false;
+			}
+
+			const capabilities = options.getDefinitionCapabilities(config.definitionId);
+			return Boolean(
+				capabilities?.tvSearch?.available &&
+				indexerHasCategoriesForSearchType(capabilities.categories, 'tv')
+			);
+		});
+
+		const hasRuTracker = eligibleTvIndexers.some(
+			(config) => this.isRuTrackerIndexerName(config.name) || this.isRuTrackerHost(config.baseUrl)
+		);
+		const hasNonRuTracker = eligibleTvIndexers.some(
+			(config) =>
+				!(this.isRuTrackerIndexerName(config.name) || this.isRuTrackerHost(config.baseUrl))
+		);
+
+		return hasRuTracker && !hasNonRuTracker ? 'episode-only' : 'pack-first';
+	}
+
+	private isRuTrackerIndexerName(indexerName: string | undefined): boolean {
+		return typeof indexerName === 'string' && indexerName.toLowerCase().includes('rutracker');
+	}
+
+	private isRuTrackerHost(baseUrl: string | undefined): boolean {
+		if (!baseUrl) {
+			return false;
+		}
+		try {
+			return new URL(baseUrl).hostname.toLowerCase().includes('rutracker.');
+		} catch {
+			return baseUrl.toLowerCase().includes('rutracker.');
 		}
 	}
 }

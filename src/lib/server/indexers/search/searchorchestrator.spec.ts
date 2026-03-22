@@ -180,6 +180,84 @@ describe('SearchOrchestrator.executeMultiTitleTextSearch', () => {
 			)
 		).toBe(true);
 	});
+
+	it('reuses cached RuTracker season search results across automatic episode variants', async () => {
+		const orchestrator = new SearchOrchestrator();
+		const captured: any[] = [];
+
+		const fakeIndexer = {
+			name: 'RuTracker.org',
+			baseUrl: 'https://rutracker.org/forum',
+			capabilities: mockCapabilities,
+			search: async (criteria: any) => {
+				captured.push(criteria);
+				return [];
+			}
+		} as any;
+
+		const baseCriteria = {
+			searchType: 'tv',
+			searchSource: 'automatic',
+			query: 'Stranger Things',
+			searchTitles: ['Stranger Things', '怪奇物语', 'Очень странные дела'],
+			season: 1
+		} as any;
+
+		await (orchestrator as any).executeMultiTitleTextSearch(fakeIndexer, {
+			...baseCriteria,
+			episode: 1
+		});
+		await (orchestrator as any).executeMultiTitleTextSearch(fakeIndexer, {
+			...baseCriteria,
+			episode: 2
+		});
+
+		// First call: two title variants (budgeted). Second call: served from cache.
+		expect(captured).toHaveLength(2);
+		expect(captured.every((c: any) => c.preferredEpisodeFormat === 'standard')).toBe(true);
+		expect(captured.every((c: any) => c.episode === undefined)).toBe(true);
+		expect(captured.every((c: any) => c.season === 1)).toBe(true);
+	});
+
+	it('dedupes concurrent RuTracker automatic season searches into a single in-flight request', async () => {
+		const orchestrator = new SearchOrchestrator();
+		const captured: any[] = [];
+
+		const fakeIndexer = {
+			name: 'RuTracker.org',
+			baseUrl: 'https://rutracker.org/forum',
+			capabilities: mockCapabilities,
+			search: async (criteria: any) => {
+				captured.push(criteria);
+				await new Promise((resolve) => setTimeout(resolve, 15));
+				return [];
+			}
+		} as any;
+
+		const baseCriteria = {
+			searchType: 'tv',
+			searchSource: 'automatic',
+			query: 'Stranger Things',
+			searchTitles: ['Stranger Things', '怪奇物语', 'Очень странные дела'],
+			season: 1
+		} as any;
+
+		await Promise.all([
+			(orchestrator as any).executeMultiTitleTextSearch(fakeIndexer, {
+				...baseCriteria,
+				episode: 1
+			}),
+			(orchestrator as any).executeMultiTitleTextSearch(fakeIndexer, {
+				...baseCriteria,
+				episode: 2
+			})
+		]);
+
+		// Budget is 2 titles; with in-flight dedupe concurrent calls should still issue only 2 variants total.
+		expect(captured).toHaveLength(2);
+		expect(captured.every((c: any) => c.preferredEpisodeFormat === 'standard')).toBe(true);
+		expect(captured.every((c: any) => c.episode === undefined)).toBe(true);
+	});
 });
 
 describe('SearchOrchestrator.executeWithTiering', () => {
@@ -560,6 +638,132 @@ describe('SearchOrchestrator.filterBySeasonEpisode', () => {
 		expect(titles).toEqual(
 			['Smallville.S01.COMPLETE.1080p.BluRay', 'Smallville.S01E01.1080p.WEBRip'].sort()
 		);
+	});
+
+	it('rejects incomplete RuTracker season packs for season-only searches', () => {
+		const releases = [
+			{
+				title: '/ Stranger Things / S1E1-8 8 [2016, WEB-DL 2160p]',
+				indexerName: 'RuTracker.org'
+			},
+			{
+				title: '/ Stranger Things / S1E1-6 8 [2016, WEB-DL 2160p]',
+				indexerName: 'RuTracker.org'
+			}
+		] as any[];
+
+		const criteria = {
+			searchType: 'tv',
+			searchSource: 'interactive',
+			season: 1
+		} as any;
+
+		const filtered = (orchestrator as any).filterBySeasonEpisode(releases, criteria, {
+			seasonEpisodeCount: 8
+		});
+
+		expect(filtered).toHaveLength(1);
+		expect(filtered[0].title).toBe('Stranger Things: S1E1-8 of 8 [2016, WEB-DL 2160p]');
+	});
+
+	it('rejects RuTracker packs that exceed target season episode count', () => {
+		const releases = [
+			{
+				title: 'The Vampire Diaries: S1E1-171 of 171 [2009-2017, BDRip] MVO (LostFilm)',
+				indexerName: 'RuTracker.org'
+			}
+		] as any[];
+
+		const criteria = {
+			searchType: 'tv',
+			searchSource: 'interactive',
+			season: 1
+		} as any;
+
+		const filtered = (orchestrator as any).filterBySeasonEpisode(releases, criteria, {
+			seasonEpisodeCount: 22
+		});
+
+		expect(filtered).toHaveLength(0);
+	});
+
+	it('uses episode pointers for RuTracker season packs in automatic episode searches', () => {
+		const releases = [
+			{
+				title: '/ Stranger Things / S1E1-8 8 [2016, WEB-DL 2160p]',
+				indexerName: 'RuTracker.org',
+				guid: 'rutracker-pack'
+			}
+		] as any[];
+
+		const criteria = {
+			searchType: 'tv',
+			searchSource: 'automatic',
+			season: 1,
+			episode: 8
+		} as any;
+
+		const filtered = (orchestrator as any).filterBySeasonEpisode(releases, criteria);
+
+		expect(filtered).toHaveLength(1);
+		expect(filtered[0].title).toContain('Season 1 Episode 8 - ');
+		expect(filtered[0].guid).toContain('episode-pointer::s01e08');
+	});
+
+	it('returns RuTracker episode pointers only in interactive episode workflow', () => {
+		const releases = [
+			{
+				title: 'Stranger Things.S01E08.1080p.WEBRip',
+				indexerName: 'RuTracker.org',
+				guid: 'rutracker-exact'
+			},
+			{
+				title: '/ Stranger Things / S1E1-8 8 [2016, WEB-DL 2160p]',
+				indexerName: 'RuTracker.org',
+				guid: 'rutracker-pack'
+			}
+		] as any[];
+
+		const criteria = {
+			searchType: 'tv',
+			searchSource: 'interactive',
+			season: 1,
+			episode: 8
+		} as any;
+
+		const filtered = (orchestrator as any).filterBySeasonEpisode(releases, criteria);
+
+		expect(filtered).toHaveLength(1);
+		expect(filtered[0].guid).toContain('episode-pointer::s01e08');
+		expect(filtered[0].title).toContain('Season 1 Episode 8 - ');
+	});
+
+	it('returns RuTracker episode pointers only in automatic episode workflow', () => {
+		const releases = [
+			{
+				title: 'Stranger Things.S01E08.1080p.WEBRip',
+				indexerName: 'RuTracker.org',
+				guid: 'rutracker-exact'
+			},
+			{
+				title: '/ Stranger Things / S1E1-8 8 [2016, WEB-DL 2160p]',
+				indexerName: 'RuTracker.org',
+				guid: 'rutracker-pack'
+			}
+		] as any[];
+
+		const criteria = {
+			searchType: 'tv',
+			searchSource: 'automatic',
+			season: 1,
+			episode: 8
+		} as any;
+
+		const filtered = (orchestrator as any).filterBySeasonEpisode(releases, criteria);
+
+		expect(filtered).toHaveLength(1);
+		expect(filtered[0].guid).toContain('episode-pointer::s01e08');
+		expect(filtered[0].title).toContain('Season 1 Episode 8 - ');
 	});
 });
 

@@ -38,6 +38,7 @@ import { DownloadHandler, createDownloadHandler } from './DownloadHandler';
 import { SearchCapabilityChecker } from './SearchCapabilityChecker';
 import { getPersistentStatusTracker } from '../status';
 import { getRateLimitRegistry } from '../ratelimit';
+import { getHostRateLimiter, type HostRateLimiter } from '../ratelimit/HostRateLimiter';
 import type { RateLimitConfig } from '../ratelimit/types';
 import { createChildLogger } from '$lib/logging';
 import { IndexerHttp, createIndexerHttp } from '../http/IndexerHttp';
@@ -91,6 +92,7 @@ export class UnifiedIndexer implements IIndexer {
 	private readonly capabilityChecker: SearchCapabilityChecker;
 	private readonly log: ReturnType<typeof createChildLogger>;
 	private readonly http: IndexerHttp;
+	private readonly hostRateLimiter: HostRateLimiter;
 	private readonly dbExecutor?: DatabaseQueryExecutor;
 
 	private cookies: Record<string, string> = {};
@@ -207,6 +209,7 @@ export class UnifiedIndexer implements IIndexer {
 			rateLimit: rateLimit ?? { requests: 30, periodMs: 60_000 },
 			encoding: definition.encoding
 		});
+		this.hostRateLimiter = getHostRateLimiter();
 
 		// Create database executor for internal streaming indexers
 		if (this.isInternalStreamingIndexer()) {
@@ -466,9 +469,6 @@ export class UnifiedIndexer implements IIndexer {
 		criteria: SearchCriteria,
 		startTime: number
 	): Promise<ReleaseResult[]> {
-		// Check rate limit
-		await this.checkRateLimit();
-
 		// Ensure we're logged in
 		await this.ensureLoggedIn();
 
@@ -496,6 +496,11 @@ export class UnifiedIndexer implements IIndexer {
 		for (const request of requests) {
 			this.log.debug({ url: request.url, method: request.method }, 'Executing search request');
 			try {
+				// Enforce both indexer and host limits per outbound request
+				// to avoid multi-variant search bursts against tracker hosts.
+				await this.checkRateLimit();
+				await this.hostRateLimiter.waitIfNeeded(request.url);
+
 				const results = await this.executeSearchRequest(request);
 				allResults.push(...results);
 				successfulRequests += 1;

@@ -38,6 +38,7 @@
 	} from '$lib/types/livetv';
 	import { onDestroy, onMount } from 'svelte';
 	import { createSSE } from '$lib/sse';
+	import { layoutState, deriveMobileSseStatus } from '$lib/layout.svelte';
 	import { resolvePath } from '$lib/utils/routing';
 	import { copyToClipboard as copyTextToClipboard } from '$lib/utils/clipboard';
 	import { toasts } from '$lib/stores/toast.svelte';
@@ -308,6 +309,13 @@
 		'channels:syncStarted': () => {},
 		'channels:syncCompleted': () => {},
 		'channels:syncFailed': () => {}
+	});
+
+	$effect(() => {
+		layoutState.setMobileSseStatus(deriveMobileSseStatus(sse));
+		return () => {
+			layoutState.clearMobileSseStatus();
+		};
 	});
 
 	async function fetchEpgData() {

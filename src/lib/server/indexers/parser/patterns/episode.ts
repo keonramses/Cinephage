@@ -238,7 +238,7 @@ const EPISODE_PATTERNS: Array<{
 	// "S01E01-08", "S1E1-E8"
 	{
 		pattern:
-			/\bS(\d{1,2})[\s._-]?E(\d{1,3})[\s._-]?-[\s._-]?E?(\d{1,3})(?:\s*(?:of|\/)\s*(\d{1,3}))?\b/i,
+			/\bS(\d{1,2})[\s._-]?E(\d{1,3})[\s._-]?-[\s._-]?E?(\d{1,3})(?!:)(?:\s*(?:of|\/)\s*(\d{1,3}))?\b/i,
 		extract: (match) => {
 			const season = parseInt(match[1], 10);
 			const startEpisode = parseInt(match[2], 10);
