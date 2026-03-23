@@ -13,6 +13,8 @@ import { series } from '$lib/server/db/schema.js';
 import { eq } from 'drizzle-orm';
 import { logger } from '$lib/logging';
 import type { SearchProgressUpdate } from '$lib/server/downloads/MultiSeasonSearchStrategy.js';
+import { collectAutoSearchIssues } from '$lib/server/library/autoSearchIssues.js';
+import { getAutoSearchPreflightIssue } from '$lib/server/library/autoSearchPreflight.js';
 
 /**
  * Auto-Search Request Types
@@ -134,6 +136,25 @@ export const POST: RequestHandler = async ({ params, request }) => {
 				};
 
 				try {
+					const preflightIssue = await getAutoSearchPreflightIssue(
+						seriesData.scoringProfileId,
+						'tv'
+					);
+					if (preflightIssue) {
+						sendEvent('search:completed', {
+							success: false,
+							results: [],
+							summary: {
+								searched: 0,
+								found: 0,
+								grabbed: 0
+							},
+							error: preflightIssue.message,
+							issues: [preflightIssue]
+						});
+						return;
+					}
+
 					switch (type) {
 						case 'episode': {
 							if (!episodeId) {
@@ -148,6 +169,7 @@ export const POST: RequestHandler = async ({ params, request }) => {
 								episodeId,
 								bypassMonitoring: true
 							});
+							const issues = collectAutoSearchIssues([result.error]);
 
 							sendEvent('search:completed', {
 								success: result.success,
@@ -161,6 +183,7 @@ export const POST: RequestHandler = async ({ params, request }) => {
 										error: result.error
 									}
 								],
+								issues: issues.length > 0 ? issues : undefined,
 								summary: {
 									searched: 1,
 									found: result.success ? 1 : 0,
@@ -184,6 +207,7 @@ export const POST: RequestHandler = async ({ params, request }) => {
 								seasonNumber,
 								bypassMonitoring: true
 							});
+							const issues = collectAutoSearchIssues([result.error]);
 
 							sendEvent('search:completed', {
 								success: result.success,
@@ -197,6 +221,7 @@ export const POST: RequestHandler = async ({ params, request }) => {
 										error: result.error
 									}
 								],
+								issues: issues.length > 0 ? issues : undefined,
 								summary: {
 									searched: 1,
 									found: result.success ? 1 : 0,
@@ -213,12 +238,20 @@ export const POST: RequestHandler = async ({ params, request }) => {
 								// Mixed/non-RuTracker setups stay on pack-first behavior.
 								searchStrategy: 'auto'
 							});
+							const itemErrors = result.results.map((item) => item.error);
+							const issues = collectAutoSearchIssues([
+								result.error,
+								...(result.errors ?? []),
+								...itemErrors
+							]);
 
 							sendEvent('search:completed', {
 								success: !result.error,
 								results: result.results,
 								summary: result.summary,
 								seasonPacks: result.seasonPacks,
+								errors: result.errors,
+								issues: issues.length > 0 ? issues : undefined,
 								error: result.error
 							});
 							break;
@@ -234,12 +267,20 @@ export const POST: RequestHandler = async ({ params, request }) => {
 							}
 
 							const result = await searchOnAdd.searchBulkEpisodes(episodeIds, onProgress);
+							const itemErrors = result.results.map((item) => item.error);
+							const issues = collectAutoSearchIssues([
+								result.error,
+								...(result.errors ?? []),
+								...itemErrors
+							]);
 
 							sendEvent('search:completed', {
 								success: !result.error,
 								results: result.results,
 								summary: result.summary,
 								seasonPacks: result.seasonPacks,
+								errors: result.errors,
+								issues: issues.length > 0 ? issues : undefined,
 								error: result.error
 							});
 							break;

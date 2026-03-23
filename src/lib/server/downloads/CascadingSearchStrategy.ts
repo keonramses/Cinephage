@@ -124,6 +124,25 @@ class CascadingSearchStrategy {
 	private readonly DEFAULT_PACK_THRESHOLD = 50; // 50%
 	private readonly DEFAULT_MIN_SCORE = 0;
 
+	private summarizeGrabFailures(errors: string[], fallback: string): string {
+		if (errors.length === 0) return fallback;
+
+		const uniqueErrors = [...new Set(errors.map((e) => e.trim()).filter(Boolean))];
+		if (uniqueErrors.length === 0) return fallback;
+
+		// Prefer explicit client/config failures first.
+		const prioritized =
+			uniqueErrors.find((error) =>
+				error.toLowerCase().includes('no enabled torrent download client configured')
+			) ??
+			uniqueErrors.find((error) =>
+				error.toLowerCase().includes('no enabled usenet download client configured')
+			) ??
+			uniqueErrors[0];
+
+		return prioritized;
+	}
+
 	/**
 	 * Search for episodes using cascading strategy:
 	 * 1. Group by season
@@ -433,6 +452,7 @@ class CascadingSearchStrategy {
 
 			// Find best non-blocklisted season pack
 			const blocklistSpec = new ReleaseBlocklistSpecification({ seriesId: seriesData.id });
+			const grabErrors: string[] = [];
 
 			for (const release of seasonPacks) {
 				const releaseCandidate: ReleaseCandidate = {
@@ -497,9 +517,16 @@ class CascadingSearchStrategy {
 						episodesCovered: grabResult.episodesCovered || episodeIds
 					};
 				}
+
+				if (grabResult.error) {
+					grabErrors.push(grabResult.error);
+				}
 			}
 
-			return { grabbed: false, error: 'All season packs rejected or failed to grab' };
+			return {
+				grabbed: false,
+				error: this.summarizeGrabFailures(grabErrors, 'All season packs rejected or failed to grab')
+			};
 		} catch (error) {
 			const message = error instanceof Error ? error.message : 'Unknown error';
 			return { grabbed: false, error: message };
@@ -565,6 +592,7 @@ class CascadingSearchStrategy {
 
 			// Find best non-blocklisted release
 			const blocklistSpec = new ReleaseBlocklistSpecification({ seriesId: seriesData.id });
+			const grabErrors: string[] = [];
 
 			for (const release of searchResult.releases) {
 				const releaseCandidate: ReleaseCandidate = {
@@ -648,9 +676,17 @@ class CascadingSearchStrategy {
 						episodesCovered: grabResult.episodesCovered
 					};
 				}
+
+				if (grabResult.error) {
+					grabErrors.push(grabResult.error);
+				}
 			}
 
-			return { found: true, grabbed: false, error: 'All releases rejected or failed to grab' };
+			return {
+				found: true,
+				grabbed: false,
+				error: this.summarizeGrabFailures(grabErrors, 'All releases rejected or failed to grab')
+			};
 		} catch (error) {
 			const message = error instanceof Error ? error.message : 'Unknown error';
 			return { found: false, grabbed: false, error: message };

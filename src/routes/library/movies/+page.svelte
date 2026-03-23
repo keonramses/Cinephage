@@ -18,6 +18,7 @@
 	import { enhance } from '$app/forms';
 	import { Eye } from 'lucide-svelte';
 	import { createSearchProgress } from '$lib/stores/searchProgress.svelte';
+	import { getPrimaryAutoSearchIssue } from '$lib/utils/autoSearchIssues';
 	import { createProgressiveRenderer } from '$lib/utils/progressive-render.svelte.js';
 
 	let { data } = $props();
@@ -225,12 +226,13 @@
 			await searchProgress.startSearch(`/api/library/movies/${movieId}/auto-search`);
 
 			if (searchProgress.results) {
-				if (searchProgress.results.error) {
-					toasts.error(searchProgress.results.error);
-				} else if (searchProgress.results.grabbed) {
+				const issue = getPrimaryAutoSearchIssue(searchProgress.results);
+				if (searchProgress.results.grabbed) {
 					toasts.success(
 						`Auto-grabbed "${searchProgress.results.releaseName}" for "${movie.title}"`
 					);
+				} else if (issue) {
+					toasts.error(issue.message, { description: issue.description });
 				} else if (searchProgress.results.found) {
 					toasts.info(`Found releases but none met criteria for "${movie.title}"`);
 				} else {

@@ -12,6 +12,8 @@ import { db } from '$lib/server/db/index.js';
 import { movies } from '$lib/server/db/schema.js';
 import { eq } from 'drizzle-orm';
 import { logger } from '$lib/logging';
+import { collectAutoSearchIssues } from '$lib/server/library/autoSearchIssues.js';
+import { getAutoSearchPreflightIssue } from '$lib/server/library/autoSearchPreflight.js';
 
 /**
  * POST /api/library/movies/[id]/auto-search
@@ -70,6 +72,18 @@ export const POST: RequestHandler = async ({ params, request }) => {
 				});
 
 				try {
+					const preflightIssue = await getAutoSearchPreflightIssue(movie.scoringProfileId, 'movie');
+					if (preflightIssue) {
+						sendEvent('search:completed', {
+							success: false,
+							found: false,
+							grabbed: false,
+							error: preflightIssue.message,
+							issues: [preflightIssue]
+						});
+						return;
+					}
+
 					// Set up progress callback
 					const onProgress = (
 						phase: string,
@@ -122,6 +136,7 @@ export const POST: RequestHandler = async ({ params, request }) => {
 						},
 						'[API] Auto-search completed for movie'
 					);
+					const issues = collectAutoSearchIssues([result.error]);
 
 					// Send completion event
 					sendEvent('search:completed', {
@@ -130,6 +145,7 @@ export const POST: RequestHandler = async ({ params, request }) => {
 						grabbed: result.success && !!result.releaseName,
 						releaseName: result.releaseName,
 						queueItemId: result.queueItemId,
+						issues: issues.length > 0 ? issues : undefined,
 						error: result.error
 					});
 

@@ -18,6 +18,7 @@
 	import { enhance } from '$app/forms';
 	import { Eye } from 'lucide-svelte';
 	import { createSearchProgress } from '$lib/stores/searchProgress.svelte';
+	import { getPrimaryAutoSearchIssue } from '$lib/utils/autoSearchIssues';
 	import { createProgressiveRenderer } from '$lib/utils/progressive-render.svelte.js';
 
 	let { data } = $props();
@@ -232,10 +233,11 @@
 
 			if (searchProgress.results) {
 				const summary = searchProgress.results.summary;
-				if (searchProgress.results.error) {
-					toasts.error(searchProgress.results.error);
-				} else if (summary && summary.grabbed > 0) {
+				const issue = getPrimaryAutoSearchIssue(searchProgress.results);
+				if (summary && summary.grabbed > 0) {
 					toasts.success(`Auto-grabbed ${summary.grabbed} release(s) for "${show.title}"`);
+				} else if (issue) {
+					toasts.error(issue.message, { description: issue.description });
 				} else if (summary && summary.found > 0) {
 					toasts.info(`Found ${summary.found} releases but none met criteria for "${show.title}"`);
 				} else {

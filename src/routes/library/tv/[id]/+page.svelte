@@ -22,6 +22,7 @@
 	import { resolvePath } from '$lib/utils/routing';
 	import { createDynamicSSE } from '$lib/sse';
 	import { createSearchProgress } from '$lib/stores/searchProgress.svelte';
+	import { getPrimaryAutoSearchIssue } from '$lib/utils/autoSearchIssues';
 	import { layoutState, deriveMobileSseStatus } from '$lib/layout.svelte';
 
 	let { data }: { data: PageData } = $props();
@@ -864,6 +865,7 @@
 			});
 
 			if (searchProgress.results) {
+				const issue = getPrimaryAutoSearchIssue(searchProgress.results);
 				const itemResult = searchProgress.results.results?.[0] as
 					| { found?: boolean; grabbed?: boolean; releaseName?: string; error?: string }
 					| undefined;
@@ -871,7 +873,7 @@
 					found: itemResult?.found ?? false,
 					grabbed: itemResult?.grabbed ?? false,
 					releaseName: itemResult?.releaseName,
-					error: itemResult?.error ?? searchProgress.results.error
+					error: itemResult?.error ?? searchProgress.results.error ?? issue?.message
 				});
 
 				// Clear result after 5 seconds
@@ -906,6 +908,7 @@
 			});
 
 			if (searchProgress.results) {
+				const issue = getPrimaryAutoSearchIssue(searchProgress.results);
 				const itemResult = searchProgress.results.results?.[0] as
 					| { found?: boolean; grabbed?: boolean; releaseName?: string; error?: string }
 					| undefined;
@@ -913,7 +916,7 @@
 					found: itemResult?.found ?? false,
 					grabbed: itemResult?.grabbed ?? false,
 					releaseName: itemResult?.releaseName,
-					error: itemResult?.error ?? searchProgress.results.error
+					error: itemResult?.error ?? searchProgress.results.error ?? issue?.message
 				});
 
 				// Clear result after 5 seconds
@@ -947,6 +950,7 @@
 			});
 
 			if (searchProgress.results) {
+				const issue = getPrimaryAutoSearchIssue(searchProgress.results);
 				const results = searchProgress.results.results as
 					| Array<{ found?: boolean; grabbed?: boolean }>
 					| undefined;
@@ -959,9 +963,16 @@
 				// Streaming grabs can complete before queue/file SSE updates arrive; refresh once so
 				// the episode/file counters reflect the completed auto-grab immediately.
 				if ((missingSearchResult.grabbed ?? 0) > 0) {
+					toasts.success(`Grabbed ${missingSearchResult.grabbed} missing release(s)`);
 					setTimeout(() => {
 						void refreshSeriesFromApi();
 					}, 500);
+				} else if (issue) {
+					toasts.error(issue.message, { description: issue.description });
+				} else if ((missingSearchResult.found ?? 0) > 0) {
+					toasts.info('Found releases, but none were grab-eligible.');
+				} else {
+					toasts.info('No suitable releases found for missing episodes.');
 				}
 			}
 

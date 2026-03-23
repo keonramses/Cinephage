@@ -137,6 +137,8 @@ interface MultiSearchResult {
 		individualEpisodesGrabbed?: number;
 	};
 	error?: string;
+	/** Additional operational errors collected during fallback attempts */
+	errors?: string[];
 	/** Season packs that were grabbed */
 	seasonPacks?: Array<{
 		seasonNumber: number;
@@ -154,6 +156,19 @@ class SearchOnAddService {
 	private readonly ALT_TITLE_REFRESH_CACHE_MAX_ENTRIES = 2000;
 	private readonly movieAltTitleRefreshAttempts = new Map<string, number>();
 	private readonly seriesAltTitleRefreshAttempts = new Map<string, number>();
+
+	private shouldExposeOperationalError(error: string | undefined): boolean {
+		if (!error) return false;
+		const normalized = error.trim().toLowerCase();
+		if (!normalized) return false;
+
+		// These are expected "no match" outcomes, not actionable operational failures.
+		return !(
+			normalized.includes('no suitable releases found') ||
+			normalized.includes('no upgrades found') ||
+			normalized.includes('no releases found that')
+		);
+	}
 
 	private pruneAltTitleRefreshCache(cache: Map<string, number>, now: number): void {
 		if (cache.size <= this.ALT_TITLE_REFRESH_CACHE_MAX_ENTRIES) {
@@ -1246,6 +1261,7 @@ class SearchOnAddService {
 				});
 
 				const results: AutoSearchItemResult[] = [];
+				const operationalErrors = new Set<string>();
 				let foundCount = 0;
 				let grabbedCount = 0;
 				let individualEpisodesGrabbed = 0;
@@ -1285,6 +1301,12 @@ class SearchOnAddService {
 							bypassMonitoring
 						});
 						const seasonPackWasGrabbed = seasonSearchResult.success;
+						if (
+							!seasonPackWasGrabbed &&
+							this.shouldExposeOperationalError(seasonSearchResult.error)
+						) {
+							operationalErrors.add(seasonSearchResult.error as string);
+						}
 
 						if (seasonPackWasGrabbed) {
 							seasonPacksGrabbed++;
@@ -1340,6 +1362,9 @@ class SearchOnAddService {
 							episodeId: episode.id,
 							bypassMonitoring
 						});
+						if (!searchResult.success && this.shouldExposeOperationalError(searchResult.error)) {
+							operationalErrors.add(searchResult.error as string);
+						}
 
 						const wasGrabbed = searchResult.success;
 						const wasFound = wasGrabbed;
@@ -1390,6 +1415,7 @@ class SearchOnAddService {
 						seasonPacksGrabbed,
 						individualEpisodesGrabbed
 					},
+					errors: operationalErrors.size > 0 ? [...operationalErrors] : undefined,
 					seasonPacks: seasonPacks.length > 0 ? seasonPacks : undefined
 				};
 			}
@@ -1471,6 +1497,9 @@ class SearchOnAddService {
 						searchResult.summary.completeSeriesPacksGrabbed,
 					individualEpisodesGrabbed: searchResult.summary.individualEpisodesGrabbed
 				},
+				errors: searchResult.results
+					.map((resultItem) => resultItem.error)
+					.filter((error): error is string => this.shouldExposeOperationalError(error)),
 				seasonPacks: allSeasonPacks
 			};
 		} catch (error) {
@@ -1559,6 +1588,7 @@ class SearchOnAddService {
 			}
 
 			const allResults: AutoSearchItemResult[] = [];
+			const operationalErrors = new Set<string>();
 			const allSeasonPacks: Array<{
 				seasonNumber: number;
 				releaseName: string;
@@ -1625,6 +1655,9 @@ class SearchOnAddService {
 
 				// Convert and aggregate results
 				for (const r of searchResult.results) {
+					if (this.shouldExposeOperationalError(r.error)) {
+						operationalErrors.add(r.error as string);
+					}
 					allResults.push({
 						itemId: r.episodeId,
 						itemLabel: r.episodeLabel,
@@ -1682,6 +1715,7 @@ class SearchOnAddService {
 						totalCompleteSeriesPacks + totalMultiSeasonPacks + totalSingleSeasonPacks,
 					individualEpisodesGrabbed: totalIndividualGrabbed
 				},
+				errors: operationalErrors.size > 0 ? [...operationalErrors] : undefined,
 				seasonPacks: allSeasonPacks.length > 0 ? allSeasonPacks : undefined
 			};
 		} catch (error) {

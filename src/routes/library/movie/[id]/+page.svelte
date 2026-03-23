@@ -273,6 +273,7 @@
 	}
 
 	import { createSearchProgress } from '$lib/stores/searchProgress.svelte';
+	import { getPrimaryAutoSearchIssue } from '$lib/utils/autoSearchIssues';
 
 	const searchProgress = createSearchProgress();
 
@@ -304,10 +305,11 @@
 				};
 
 				// Show toast notification
+				const issue = getPrimaryAutoSearchIssue(searchProgress.results);
 				if (searchProgress.results.grabbed) {
 					toasts.success(`Found and grabbed: ${searchProgress.results.releaseName}`);
-				} else if (searchProgress.results.error) {
-					toasts.error(searchProgress.results.error);
+				} else if (issue) {
+					toasts.error(issue.message, { description: issue.description });
 				} else {
 					toasts.info('No suitable releases found');
 				}

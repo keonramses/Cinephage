@@ -26,6 +26,18 @@ export interface SearchState {
 export interface SearchResults {
 	success: boolean;
 	error?: string;
+	errors?: string[];
+	issues?: Array<{
+		code:
+			| 'NO_DOWNLOAD_CLIENT'
+			| 'NO_INDEXER_AVAILABLE'
+			| 'INDEXER_TIMEOUT'
+			| 'INDEXER_RATE_LIMITED'
+			| 'GENERIC_ERROR';
+		message: string;
+		suggestion?: string;
+		count?: number;
+	}>;
 	results?: unknown[];
 	// Movie search fields
 	found?: boolean;
