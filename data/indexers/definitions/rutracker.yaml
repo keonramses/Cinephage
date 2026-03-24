@@ -381,7 +381,7 @@ login:
     redirect: 'index.php'
   test:
     path: /forum/index.php
-    selector: a[href*="logout.php"]
+    selector: "a[href*='logout.php'], img[onclick*='logout'], a[href*='login.php?logout=1']"
 
 search:
   paths:
@@ -402,6 +402,7 @@ search:
     title:
       selector: td.t-title-col div.t-title a.tLink
       filters:
+        # PHASE 1: Extract season/episode info FIRST (preserve this data)
         - name: re_replace
           args: ["(?i)\\s*[СС]езоны?:?\\s*(\\d+).+?[СС]ери[ия]:?\\s*(\\d+-?\\d*)", ' S$1E$2']
         - name: re_replace
@@ -412,22 +413,35 @@ search:
           args: ["(?i)\\s*ТВ-?(\\d+)", ' S$1']
         - name: re_replace
           args: ["\\[\\s*(\\d+)\\s*из\\s*(\\d+)\\s*\\]", ' E$1 of $2']
+
+        # PHASE 2: Strip metadata parentheses (NON-GREEDY - max 150 chars total)
+        # Only strips parens containing quality/format keywords
         - name: re_replace
           args:
             [
-              "(?i)\\s*\\([^\\)]*?\\b(?:Юбилейный|Лицензия|Itunes|BLU\\-?RAY|Blu-ray|BDRip|WEB\\-DL|HDTV|HDTVRip|SATRip|TVRip|DVD\\d?|DVD\\-?Rip|DVDScr|WEBRip|WEB\\-?Rip|WEB-DLRip|HDRip|BRRip|BDRemux|Remux|BD\\d|BD\\-?Rip|CAMRip|TeleSync|TS|HDTS|HD\\-?CAM|LD|Line\\.Dubbed|Line\\.Audio|FANSUB|Fansub|Hardsub|Softsub|Subtitles|Subs|VO|VoiceOver|Dub|Dubbed|MVO|P|A)\\b[^\\)]*?\\)",
+              "(?i)\\s*\\([^\\)]{0,100}?\\b(?:Юбилейный|Лицензия|Itunes|BLU\\-?RAY|Blu-ray|BDRip|WEB\\-DL|HDTV|HDTVRip|SATRip|TVRip|DVD\\d?|DVD\\-?Rip|DVDScr|WEBRip|WEB\\-?Rip|WEB-DLRip|HDRip|BRRip|BDRemux|Remux|BD\\d|BD\\-?Rip|CAMRip|TeleSync|TS|HDTS|HD\\-?CAM|LD|Line\\.Dubbed|Line\\.Audio|FANSUB|Fansub|Hardsub|Softsub|Subtitles|Subs|VO|VoiceOver|Dub|Dubbed|MVO|P|A|Rus|Eng|Sub)\\b[^\\)]{0,50}?\\)",
               ''
             ]
+
+        # PHASE 3: Clean up metadata after slash (CONTEXT-AWARE)
+        # Only removes if contains season/episode/metadata keywords
+        # FIX: Previously stripped everything after last slash - now specific to metadata
         - name: re_replace
-          args: ["(?i)(\\s*/\\s*[A-Za-zА-Яа-яЁё0-9\\s\\.'\\-]{1,80})$", '']
+          args: ["(?i)\\s*/\\s*(?:Сезон|Сезоны|Season|Серии|Серия|Episode|Эпизод)[^/]{0,80}$", '']
+
+        # PHASE 4: Normalize quality tags (preserve these at end)
         - name: re_replace
           args: ['(HDTVRip|HDRip|HDTV)', 'HDTV']
         - name: re_replace
           args: ['(WEBRip|WEB-DLRip|WEB-DL)', 'WEB-DL']
         - name: re_replace
           args: ["(BDRip|BD\\d|BD\\-?Rip)", 'BDRip']
+
+        # PHASE 5: Handle Cyrillic conditionally (respects user setting)
         - name: re_replace
           args: ['[А-Яа-яЁё]+', '{{ if .Config.stripcyrillic }}{{ else }}$&{{ end }}']
+
+        # PHASE 6: Clean up remaining formatting artifacts
         - name: re_replace
           args: ['^\s*[-–—]+\s*/\s*', '']
         - name: re_replace
@@ -452,6 +466,8 @@ search:
           args: ['[(]\s*[)]', '']
         - name: re_replace
           args: ['\s{2,}', ' ']
+
+        # SAFETY: Final trim
         - name: trim
     download:
       selector: td.tor-size a.tr-dl

@@ -644,6 +644,46 @@ const FILTERS: Record<string, FilterFunction> = {
 		return intersection.join(', ');
 	},
 
+	// Title validation: ensures title isn't empty or only quality tags after filtering
+	// Usage: validate_title (returns data if valid, empty if invalid)
+	// Or: validate_title 5 (returns data if at least 5 chars, empty otherwise)
+	validate_title: (data, args) => {
+		const minLength =
+			typeof args === 'number' ? args : typeof args === 'string' ? parseInt(args, 10) || 5 : 5;
+		const trimmed = data.trim();
+
+		// Check if title is empty or too short
+		if (!trimmed || trimmed.length < minLength) {
+			logger.warn(
+				{
+					title: data,
+					length: trimmed.length,
+					minLength
+				},
+				'[FilterEngine] Title validation failed: too short or empty'
+			);
+			return ''; // Return empty to signal validation failure
+		}
+
+		// Check if title is only quality tags (common issue with RuTracker)
+		const qualityOnlyPattern =
+			/^(?:\s*(?:WEB|WEB-DL|WEBRip|HDTV|HDRip|BDRip|BluRay|DVD|DVDRip|1080p|720p|2160p|4K|x264|x265|HEVC|AVC|AAC|AC3|DTS|MP3|MKV|MP4|AVI)\s*)+$/i;
+		if (qualityOnlyPattern.test(trimmed)) {
+			logger.warn({ title: data }, '[FilterEngine] Title validation failed: only quality tags');
+			return ''; // Return empty to signal validation failure
+		}
+
+		// Check if title is only brackets/punctuation
+		const punctuationOnlyPattern = /^[\s[\](){}<>/\\|.,:;!?#@$%^&*+=_-]*$/;
+		if (punctuationOnlyPattern.test(trimmed)) {
+			logger.warn({ title: data }, '[FilterEngine] Title validation failed: only punctuation');
+			return ''; // Return empty to signal validation failure
+		}
+
+		// Title is valid
+		return data;
+	},
+
 	// Absolute URL
 	absoluteurl: (data, args, templateEngine) => {
 		if (!data) return data;
