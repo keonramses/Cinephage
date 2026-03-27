@@ -1,7 +1,6 @@
 <script lang="ts">
 	import { tick } from 'svelte';
 	import type { UnifiedTask } from '$lib/server/tasks/UnifiedTaskRegistry';
-	import * as m from '$lib/paraglide/messages.js';
 	import { toasts } from '$lib/stores/toast.svelte';
 
 	interface Props {

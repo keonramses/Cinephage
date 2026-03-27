@@ -13,7 +13,6 @@
 		Settings,
 		Trash2
 	} from 'lucide-svelte';
-	import * as m from '$lib/paraglide/messages.js';
 	import IndexerStatusBadge from './IndexerStatusBadge.svelte';
 	import IndexerRow from './IndexerRow.svelte';
 	import type { IndexerWithStatus, IndexerSort } from '$lib/types/indexer';

@@ -1,7 +1,6 @@
 <script lang="ts">
 	import type { ScoringProfile } from '$lib/types/profile';
 	import { Settings, Trash2, Lock, Star, Check, Film, Tv, Sliders } from 'lucide-svelte';
-	import * as m from '$lib/paraglide/messages.js';
 
 	interface Props {
 		profiles: ScoringProfile[];

@@ -1,7 +1,6 @@
 <script lang="ts">
 	import { X, Loader2, Search } from 'lucide-svelte';
 	import { toasts } from '$lib/stores/toast.svelte';
-	import * as m from '$lib/paraglide/messages.js';
 	import { SvelteSet } from 'svelte/reactivity';
 	import ModalWrapper from '$lib/components/ui/modal/ModalWrapper.svelte';
 	import CommonOptions from './add/CommonOptions.svelte';

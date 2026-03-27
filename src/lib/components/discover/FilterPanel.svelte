@@ -118,7 +118,7 @@
 			value={selectedLanguage}
 			onchange={(e) => onLanguageChange(e.currentTarget.value)}
 		>
-			{#each languages as language}
+			{#each languages as language (language.code)}
 				<option value={language.code}>{language.name}</option>
 			{/each}
 		</select>

@@ -10,7 +10,6 @@
 	import { SvelteMap } from 'svelte/reactivity';
 	import { TMDB } from '$lib/config/constants';
 	import { toasts } from '$lib/stores/toast.svelte';
-	import * as m from '$lib/paraglide/messages.js';
 
 	// Release type labels
 	const RELEASE_TYPE_LABELS: Record<number, string> = {

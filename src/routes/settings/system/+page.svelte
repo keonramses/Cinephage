@@ -20,9 +20,7 @@
 		Activity,
 		Clock,
 		Trash2,
-		Play,
-		Settings2,
-		X
+		Play
 	} from 'lucide-svelte';
 	import type { PageData } from './$types';
 	import { copyToClipboard as copyTextToClipboard } from '$lib/utils/clipboard.js';

@@ -44,9 +44,9 @@
 
 	<p class="py-2">
 		{#if selectedCount === 1 && channelName}
-			{@html m.livetv_channelRemoveModal_removeSingle({ name: channelName })}
+			{m.livetv_channelRemoveModal_removeSingle({ name: channelName })}
 		{:else}
-			{@html m.livetv_channelRemoveModal_removeMultiple({
+			{m.livetv_channelRemoveModal_removeMultiple({
 				count: selectedCount,
 				label: channelLabel
 			})}

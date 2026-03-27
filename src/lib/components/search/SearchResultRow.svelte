@@ -1,5 +1,4 @@
 <script lang="ts">
-	import * as m from '$lib/paraglide/messages.js';
 	import { Download, ExternalLink, Loader2, Check, X, Play } from 'lucide-svelte';
 	import { formatBytes } from '$lib/utils/format';
 

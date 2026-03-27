@@ -97,16 +97,16 @@
 
 	<p class="py-2">
 		{#if actionMode === 'remove_and_delete'}
-			{@html m.library_bulkDelete_messageRemoveAndDelete({
+			{m.library_bulkDelete_messageRemoveAndDelete({
 				count: selectedCount,
 				items: itemLabel
 			})}
 		{:else if actionMode === 'remove_only'}
-			{@html m.library_bulkDelete_messageRemoveOnly({ count: selectedCount, items: itemLabel })}
+			{m.library_bulkDelete_messageRemoveOnly({ count: selectedCount, items: itemLabel })}
 		{:else if actionMode === 'delete_files'}
-			{@html m.library_bulkDelete_messageDeleteFiles({ count: selectedCount, items: itemLabel })}
+			{m.library_bulkDelete_messageDeleteFiles({ count: selectedCount, items: itemLabel })}
 		{:else}
-			{@html m.library_bulkDelete_messageUnmatchFiles({ count: selectedCount, items: itemLabel })}
+			{m.library_bulkDelete_messageUnmatchFiles({ count: selectedCount, items: itemLabel })}
 		{/if}
 	</p>
 

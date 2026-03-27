@@ -1,5 +1,4 @@
 <script lang="ts">
-	import * as m from '$lib/paraglide/messages.js';
 	import type { QualityInfo, MediaInfo } from '$lib/types/library';
 	import { getQualityDisplay, getHdrDisplay } from '$lib/types/library';
 

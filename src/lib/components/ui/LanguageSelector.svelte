@@ -2,7 +2,6 @@
 	import { Globe, Check } from 'lucide-svelte';
 	import { setLocale, getLocale, locales, type Locale } from '$lib/paraglide/runtime.js';
 	import * as m from '$lib/paraglide/messages.js';
-	import { invalidateAll } from '$app/navigation';
 	import { toasts } from '$lib/stores/toast.svelte';
 
 	interface Props {
@@ -28,10 +27,7 @@
 		isOpen = false;
 
 		try {
-			setLocale(locale);
-			currentLocale = locale;
-
-			// Persist to user account via API
+			// Step 1: Persist to user account via API (before reload can interrupt)
 			const response = await fetch('/api/user/language', {
 				method: 'POST',
 				headers: { 'Content-Type': 'application/json' },
@@ -41,14 +37,20 @@
 			if (!response.ok) {
 				// Non-fatal - language is still set in cookie
 				// Silently ignore persistence failures
+				console.warn('Failed to persist language preference to user account');
 			}
 
-			// Reload the page to apply translations
-			await invalidateAll();
+			// Step 2: Set the locale cookie WITHOUT triggering reload
+			setLocale(locale, { reload: false });
+			currentLocale = locale;
+
+			// Step 3: Reload the page to apply translations
 			window.location.reload();
-		} catch {
-			toasts.error(m.ui_failedToChangeLanguage());
-		} finally {
+		} catch (error) {
+			// Only show error if it's not a page reload/navigation interruption
+			if (error instanceof Error && error.name !== 'AbortError') {
+				toasts.error(m.ui_failedToChangeLanguage());
+			}
 			isLoading = false;
 		}
 	}

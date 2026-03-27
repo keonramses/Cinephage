@@ -11,7 +11,6 @@
 		XCircle
 	} from 'lucide-svelte';
 	import { SvelteMap, SvelteSet } from 'svelte/reactivity';
-	import * as m from '$lib/paraglide/messages.js';
 	import ModalWrapper from '$lib/components/ui/modal/ModalWrapper.svelte';
 
 	interface SubtitleItem {
