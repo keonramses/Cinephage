@@ -203,9 +203,8 @@
 		if (!enforceAnimeSubtype || requiredMediaSubType !== 'anime') return;
 		if (eligibleRootFolders.length > 0) return;
 
-		toasts.warning('No Anime root folders are available for this series.', {
-			description:
-				'Add an Anime TV root folder in Settings > Media Storage > Root Folders, or disable anime root folder enforcement.'
+		toasts.warning(m.library_seriesEdit_animeRootWarningTitle(), {
+			description: m.library_seriesEdit_animeRootWarningDesc()
 		});
 		animeRootWarningShown = true;
 	});

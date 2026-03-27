@@ -22,7 +22,7 @@
 
 <!-- Toast Container - Fixed position, centered on mobile, right-aligned on desktop -->
 <div
-	class="fixed inset-x-4 bottom-[max(1rem,env(safe-area-inset-bottom))] z-[2000] flex flex-col gap-2 sm:inset-x-auto sm:right-4 sm:left-auto"
+	class="fixed inset-x-4 bottom-[max(1rem,env(safe-area-inset-bottom))] z-2000 flex flex-col gap-2 sm:inset-x-auto sm:right-4 sm:left-auto"
 	aria-live="polite"
 >
 	{#each toasts.toasts as toast (toast.id)}

@@ -368,9 +368,9 @@
 						updateAnimeSubtypeEnforcement((event.currentTarget as HTMLInputElement).checked)}
 				/>
 				<div class="min-w-0">
-					<div class="font-medium">Enforce Anime Root Folders</div>
+					<div class="font-medium">{m.settings_general_enforceAnimeRootFoldersLabel()}</div>
 					<div class="text-sm text-base-content/70">
-						When enabled, anime media can only be added to root folders with subtype set to Anime.
+						{m.settings_general_enforceAnimeRootFoldersDesc()}
 					</div>
 				</div>
 			</label>

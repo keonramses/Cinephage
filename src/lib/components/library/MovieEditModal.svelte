@@ -163,9 +163,8 @@
 		if (!enforceAnimeSubtype || requiredMediaSubType !== 'anime') return;
 		if (eligibleRootFolders.length > 0) return;
 
-		toasts.warning('No Anime root folders are available for this movie.', {
-			description:
-				'Add an Anime movie root folder in Settings > Media Storage > Root Folders, or disable anime root folder enforcement.'
+		toasts.warning(m.library_editMovie_animeRootWarningTitle(), {
+			description: m.library_editMovie_animeRootWarningDesc()
 		});
 		animeRootWarningShown = true;
 	});
