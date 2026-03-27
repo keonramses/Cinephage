@@ -46,7 +46,7 @@ jobs:
         run: npm ci
 
       - name: Generate paraglide files
-        run: npm run build
+        run: rm -rf src/lib/paraglide && npm run build
 
       - name: Run type check
         run: npm run check

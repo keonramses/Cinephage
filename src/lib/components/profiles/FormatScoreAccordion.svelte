@@ -161,8 +161,9 @@
 									<div class="hover:bg-base-50 flex items-center gap-3 px-4 py-2">
 										<!-- Format name -->
 										<span class="min-w-0 flex-1 truncate" class:font-medium={entry.score !== 0}>
-											{(m as Record<string, () => string>)[`format_${entry.formatId}`]?.() ||
-												entry.formatName}
+											{(m as unknown as Record<string, () => string>)[
+												`format_${entry.formatId}`
+											]?.() || entry.formatName}
 										</span>
 
 										<!-- Score input -->

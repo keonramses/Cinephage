@@ -107,10 +107,12 @@
 	<div class="flex items-start justify-between gap-3">
 		<div class="min-w-0">
 			<div class="truncate font-medium">
-				{(m as Record<string, () => string>)[`task_name_${camelCaseId}`]?.() ?? task.name}
+				{(m as unknown as Record<string, () => string>)[`task_name_${camelCaseId}`]?.() ??
+					task.name}
 			</div>
 			<div class="mt-1 text-xs break-words text-base-content/60">
-				{(m as Record<string, () => string>)[`task_desc_${camelCaseId}`]?.() ?? task.description}
+				{(m as unknown as Record<string, () => string>)[`task_desc_${camelCaseId}`]?.() ??
+					task.description}
 			</div>
 		</div>
 		{#if isRunning}

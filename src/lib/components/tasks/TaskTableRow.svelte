@@ -127,10 +127,12 @@
 		<div class="flex items-center gap-3">
 			<div class="min-w-0 flex-1">
 				<div class="truncate font-medium">
-					{(m as Record<string, () => string>)[`task_name_${camelCaseId}`]?.() ?? task.name}
+					{(m as unknown as Record<string, () => string>)[`task_name_${camelCaseId}`]?.() ??
+						task.name}
 				</div>
 				<div class="truncate text-sm text-base-content/60">
-					{(m as Record<string, () => string>)[`task_desc_${camelCaseId}`]?.() ?? task.description}
+					{(m as unknown as Record<string, () => string>)[`task_desc_${camelCaseId}`]?.() ??
+						task.description}
 				</div>
 			</div>
 			{#if task.isRunning}
