@@ -402,20 +402,28 @@
 				body: JSON.stringify(editData)
 			});
 
-			if (response.ok) {
-				// Update local state
-				movie.monitored = editData.monitored;
-				movie.scoringProfileId = editData.scoringProfileId;
-				movie.rootFolderId = editData.rootFolderId;
-				movie.minimumAvailability = editData.minimumAvailability;
-				movie.wantsSubtitles = editData.wantsSubtitles;
+			const result = await response.json().catch(() => null);
+			if (!response.ok) {
+				throw new Error(result?.error || m.toast_library_movieDetail_failedToUpdate());
+			}
 
-				// Update root folder path display
+			// Update local state
+			movie.monitored = editData.monitored;
+			movie.scoringProfileId = editData.scoringProfileId;
+			movie.minimumAvailability = editData.minimumAvailability;
+			movie.wantsSubtitles = editData.wantsSubtitles;
+
+			if (result?.moveQueued) {
+				toasts.success(
+					'Move queued. File transfer has started and will appear in Activity until completion.'
+				);
+			} else {
+				movie.rootFolderId = editData.rootFolderId;
 				const newFolder = data.rootFolders.find((f) => f.id === editData.rootFolderId);
 				movie.rootFolderPath = newFolder?.path ?? null;
-
-				isEditModalOpen = false;
 			}
+
+			isEditModalOpen = false;
 		} catch (error) {
 			showActionError(m.toast_library_movieDetail_failedToUpdate(), error);
 		} finally {

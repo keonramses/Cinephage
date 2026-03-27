@@ -1151,6 +1151,7 @@ export const movieUpdateSchema = z.object({
 	scoringProfileId: z.string().optional(),
 	minimumAvailability: z.string().min(1).optional(),
 	rootFolderId: z.string().optional(),
+	moveFilesOnRootChange: z.boolean().optional(),
 	wantsSubtitles: z.boolean().optional(),
 	languageProfileId: z.string().optional()
 });

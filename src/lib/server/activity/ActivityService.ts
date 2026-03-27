@@ -3,6 +3,7 @@ import {
 	downloadQueue,
 	downloadHistory,
 	monitoringHistory,
+	taskHistory,
 	movies,
 	series,
 	episodes,
@@ -24,6 +25,7 @@ import {
 } from '$lib/types/activity';
 import type { DownloadQueueRecord, DownloadHistoryRecord, MonitoringHistoryRecord } from './types';
 import { projectQueueActivity } from './projectors';
+import { parseMoveTaskId } from '$lib/server/library/MediaMoveService.js';
 
 interface MediaInfo {
 	id: string;
@@ -51,6 +53,16 @@ interface MediaMaps {
 interface PaginationOptions {
 	limit: number;
 	offset: number;
+}
+
+interface MoveTaskRecord {
+	id: string;
+	taskId: string;
+	status: 'running' | 'completed' | 'failed' | 'cancelled';
+	results: Record<string, unknown> | null;
+	errors: string[] | null;
+	startedAt: string | null;
+	completedAt: string | null;
 }
 
 interface ActiveQueueIndex {
@@ -142,9 +154,11 @@ export class ActivityService {
 			activeDownloads,
 			historyItems,
 			monitoringItems,
+			moveTasks,
 			failedQueueItems,
 			historyCount,
-			monitoringCount
+			monitoringCount,
+			moveTaskCount
 		] = await Promise.all([
 			needsActive
 				? this.fetchActiveDownloads(summaryFilters)
@@ -155,6 +169,9 @@ export class ActivityService {
 			needsHistory
 				? this.fetchMonitoringItems(filters.includeNoResults, filters)
 				: Promise.resolve([] as MonitoringHistoryRecord[]),
+			needsActive || needsHistory
+				? this.fetchMoveTasks(scope, filters)
+				: Promise.resolve([] as MoveTaskRecord[]),
 			needsActive
 				? this.fetchFailedQueueItems()
 				: Promise.resolve(
@@ -163,6 +180,9 @@ export class ActivityService {
 			needsHistory && !hasJsOnlyFilters ? this.countHistoryItems(filters) : Promise.resolve(0),
 			needsHistory && !hasJsOnlyFilters
 				? this.countMonitoringItems(filters.includeNoResults, filters)
+				: Promise.resolve(0),
+			(needsActive || needsHistory) && !hasJsOnlyFilters
+				? this.countMoveTasks(scope, filters)
 				: Promise.resolve(0)
 		]);
 
@@ -188,10 +208,12 @@ export class ActivityService {
 			failedQueueIndex
 		);
 		const monitoringActivities = this.transformMonitoringItems(monitoringItems, mediaMaps);
+		const moveActivities = this.transformMoveTasks(moveTasks);
 		const activities: UnifiedActivity[] = [
 			...queueActivities,
 			...historyActivities,
-			...monitoringActivities
+			...monitoringActivities,
+			...moveActivities
 		];
 
 		let filtered = this.applyRequestedStatusFilter(
@@ -221,10 +243,10 @@ export class ActivityService {
 				: scope === 'history'
 					? hasJsOnlyFilters
 						? filtered.length
-						: historyCount + monitoringCount
+						: historyCount + monitoringCount + moveTaskCount
 					: hasJsOnlyFilters
 						? filtered.length
-						: activeFilteredCount + historyCount + monitoringCount;
+						: activeFilteredCount + historyCount + monitoringCount + moveTaskCount;
 
 		const paginated = filtered.slice(pagination.offset, pagination.offset + pagination.limit);
 
@@ -951,6 +973,179 @@ export class ActivityService {
 			.where(and(...conditions))
 			.get();
 		return result?.count ?? 0;
+	}
+
+	private async fetchMoveTasks(
+		scope: ActivityScope,
+		filters: ActivityFilters = {}
+	): Promise<MoveTaskRecord[]> {
+		const conditions: SQL[] = [sql`${taskHistory.taskId} LIKE 'media-move:%'`];
+
+		const statuses = this.mapMoveStatusesForScopeAndFilter(scope, filters.status ?? 'all');
+		if (statuses.length === 0) return [];
+		conditions.push(inArray(taskHistory.status, statuses));
+
+		if (filters.mediaType === 'movie') {
+			conditions.push(sql`${taskHistory.taskId} LIKE 'media-move:movie:%'`);
+		} else if (filters.mediaType === 'tv') {
+			conditions.push(sql`${taskHistory.taskId} LIKE 'media-move:series:%'`);
+		}
+
+		if (filters.protocol && filters.protocol !== 'all') {
+			return [];
+		}
+		if (filters.downloadClientId || filters.indexer) {
+			return [];
+		}
+
+		if (filters.startDate) {
+			conditions.push(gte(taskHistory.startedAt, filters.startDate));
+		}
+		if (filters.endDate) {
+			const endDateEnd = filters.endDate + 'T23:59:59.999Z';
+			conditions.push(lte(taskHistory.startedAt, endDateEnd));
+		}
+
+		return (await db
+			.select({
+				id: taskHistory.id,
+				taskId: taskHistory.taskId,
+				status: taskHistory.status,
+				results: taskHistory.results,
+				errors: taskHistory.errors,
+				startedAt: taskHistory.startedAt,
+				completedAt: taskHistory.completedAt
+			})
+			.from(taskHistory)
+			.where(and(...conditions))
+			.orderBy(desc(taskHistory.startedAt))
+			.limit(500)
+			.all()) as MoveTaskRecord[];
+	}
+
+	private async countMoveTasks(
+		scope: ActivityScope,
+		filters: ActivityFilters = {}
+	): Promise<number> {
+		const conditions: SQL[] = [sql`${taskHistory.taskId} LIKE 'media-move:%'`];
+
+		const statuses = this.mapMoveStatusesForScopeAndFilter(scope, filters.status ?? 'all');
+		if (statuses.length === 0) return 0;
+		conditions.push(inArray(taskHistory.status, statuses));
+
+		if (filters.mediaType === 'movie') {
+			conditions.push(sql`${taskHistory.taskId} LIKE 'media-move:movie:%'`);
+		} else if (filters.mediaType === 'tv') {
+			conditions.push(sql`${taskHistory.taskId} LIKE 'media-move:series:%'`);
+		}
+
+		if (filters.protocol && filters.protocol !== 'all') {
+			return 0;
+		}
+		if (filters.downloadClientId || filters.indexer) {
+			return 0;
+		}
+
+		if (filters.startDate) {
+			conditions.push(gte(taskHistory.startedAt, filters.startDate));
+		}
+		if (filters.endDate) {
+			const endDateEnd = filters.endDate + 'T23:59:59.999Z';
+			conditions.push(lte(taskHistory.startedAt, endDateEnd));
+		}
+
+		const result = await db
+			.select({ count: count() })
+			.from(taskHistory)
+			.where(and(...conditions))
+			.get();
+		return result?.count ?? 0;
+	}
+
+	private transformMoveTasks(tasks: MoveTaskRecord[]): UnifiedActivity[] {
+		return tasks
+			.map((task) => this.transformMoveTask(task))
+			.filter((activity): activity is UnifiedActivity => activity !== null);
+	}
+
+	private transformMoveTask(task: MoveTaskRecord): UnifiedActivity | null {
+		const parsed = parseMoveTaskId(task.taskId);
+		if (!parsed) return null;
+
+		const mediaType = parsed.mediaType === 'movie' ? 'movie' : 'episode';
+		const defaultTitle = parsed.mediaType === 'movie' ? 'Movie' : 'Series';
+		const results = task.results ?? {};
+		const resultsMediaTitle =
+			typeof results.mediaTitle === 'string' && results.mediaTitle.trim().length > 0
+				? results.mediaTitle.trim()
+				: null;
+		const mediaTitle = resultsMediaTitle ?? defaultTitle;
+
+		const mappedStatus = this.mapMoveTaskStatus(task.status);
+		const statusReason =
+			task.status === 'failed'
+				? (task.errors?.[0] ?? 'Failed to move media files')
+				: task.status === 'cancelled'
+					? (task.errors?.[0] ?? 'Move cancelled')
+					: undefined;
+
+		const startedAt = task.startedAt ?? new Date().toISOString();
+		const completedAt = task.completedAt ?? null;
+		const timeline: ActivityEvent[] = [{ type: 'searched', timestamp: startedAt }];
+		if (task.status === 'running') {
+			timeline.push({
+				type: 'downloading',
+				timestamp: startedAt,
+				details: 'Moving files to new root folder'
+			});
+		} else if (task.status === 'completed') {
+			timeline.push({
+				type: 'imported',
+				timestamp: completedAt ?? startedAt,
+				details:
+					typeof results.destPath === 'string' && results.destPath
+						? `Moved to ${results.destPath}`
+						: 'Moved to new root folder'
+			});
+		} else if (task.status === 'failed') {
+			timeline.push({
+				type: 'failed',
+				timestamp: completedAt ?? startedAt,
+				details: statusReason
+			});
+		} else if (task.status === 'cancelled') {
+			timeline.push({
+				type: 'removed',
+				timestamp: completedAt ?? startedAt,
+				details: statusReason
+			});
+		}
+
+		return {
+			id: `task-${task.id}`,
+			activitySource: 'task',
+			taskType: 'media_move',
+			mediaType,
+			mediaId: parsed.mediaId,
+			mediaTitle,
+			mediaYear: null,
+			seriesId: mediaType === 'episode' ? parsed.mediaId : undefined,
+			seriesTitle: mediaType === 'episode' ? mediaTitle : undefined,
+			releaseTitle: 'Move media files to new root folder',
+			quality: null,
+			releaseGroup: null,
+			size: null,
+			indexerId: null,
+			indexerName: null,
+			protocol: null,
+			status: mappedStatus,
+			statusReason,
+			isUpgrade: false,
+			timeline,
+			startedAt,
+			completedAt,
+			lastAttemptAt: task.status === 'failed' ? (completedAt ?? startedAt) : null
+		};
 	}
 
 	private async fetchMediaMaps(
@@ -1791,6 +1986,59 @@ export class ActivityService {
 				return [];
 			default:
 				return null;
+		}
+	}
+
+	private mapMoveStatusesForScopeAndFilter(
+		scope: ActivityScope,
+		status: ActivityFilters['status'] | 'all'
+	): Array<'running' | 'completed' | 'failed' | 'cancelled'> {
+		let base: Array<'running' | 'completed' | 'failed' | 'cancelled'>;
+		if (scope === 'active') {
+			base = ['running'];
+		} else if (scope === 'history') {
+			base = ['completed', 'failed', 'cancelled'];
+		} else {
+			base = ['running', 'completed', 'failed', 'cancelled'];
+		}
+
+		switch (status) {
+			case 'all':
+				return base;
+			case 'downloading':
+				return base.includes('running') ? ['running'] : [];
+			case 'success':
+				return base.includes('completed') ? ['completed'] : [];
+			case 'failed':
+				return base.includes('failed') ? ['failed'] : [];
+			case 'removed':
+				return base.includes('cancelled') ? ['cancelled'] : [];
+			case 'seeding':
+			case 'paused':
+			case 'search_error':
+			case 'rejected':
+			case 'no_results':
+			case 'streaming':
+			case 'searching':
+			case 'imported':
+				return [];
+			default:
+				return base;
+		}
+	}
+
+	private mapMoveTaskStatus(
+		status: MoveTaskRecord['status']
+	): Extract<ActivityStatus, 'downloading' | 'imported' | 'failed' | 'removed'> {
+		switch (status) {
+			case 'running':
+				return 'downloading';
+			case 'completed':
+				return 'imported';
+			case 'failed':
+				return 'failed';
+			case 'cancelled':
+				return 'removed';
 		}
 	}
 

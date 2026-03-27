@@ -5,6 +5,7 @@
 	import { FormCheckbox } from '$lib/components/ui/form';
 	import { sortRootFoldersForMediaType } from '$lib/utils/root-folders.js';
 	import { isLikelyAnimeMedia } from '$lib/shared/anime-classification.js';
+	import { toasts } from '$lib/stores/toast.svelte';
 	import * as m from '$lib/paraglide/messages.js';
 
 	interface QualityProfile {
@@ -46,6 +47,7 @@
 		monitored: boolean;
 		scoringProfileId: string | null;
 		rootFolderId: string | null;
+		moveFilesOnRootChange: boolean;
 		minimumAvailability: string;
 		wantsSubtitles: boolean;
 	}
@@ -58,11 +60,14 @@
 	let rootFolderId = $state('');
 	let minimumAvailability = $state('released');
 	let wantsSubtitles = $state(true);
+	let moveFilesOnRootChange = $state(false);
+	let moveOptionTouched = $state(false);
+	let animeRootWarningShown = $state(false);
 	let enforceAnimeSubtype = $state(false);
 	let detectedAnime = $state(false);
 
 	const requiredMediaSubType = $derived(
-		enforceAnimeSubtype && detectedAnime ? ('anime' as const) : undefined
+		enforceAnimeSubtype ? (detectedAnime ? ('anime' as const) : ('standard' as const)) : undefined
 	);
 	const eligibleRootFolders = $derived(
 		sortRootFoldersForMediaType(rootFolders, 'movie', requiredMediaSubType)
@@ -73,6 +78,9 @@
 			!!selectedRootFolderObj &&
 			(selectedRootFolderObj.mediaSubType ?? 'standard') !== 'anime'
 	);
+	const hasExistingFiles = $derived(movie.hasFile === true);
+	const rootFolderChanged = $derived((rootFolderId || null) !== (movie.rootFolderId ?? null));
+	const canMoveExistingFiles = $derived(hasExistingFiles && rootFolderChanged && !!rootFolderId);
 
 	async function loadAnimeRoutingContext(tmdbId: number) {
 		try {
@@ -81,16 +89,17 @@
 				fetch(`/api/tmdb/movie/${tmdbId}`)
 			]);
 
+			let nextEnforceAnimeSubtype = false;
+			let nextDetectedAnime = false;
+
 			if (classificationRes.ok) {
 				const classificationData = await classificationRes.json();
-				enforceAnimeSubtype = classificationData?.enforceAnimeSubtype === true;
-			} else {
-				enforceAnimeSubtype = false;
+				nextEnforceAnimeSubtype = classificationData?.enforceAnimeSubtype === true;
 			}
 
 			if (movieRes.ok) {
 				const details: TmdbMovieDetails = await movieRes.json();
-				detectedAnime = isLikelyAnimeMedia({
+				nextDetectedAnime = isLikelyAnimeMedia({
 					genres: details.genres,
 					originalLanguage: details.original_language,
 					productionCountries: details.production_countries,
@@ -100,9 +109,11 @@
 					title: details.title,
 					originalTitle: details.original_title
 				});
-			} else {
-				detectedAnime = false;
 			}
+
+			// Apply detection before enabling enforcement to avoid transient standard-folder re-selection.
+			detectedAnime = nextDetectedAnime;
+			enforceAnimeSubtype = nextEnforceAnimeSubtype;
 		} catch {
 			enforceAnimeSubtype = false;
 			detectedAnime = false;
@@ -121,6 +132,9 @@
 			rootFolderId = movie.rootFolderId ?? '';
 			minimumAvailability = movie.minimumAvailability ?? 'released';
 			wantsSubtitles = movie.wantsSubtitles ?? true;
+			moveFilesOnRootChange = false;
+			moveOptionTouched = false;
+			animeRootWarningShown = false;
 			enforceAnimeSubtype = false;
 			detectedAnime = false;
 			void loadAnimeRoutingContext(movie.tmdbId);
@@ -133,6 +147,38 @@
 		const stillAllowed = eligibleRootFolders.some((folder) => folder.id === rootFolderId);
 		if (!stillAllowed && !selectedRootFolderOutOfPolicy) {
 			rootFolderId = '';
+		}
+	});
+
+	$effect(() => {
+		if (!open) return;
+		if (rootFolderId) return;
+		if (eligibleRootFolders.length > 0) {
+			rootFolderId = eligibleRootFolders[0].id;
+		}
+	});
+
+	$effect(() => {
+		if (!open || animeRootWarningShown) return;
+		if (!enforceAnimeSubtype || requiredMediaSubType !== 'anime') return;
+		if (eligibleRootFolders.length > 0) return;
+
+		toasts.warning('No Anime root folders are available for this movie.', {
+			description:
+				'Add an Anime movie root folder in Settings > Media Storage > Root Folders, or disable anime root folder enforcement.'
+		});
+		animeRootWarningShown = true;
+	});
+
+	$effect(() => {
+		if (!open) return;
+		if (!canMoveExistingFiles) {
+			moveFilesOnRootChange = false;
+			moveOptionTouched = false;
+			return;
+		}
+		if (!moveOptionTouched) {
+			moveFilesOnRootChange = true;
 		}
 	});
 
@@ -179,6 +225,7 @@
 			monitored,
 			scoringProfileId: qualityProfileId || null,
 			rootFolderId: rootFolderId || null,
+			moveFilesOnRootChange,
 			minimumAvailability,
 			wantsSubtitles
 		});
@@ -240,7 +287,7 @@
 				{/each}
 			</select>
 			<div class="label">
-				<span class="label-text-alt break-words whitespace-normal text-base-content/60">
+				<span class="label-text-alt wrap-break-word whitespace-normal text-base-content/60">
 					{#if currentProfile}
 						{currentProfile.description}
 					{:else}
@@ -260,7 +307,9 @@
 				bind:value={rootFolderId}
 				class="select-bordered select w-full"
 			>
-				<option value="">{m.common_notSet()}</option>
+				{#if !rootFolderId}
+					<option value="" disabled>{m.common_notSet()}</option>
+				{/if}
 				{#if selectedRootFolderOutOfPolicy && selectedRootFolderObj}
 					<option value={selectedRootFolderObj.id}>{selectedRootFolderObj.path} (current)</option>
 				{/if}
@@ -274,16 +323,31 @@
 				{/each}
 			</select>
 			<div class="label">
-				<span class="label-text-alt break-words whitespace-normal text-base-content/60">
+				<span class="label-text-alt wrap-break-word whitespace-normal text-base-content/60">
 					{m.library_add_rootFolderDesc()}
 				</span>
 			</div>
-			{#if requiredMediaSubType === 'anime'}
+			{#if enforceAnimeSubtype}
 				<div class="text-xs text-base-content/70">
-					Anime root enforcement is enabled. New folder selections are limited to Anime roots.
+					Anime root folder enforcement is enabled. New folder selections are limited to <strong
+						>{requiredMediaSubType === 'anime' ? 'Anime' : 'Standard'}</strong
+					> root folders for this movie.
 				</div>
 			{/if}
 		</div>
+
+		{#if canMoveExistingFiles}
+			<FormCheckbox
+				bind:checked={moveFilesOnRootChange}
+				onchange={() => {
+					moveOptionTouched = true;
+				}}
+				label="Move existing files to new root folder"
+				description="Moves the existing movie folder after saving. Same-disk moves are instant; cross-disk moves copy then delete."
+				variant="toggle"
+				color="warning"
+			/>
+		{/if}
 
 		<!-- Minimum Availability -->
 		<div class="form-control">
@@ -300,7 +364,7 @@
 				{/each}
 			</select>
 			<div class="label">
-				<span class="label-text-alt break-words whitespace-normal text-base-content/60">
+				<span class="label-text-alt wrap-break-word whitespace-normal text-base-content/60">
 					{availabilityOptions.find((o) => o.value === minimumAvailability)?.description}
 				</span>
 			</div>

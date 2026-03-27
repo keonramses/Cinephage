@@ -5,6 +5,7 @@
 	import { FormCheckbox } from '$lib/components/ui/form';
 	import { sortRootFoldersForMediaType } from '$lib/utils/root-folders.js';
 	import { isLikelyAnimeMedia } from '$lib/shared/anime-classification.js';
+	import { toasts } from '$lib/stores/toast.svelte';
 
 	interface SeriesData {
 		tmdbId: number;
@@ -13,6 +14,7 @@
 		monitored: boolean | null;
 		scoringProfileId: string | null;
 		rootFolderId: string | null;
+		episodeFileCount?: number | null;
 		seasonFolder: boolean | null;
 		wantsSubtitles: boolean | null;
 		seriesType: string | null;
@@ -58,6 +60,7 @@
 		monitored: boolean;
 		scoringProfileId: string | null;
 		rootFolderId: string | null;
+		moveFilesOnRootChange: boolean;
 		seasonFolder: boolean;
 		wantsSubtitles: boolean;
 		seriesType: 'standard' | 'anime' | 'daily';
@@ -72,11 +75,14 @@
 	let seasonFolder = $state(true);
 	let wantsSubtitles = $state(true);
 	let seriesType = $state<'standard' | 'anime' | 'daily'>('standard');
+	let moveFilesOnRootChange = $state(false);
+	let moveOptionTouched = $state(false);
+	let animeRootWarningShown = $state(false);
 	let enforceAnimeSubtype = $state(false);
 	let detectedAnime = $state(false);
 
 	const requiredMediaSubType = $derived(
-		enforceAnimeSubtype && detectedAnime ? ('anime' as const) : undefined
+		enforceAnimeSubtype ? (detectedAnime ? ('anime' as const) : ('standard' as const)) : undefined
 	);
 	const eligibleRootFolders = $derived(
 		sortRootFoldersForMediaType(rootFolders, 'tv', requiredMediaSubType)
@@ -87,6 +93,9 @@
 			!!selectedRootFolderObj &&
 			(selectedRootFolderObj.mediaSubType ?? 'standard') !== 'anime'
 	);
+	const hasExistingFiles = $derived((series.episodeFileCount ?? 0) > 0);
+	const rootFolderChanged = $derived((rootFolderId || null) !== (series.rootFolderId ?? null));
+	const canMoveExistingFiles = $derived(hasExistingFiles && rootFolderChanged && !!rootFolderId);
 
 	async function loadAnimeRoutingContext(tmdbId: number) {
 		try {
@@ -95,16 +104,17 @@
 				fetch(`/api/tmdb/tv/${tmdbId}`)
 			]);
 
+			let nextEnforceAnimeSubtype = false;
+			let nextDetectedAnime = false;
+
 			if (classificationRes.ok) {
 				const classificationData = await classificationRes.json();
-				enforceAnimeSubtype = classificationData?.enforceAnimeSubtype === true;
-			} else {
-				enforceAnimeSubtype = false;
+				nextEnforceAnimeSubtype = classificationData?.enforceAnimeSubtype === true;
 			}
 
 			if (tvRes.ok) {
 				const details: TmdbTvDetails = await tvRes.json();
-				detectedAnime = isLikelyAnimeMedia({
+				nextDetectedAnime = isLikelyAnimeMedia({
 					genres: details.genres,
 					originalLanguage: details.original_language,
 					originCountries: details.origin_country,
@@ -112,9 +122,11 @@
 					title: details.name,
 					originalTitle: details.original_name
 				});
-			} else {
-				detectedAnime = false;
 			}
+
+			// Apply detection before enabling enforcement to avoid transient standard-folder re-selection.
+			detectedAnime = nextDetectedAnime;
+			enforceAnimeSubtype = nextEnforceAnimeSubtype;
 		} catch {
 			enforceAnimeSubtype = false;
 			detectedAnime = false;
@@ -160,6 +172,9 @@
 			seasonFolder = series.seasonFolder ?? true;
 			wantsSubtitles = series.wantsSubtitles ?? true;
 			seriesType = normalizeSeriesType(series.seriesType);
+			moveFilesOnRootChange = false;
+			moveOptionTouched = false;
+			animeRootWarningShown = false;
 			enforceAnimeSubtype = false;
 			detectedAnime = false;
 			void loadAnimeRoutingContext(series.tmdbId);
@@ -172,6 +187,38 @@
 		const stillAllowed = eligibleRootFolders.some((folder) => folder.id === rootFolderId);
 		if (!stillAllowed && !selectedRootFolderOutOfPolicy) {
 			rootFolderId = '';
+		}
+	});
+
+	$effect(() => {
+		if (!open) return;
+		if (rootFolderId) return;
+		if (eligibleRootFolders.length > 0) {
+			rootFolderId = eligibleRootFolders[0].id;
+		}
+	});
+
+	$effect(() => {
+		if (!open || animeRootWarningShown) return;
+		if (!enforceAnimeSubtype || requiredMediaSubType !== 'anime') return;
+		if (eligibleRootFolders.length > 0) return;
+
+		toasts.warning('No Anime root folders are available for this series.', {
+			description:
+				'Add an Anime TV root folder in Settings > Media Storage > Root Folders, or disable anime root folder enforcement.'
+		});
+		animeRootWarningShown = true;
+	});
+
+	$effect(() => {
+		if (!open) return;
+		if (!canMoveExistingFiles) {
+			moveFilesOnRootChange = false;
+			moveOptionTouched = false;
+			return;
+		}
+		if (!moveOptionTouched) {
+			moveFilesOnRootChange = true;
 		}
 	});
 
@@ -195,6 +242,7 @@
 			monitored,
 			scoringProfileId: qualityProfileId || null,
 			rootFolderId: rootFolderId || null,
+			moveFilesOnRootChange,
 			seasonFolder,
 			wantsSubtitles,
 			seriesType
@@ -300,7 +348,9 @@
 				bind:value={rootFolderId}
 				class="select-bordered select w-full"
 			>
-				<option value="">{m.library_seriesEdit_notSet()}</option>
+				{#if !rootFolderId}
+					<option value="" disabled>{m.common_notSet()}</option>
+				{/if}
 				{#if selectedRootFolderOutOfPolicy && selectedRootFolderObj}
 					<option value={selectedRootFolderObj.id}>{selectedRootFolderObj.path} (current)</option>
 				{/if}
@@ -318,12 +368,27 @@
 					{m.library_seriesEdit_rootFolderDesc()}
 				</span>
 			</div>
-			{#if requiredMediaSubType === 'anime'}
+			{#if enforceAnimeSubtype}
 				<div class="text-xs text-base-content/70">
-					Anime root enforcement is enabled. New folder selections are limited to Anime roots.
+					Anime root folder enforcement is enabled. New folder selections are limited to <strong
+						>{requiredMediaSubType === 'anime' ? 'Anime' : 'Standard'}
+					</strong> root folders for this series.
 				</div>
 			{/if}
 		</div>
+
+		{#if canMoveExistingFiles}
+			<FormCheckbox
+				bind:checked={moveFilesOnRootChange}
+				onchange={() => {
+					moveOptionTouched = true;
+				}}
+				label="Move existing files to new root folder"
+				description="Moves the existing series folder after saving. Same-disk moves are instant; cross-disk moves copy then delete."
+				variant="toggle"
+				color="warning"
+			/>
+		{/if}
 	</div>
 
 	<!-- Actions -->

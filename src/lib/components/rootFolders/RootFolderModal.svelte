@@ -56,6 +56,11 @@
 	const modalTitle = $derived(
 		mode === 'add' ? m.rootFolders_addTitle() : m.rootFolders_editTitle()
 	);
+	const defaultScopeLabel = $derived.by(() => {
+		const mediaLabel = mediaType === 'movie' ? 'Movies' : 'TV Shows';
+		const subtypeLabel = mediaSubType === 'anime' ? 'Anime' : 'Standard';
+		return `${subtypeLabel} ${mediaLabel}`;
+	});
 
 	// Reset form when modal opens or folder changes
 	$effect(() => {
@@ -212,8 +217,7 @@
 				<input type="checkbox" class="checkbox shrink-0 checkbox-sm" bind:checked={isDefault} />
 				<span class="text-sm"
 					>{m.rootFolders_setAsDefault({
-						mediaType:
-							mediaType === 'movie' ? m.rootFolders_movies().toLowerCase() : m.rootFolders_tvShows()
+						mediaType: defaultScopeLabel
 					})}</span
 				>
 			</label>

@@ -73,6 +73,8 @@
 			<span
 				>{#if requiredMediaSubType === 'anime'}
 					No Anime root folders are available for this media type.
+				{:else if requiredMediaSubType === 'standard'}
+					No Standard root folders are available for this media type.
 				{:else}
 					{m.library_add_noRootFoldersConfigured({
 						mediaType:

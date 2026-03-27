@@ -196,8 +196,7 @@ export const POST: RequestHandler = async (event) => {
 			originCountries: tvDetails.origin_country,
 			productionCountries: tvDetails.production_countries,
 			title: tvDetails.name,
-			originalTitle: tvDetails.original_name,
-			explicitAnimeType: seriesType === 'anime'
+			originalTitle: tvDetails.original_name
 		});
 
 		// Verify root folder exists and is for TV (with optional anime subtype enforcement)

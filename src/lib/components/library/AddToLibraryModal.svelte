@@ -122,13 +122,48 @@
 	let monitoredSeasons = new SvelteSet<number>();
 
 	// Derived: Filter root folders by media type
-	const requiresAnimeRootSubtype = $derived(
-		enforceAnimeSubtype && (detectedAnime || (mediaType === 'tv' && seriesType === 'anime'))
+	const requiredMediaSubType = $derived(
+		enforceAnimeSubtype ? (detectedAnime ? ('anime' as const) : ('standard' as const)) : undefined
 	);
-	const requiredMediaSubType = $derived(requiresAnimeRootSubtype ? ('anime' as const) : undefined);
 	const filteredRootFolders = $derived(
 		sortRootFoldersForMediaType(rootFolders, mediaType, requiredMediaSubType)
 	);
+
+	function getRecommendedRootFolderId(folders: RootFolder[]): string | undefined {
+		if (folders.length === 0) return undefined;
+
+		// Enforcement path: list is already filtered to required subtype, so pick that default if present.
+		if (requiredMediaSubType) {
+			return (
+				folders.find(
+					(folder) =>
+						folder.isDefault && (folder.mediaSubType ?? 'standard') === requiredMediaSubType
+				)?.id ?? folders[0].id
+			);
+		}
+
+		// Smart recommendation path (enforcement disabled).
+		if (detectedAnime) {
+			return (
+				folders.find(
+					(folder) => folder.isDefault && (folder.mediaSubType ?? 'standard') === 'anime'
+				)?.id ??
+				folders.find(
+					(folder) => folder.isDefault && (folder.mediaSubType ?? 'standard') === 'standard'
+				)?.id ??
+				folders.find((folder) => folder.isDefault)?.id ??
+				folders[0].id
+			);
+		}
+
+		return (
+			folders.find(
+				(folder) => folder.isDefault && (folder.mediaSubType ?? 'standard') === 'standard'
+			)?.id ??
+			folders.find((folder) => folder.isDefault)?.id ??
+			folders[0].id
+		);
+	}
 
 	// Derived: Collection movies not in library (excluding current movie)
 	const missingCollectionMovies = $derived(
@@ -187,8 +222,7 @@
 
 		const stillValid = filteredRootFolders.some((folder) => folder.id === selectedRootFolder);
 		if (!stillValid) {
-			const preferred = filteredRootFolders.find((folder) => folder.isDefault);
-			selectedRootFolder = preferred?.id ?? filteredRootFolders[0].id;
+			selectedRootFolder = getRecommendedRootFolderId(filteredRootFolders) ?? '';
 		}
 	});
 
@@ -253,8 +287,7 @@
 			originCountries: tvDetails?.origin_country,
 			productionCountries: tvDetails?.production_countries,
 			title: tvDetails?.name,
-			originalTitle: tvDetails?.original_name,
-			explicitAnimeType: seriesType === 'anime'
+			originalTitle: tvDetails?.original_name
 		});
 	}
 
@@ -319,12 +352,7 @@
 			}
 
 			// Set defaults
-			const defaultFolder = filteredRootFolders.find((folder) => folder.isDefault);
-			if (defaultFolder) {
-				selectedRootFolder = defaultFolder.id;
-			} else if (filteredRootFolders.length > 0) {
-				selectedRootFolder = filteredRootFolders[0].id;
-			}
+			selectedRootFolder = getRecommendedRootFolderId(filteredRootFolders) ?? '';
 
 			// Use API-provided default profile ID, fallback to first profile
 			const defaultProfileId = profilesData.defaultProfileId;
@@ -580,9 +608,13 @@
 				</div>
 			{/if}
 
-			{#if requiresAnimeRootSubtype}
+			{#if enforceAnimeSubtype}
 				<div class="alert text-sm alert-info">
-					<span>Anime detected. Only folders with subtype Anime are available.</span>
+					<span
+						>{requiredMediaSubType === 'anime'
+							? 'Anime detected. Only folders with subtype Anime are available.'
+							: 'Anime root folder enforcement is enabled. Only Standard folders are available.'}</span
+					>
 				</div>
 			{/if}
 

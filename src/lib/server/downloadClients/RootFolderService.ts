@@ -88,13 +88,21 @@ export class RootFolderService {
 	}
 
 	/**
-	 * Get the default folder for a media type.
+	 * Get the default folder for a media type and optional subtype.
 	 */
-	async getDefaultFolder(mediaType: RootFolderMediaType): Promise<RootFolder | undefined> {
-		const rows = await db
-			.select()
-			.from(rootFoldersTable)
-			.where(and(eq(rootFoldersTable.mediaType, mediaType), eq(rootFoldersTable.isDefault, true)));
+	async getDefaultFolder(
+		mediaType: RootFolderMediaType,
+		mediaSubType?: RootFolderMediaSubType
+	): Promise<RootFolder | undefined> {
+		const whereClause = mediaSubType
+			? and(
+					eq(rootFoldersTable.mediaType, mediaType),
+					eq(rootFoldersTable.mediaSubType, mediaSubType),
+					eq(rootFoldersTable.isDefault, true)
+				)
+			: and(eq(rootFoldersTable.mediaType, mediaType), eq(rootFoldersTable.isDefault, true));
+
+		const rows = await db.select().from(rootFoldersTable).where(whereClause);
 
 		if (!rows[0]) return undefined;
 		return this.rowToFolder(rows[0]);
@@ -112,12 +120,18 @@ export class RootFolderService {
 
 		await this.assertNoPathOverlap(input.path);
 
-		// If this is being set as default, unset any existing defaults for this media type
+		// If this is being set as default, unset any existing defaults for this media type + subtype.
+		const mediaSubType = input.mediaSubType ?? 'standard';
 		if (input.isDefault) {
 			await db
 				.update(rootFoldersTable)
 				.set({ isDefault: false })
-				.where(eq(rootFoldersTable.mediaType, input.mediaType));
+				.where(
+					and(
+						eq(rootFoldersTable.mediaType, input.mediaType),
+						eq(rootFoldersTable.mediaSubType, mediaSubType)
+					)
+				);
 		}
 
 		const id = randomUUID();
@@ -128,7 +142,7 @@ export class RootFolderService {
 			name: input.name,
 			path: input.path,
 			mediaType: input.mediaType,
-			mediaSubType: input.mediaSubType ?? 'standard',
+			mediaSubType,
 			isDefault: input.isDefault ?? false,
 			readOnly: input.readOnly ?? false,
 			preserveSymlinks: input.preserveSymlinks ?? false,
@@ -196,13 +210,19 @@ export class RootFolderService {
 
 		await this.assertNoPathOverlap(updates.path ?? existing.path, id);
 
-		// If this is being set as default, unset any existing defaults for this media type
+		// If this is being set as default, unset any existing defaults for this media type + subtype.
 		const mediaType = updates.mediaType ?? existing.mediaType;
+		const mediaSubType = updates.mediaSubType ?? existing.mediaSubType;
 		if (updates.isDefault) {
 			await db
 				.update(rootFoldersTable)
 				.set({ isDefault: false })
-				.where(eq(rootFoldersTable.mediaType, mediaType));
+				.where(
+					and(
+						eq(rootFoldersTable.mediaType, mediaType),
+						eq(rootFoldersTable.mediaSubType, mediaSubType)
+					)
+				);
 		}
 
 		const updateData: Record<string, unknown> = {};

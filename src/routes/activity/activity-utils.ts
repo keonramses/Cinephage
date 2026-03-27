@@ -46,7 +46,10 @@ export function normalizeFiltersForTab(nextFilters: FiltersType, tab: ActivityTa
 // ── Activity classification ───────────────────────────────────────────
 
 export function isHistoryActivity(activity: UnifiedActivity): boolean {
-	const isHistoryRow = activity.id.startsWith('history-') || activity.id.startsWith('monitoring-');
+	const isHistoryRow =
+		activity.id.startsWith('history-') ||
+		activity.id.startsWith('monitoring-') ||
+		activity.id.startsWith('task-');
 	if (!isHistoryRow) return false;
 
 	// Keep failed activities retryable via queue actions; don't allow bulk-delete selection.
@@ -109,7 +112,9 @@ export function normalizeActivity(activity: Partial<UnifiedActivity>): UnifiedAc
 			? 'queue'
 			: activity.id.startsWith('monitoring-')
 				? 'monitoring'
-				: 'download_history');
+				: activity.id.startsWith('task-')
+					? 'task'
+					: 'download_history');
 
 	return {
 		id: activity.id,

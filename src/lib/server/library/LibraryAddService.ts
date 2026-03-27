@@ -73,17 +73,23 @@ export async function validateRootFolder(
 	}
 
 	const mediaSubType = folder.mediaSubType ?? 'standard';
-	if (options.enforceAnimeSubtype && options.isAnimeMedia && mediaSubType !== 'anime') {
-		throw new ValidationError(
-			'Anime media can only be added to an Anime root folder while anime enforcement is enabled',
-			{
-				rootFolderId: folder.id,
-				rootFolderName: folder.name,
-				mediaSubType,
-				expectedMediaSubType: 'anime',
-				title: options.mediaTitle
-			}
-		);
+	if (options.enforceAnimeSubtype && typeof options.isAnimeMedia === 'boolean') {
+		const expectedMediaSubType = options.isAnimeMedia ? 'anime' : 'standard';
+		if (mediaSubType !== expectedMediaSubType) {
+			const mediaLabel = options.isAnimeMedia ? 'Anime' : 'Standard';
+			const expectedLabel = expectedMediaSubType === 'anime' ? 'Anime' : 'Standard';
+			throw new ValidationError(
+				`${mediaLabel} media can only be added to a ${expectedLabel} root folder while anime enforcement is enabled`,
+				{
+					rootFolderId: folder.id,
+					rootFolderName: folder.name,
+					mediaSubType,
+					expectedMediaSubType,
+					isAnimeMedia: options.isAnimeMedia,
+					title: options.mediaTitle
+				}
+			);
+		}
 	}
 
 	return {

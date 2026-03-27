@@ -598,19 +598,28 @@
 				body: JSON.stringify(editData)
 			});
 
-			if (response.ok) {
-				series.monitored = editData.monitored;
-				series.scoringProfileId = editData.scoringProfileId;
-				series.rootFolderId = editData.rootFolderId;
-				series.seasonFolder = editData.seasonFolder;
-				series.seriesType = editData.seriesType;
-				series.wantsSubtitles = editData.wantsSubtitles;
+			const result = await response.json().catch(() => null);
+			if (!response.ok) {
+				throw new Error(result?.error || m.toast_library_tvDetail_failedToUpdate());
+			}
 
+			series.monitored = editData.monitored;
+			series.scoringProfileId = editData.scoringProfileId;
+			series.seasonFolder = editData.seasonFolder;
+			series.seriesType = editData.seriesType;
+			series.wantsSubtitles = editData.wantsSubtitles;
+
+			if (result?.moveQueued) {
+				toasts.success(
+					'Move queued. File transfer has started and will appear in Activity until completion.'
+				);
+			} else {
+				series.rootFolderId = editData.rootFolderId;
 				const newFolder = data.rootFolders.find((f) => f.id === editData.rootFolderId);
 				series.rootFolderPath = newFolder?.path ?? null;
-
-				isEditModalOpen = false;
 			}
+
+			isEditModalOpen = false;
 		} catch (error) {
 			showActionError(m.toast_library_tvDetail_failedToUpdate(), error);
 		} finally {

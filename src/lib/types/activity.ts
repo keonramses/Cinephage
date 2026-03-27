@@ -24,7 +24,7 @@ export type ActivityStatus =
 /**
  * Where an activity row originated from.
  */
-export type ActivitySource = 'queue' | 'download_history' | 'monitoring';
+export type ActivitySource = 'queue' | 'download_history' | 'monitoring' | 'task';
 
 /**
  * Human-readable labels for monitoring task types.
@@ -38,7 +38,8 @@ export const TASK_TYPE_LABELS: Record<string, string> = {
 	subtitleUpgrade: 'Subtitle Upgrade',
 	new_episode: 'New Episode Search',
 	pendingRelease: 'Pending Release',
-	smartListRefresh: 'Smart List Refresh'
+	smartListRefresh: 'Smart List Refresh',
+	media_move: 'File Move'
 };
 
 /**

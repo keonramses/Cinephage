@@ -118,7 +118,7 @@ export const POST: RequestHandler = async ({ request }) => {
 					originalTitle: movieDetails.original_title
 				});
 
-				if (enforceAnimeSubtype && isAnimeMedia) {
+				if (enforceAnimeSubtype) {
 					await validateRootFolder(rootFolderId, 'movie', {
 						enforceAnimeSubtype,
 						isAnimeMedia,
