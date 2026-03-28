@@ -28,17 +28,7 @@ export const DELETE: RequestHandler = async ({ params, url }) => {
 
 	const downloadService = getSubtitleDownloadService();
 
-	try {
-		await downloadService.delete(id, addToBlacklist, addToBlacklist && reason ? reason : undefined);
+	await downloadService.delete(id, addToBlacklist, addToBlacklist && reason ? reason : undefined);
 
-		return json({ success: true });
-	} catch (error) {
-		const message = error instanceof Error ? error.message : 'Unknown error';
-
-		if (message.includes('not found')) {
-			return json({ error: 'Subtitle not found' }, { status: 404 });
-		}
-
-		return json({ error: message }, { status: 500 });
-	}
+	return json({ success: true });
 };

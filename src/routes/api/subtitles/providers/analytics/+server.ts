@@ -11,6 +11,7 @@
 import { json } from '@sveltejs/kit';
 import type { RequestEvent } from '@sveltejs/kit';
 import { getSubtitleProviderManager } from '$lib/server/subtitles/services/SubtitleProviderManager';
+import { assertFound } from '$lib/server/api/validate.js';
 
 export interface ProviderAnalyticsResponse {
 	/** Provider ID */
@@ -45,54 +46,44 @@ export interface AllAnalyticsResponse {
  * GET - Get throttle status for all providers
  */
 export async function GET(): Promise<Response> {
-	try {
-		const providerManager = getSubtitleProviderManager();
-		const configs = await providerManager.getProviders();
+	const providerManager = getSubtitleProviderManager();
+	const configs = await providerManager.getProviders();
 
-		const providers: ProviderAnalyticsResponse[] = [];
-		let throttledCount = 0;
+	const providers: ProviderAnalyticsResponse[] = [];
+	let throttledCount = 0;
 
-		for (const config of configs) {
-			const isThrottled = providerManager.isThrottled(config);
-			if (isThrottled) {
-				throttledCount++;
-			}
-
-			providers.push({
-				id: config.id,
-				name: config.name,
-				implementation: config.implementation,
-				enabled: config.enabled,
-				throttle: {
-					isThrottled,
-					throttledUntil: config.throttledUntil ?? undefined,
-					consecutiveFailures: config.consecutiveFailures,
-					lastError: config.lastError ?? undefined,
-					lastErrorAt: config.lastErrorAt ?? undefined
-				}
-			});
+	for (const config of configs) {
+		const isThrottled = providerManager.isThrottled(config);
+		if (isThrottled) {
+			throttledCount++;
 		}
 
-		// Sort by consecutive failures (most failures first)
-		providers.sort((a, b) => b.throttle.consecutiveFailures - a.throttle.consecutiveFailures);
-
-		const response: AllAnalyticsResponse = {
-			providers,
-			totalProviders: configs.length,
-			throttledCount,
-			timestamp: new Date().toISOString()
-		};
-
-		return json(response);
-	} catch (error) {
-		return json(
-			{
-				error: 'Failed to get provider analytics',
-				message: error instanceof Error ? error.message : String(error)
-			},
-			{ status: 500 }
-		);
+		providers.push({
+			id: config.id,
+			name: config.name,
+			implementation: config.implementation,
+			enabled: config.enabled,
+			throttle: {
+				isThrottled,
+				throttledUntil: config.throttledUntil ?? undefined,
+				consecutiveFailures: config.consecutiveFailures,
+				lastError: config.lastError ?? undefined,
+				lastErrorAt: config.lastErrorAt ?? undefined
+			}
+		});
 	}
+
+	// Sort by consecutive failures (most failures first)
+	providers.sort((a, b) => b.throttle.consecutiveFailures - a.throttle.consecutiveFailures);
+
+	const response: AllAnalyticsResponse = {
+		providers,
+		totalProviders: configs.length,
+		throttledCount,
+		timestamp: new Date().toISOString()
+	};
+
+	return json(response);
 }
 
 /**
@@ -102,35 +93,22 @@ export async function GET(): Promise<Response> {
  * - provider: The provider ID to clear throttle for
  */
 export async function DELETE({ url }: RequestEvent): Promise<Response> {
-	try {
-		const providerId = url.searchParams.get('provider');
+	const providerId = url.searchParams.get('provider');
 
-		if (!providerId) {
-			return json({ error: 'Missing provider parameter' }, { status: 400 });
-		}
-
-		const providerManager = getSubtitleProviderManager();
-
-		// Check if provider exists
-		const config = await providerManager.getProvider(providerId);
-		if (!config) {
-			return json({ error: `Unknown provider: ${providerId}` }, { status: 404 });
-		}
-
-		// Clear throttle by recording a "success" which resets all error state
-		await providerManager.recordSuccess(providerId);
-
-		return json({
-			success: true,
-			message: `Throttle cleared for ${config.name}`
-		});
-	} catch (error) {
-		return json(
-			{
-				error: 'Failed to clear throttle',
-				message: error instanceof Error ? error.message : String(error)
-			},
-			{ status: 500 }
-		);
+	if (!providerId) {
+		return json({ error: 'Missing provider parameter' }, { status: 400 });
 	}
+
+	const providerManager = getSubtitleProviderManager();
+
+	// Check if provider exists
+	const config = assertFound(await providerManager.getProvider(providerId), 'Provider', providerId);
+
+	// Clear throttle by recording a "success" which resets all error state
+	await providerManager.recordSuccess(providerId);
+
+	return json({
+		success: true,
+		message: `Throttle cleared for ${config.name}`
+	});
 }

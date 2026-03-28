@@ -1,9 +1,9 @@
 import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
 import { getRootFolderService } from '$lib/server/downloadClients/RootFolderService';
-import { isAppError } from '$lib/errors';
 import { rootFolderCreateSchema } from '$lib/validation/schemas';
 import { requireAdmin } from '$lib/server/auth/authorization.js';
+import { parseBody } from '$lib/server/api/validate.js';
 
 /**
  * GET /api/root-folders
@@ -24,45 +24,19 @@ export const POST: RequestHandler = async (event) => {
 	if (authError) return authError;
 
 	const { request } = event;
-	let data: unknown;
-	try {
-		data = await request.json();
-	} catch {
-		return json({ error: 'Invalid JSON body' }, { status: 400 });
-	}
+	const validated = await parseBody(request, rootFolderCreateSchema);
 
-	const result = rootFolderCreateSchema.safeParse(data);
-
-	if (!result.success) {
-		return json(
-			{
-				error: 'Validation failed',
-				details: result.error.flatten()
-			},
-			{ status: 400 }
-		);
-	}
-
-	const validated = result.data;
 	const service = getRootFolderService();
 
-	try {
-		const created = await service.createFolder({
-			name: validated.name,
-			path: validated.path,
-			mediaType: validated.mediaType,
-			isDefault: validated.isDefault,
-			readOnly: validated.readOnly,
-			preserveSymlinks: validated.preserveSymlinks,
-			defaultMonitored: validated.defaultMonitored
-		});
+	const created = await service.createFolder({
+		name: validated.name,
+		path: validated.path,
+		mediaType: validated.mediaType,
+		isDefault: validated.isDefault,
+		readOnly: validated.readOnly,
+		preserveSymlinks: validated.preserveSymlinks,
+		defaultMonitored: validated.defaultMonitored
+	});
 
-		return json({ success: true, folder: created });
-	} catch (error) {
-		if (isAppError(error)) {
-			return json(error.toJSON(), { status: error.statusCode });
-		}
-		const message = error instanceof Error ? error.message : 'Unknown error';
-		return json({ error: message }, { status: 500 });
-	}
+	return json({ success: true, folder: created });
 };

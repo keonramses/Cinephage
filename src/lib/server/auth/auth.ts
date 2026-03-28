@@ -156,6 +156,9 @@ const DB_PATH = getAuthDatabasePath();
 ensureAuthDatabaseDirectory();
 const authDb = new Database(DB_PATH);
 
+const disableSecureCookies = process.env.BETTER_AUTH_DISABLE_SECURE_COOKIES === 'true';
+const useSecureCookies = !disableSecureCookies && getBaseURL().startsWith('https://');
+
 /**
  * Better Auth configuration for Cinephage
  * Username-based authentication with no email required
@@ -323,21 +326,14 @@ export const auth = betterAuth({
 		}
 	},
 
-	// Advanced security settings
-	// Optimized for both HTTP (local/LAN) and HTTPS (reverse proxy) deployments
 	advanced: {
-		// Use custom cookie prefix instead of __Secure- to avoid HTTPS requirement
-		// __Secure- prefix requires HTTPS and breaks HTTP access
-		cookiePrefix: 'cinephage',
+		cookiePrefix: useSecureCookies ? '__Secure' : 'cinephage',
 
-		// Disable secure cookies by default for HTTP compatibility
-		// HTTPS deployments should set BETTER_AUTH_URL=https://domain.com
-		useSecureCookies: false,
+		useSecureCookies: useSecureCookies,
 
-		// Cookie attributes - httpOnly prevents XSS, lax prevents CSRF
 		defaultCookieAttributes: {
 			httpOnly: true,
-			secure: false, // Allow HTTP access
+			secure: useSecureCookies,
 			sameSite: 'lax'
 		}
 	}

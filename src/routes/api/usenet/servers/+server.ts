@@ -9,6 +9,7 @@ import { getNntpServerService } from '$lib/server/streaming/nzb/NntpServerServic
 import { getNntpManager } from '$lib/server/streaming/usenet/NntpManager';
 import { nntpServerCreateSchema } from '$lib/validation/schemas';
 import { requireAdmin } from '$lib/server/auth/authorization.js';
+import { parseBody } from '$lib/server/api/validate.js';
 
 /**
  * GET /api/usenet/servers
@@ -30,33 +31,11 @@ export const POST: RequestHandler = async (event) => {
 	if (authError) return authError;
 
 	const { request } = event;
-	let data: unknown;
-	try {
-		data = await request.json();
-	} catch {
-		return json({ error: 'Invalid JSON body' }, { status: 400 });
-	}
-
-	const result = nntpServerCreateSchema.safeParse(data);
-
-	if (!result.success) {
-		return json(
-			{
-				error: 'Validation failed',
-				details: result.error.flatten()
-			},
-			{ status: 400 }
-		);
-	}
+	const result = await parseBody(request, nntpServerCreateSchema);
 
 	const service = getNntpServerService();
 
-	try {
-		const created = await service.createServer(result.data);
-		await getNntpManager().reload();
-		return json({ success: true, server: created });
-	} catch (error) {
-		const message = error instanceof Error ? error.message : 'Unknown error';
-		return json({ error: message }, { status: 500 });
-	}
+	const created = await service.createServer(result);
+	await getNntpManager().reload();
+	return json({ success: true, server: created });
 };

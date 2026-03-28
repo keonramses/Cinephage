@@ -20,6 +20,8 @@ import { deleteDirectoryWithinRoot } from '$lib/server/filesystem/delete-helpers
 import { logger } from '$lib/logging';
 import { libraryMediaEvents } from '$lib/server/library/LibraryMediaEvents';
 import { tmdb } from '$lib/server/tmdb.js';
+import { movieUpdateSchema } from '$lib/validation/schemas';
+import { parseBody } from '$lib/server/api/validate.js';
 
 /**
  * GET /api/library/movies/[id]
@@ -132,98 +134,75 @@ export const GET: RequestHandler = async ({ params }) => {
  * Update movie settings (monitored, quality profile, etc.)
  */
 export const PATCH: RequestHandler = async ({ params, request }) => {
-	try {
-		const body = await request.json();
-		const {
-			monitored,
-			scoringProfileId,
-			minimumAvailability,
-			rootFolderId,
-			wantsSubtitles,
-			languageProfileId
-		} = body;
+	const body = await parseBody(request, movieUpdateSchema);
 
-		// Capture current state before update (for subtitle trigger detection)
-		const [currentMovie] = await db
-			.select({
-				wantsSubtitles: movies.wantsSubtitles,
-				languageProfileId: movies.languageProfileId,
-				hasFile: movies.hasFile
-			})
-			.from(movies)
-			.where(eq(movies.id, params.id));
+	// Capture current state before update (for subtitle trigger detection)
+	const [currentMovie] = await db
+		.select({
+			wantsSubtitles: movies.wantsSubtitles,
+			languageProfileId: movies.languageProfileId,
+			hasFile: movies.hasFile
+		})
+		.from(movies)
+		.where(eq(movies.id, params.id));
 
-		const updateData: Record<string, unknown> = {};
+	const updateData: Record<string, unknown> = {};
 
-		if (typeof monitored === 'boolean') {
-			updateData.monitored = monitored;
-		}
-		if (scoringProfileId !== undefined) {
-			updateData.scoringProfileId = scoringProfileId;
-		}
-		if (minimumAvailability) {
-			updateData.minimumAvailability = minimumAvailability;
-		}
-		if (rootFolderId !== undefined) {
-			updateData.rootFolderId = rootFolderId;
-		}
-		if (typeof wantsSubtitles === 'boolean') {
-			updateData.wantsSubtitles = wantsSubtitles;
-		}
-		if (languageProfileId !== undefined) {
-			updateData.languageProfileId = languageProfileId;
-		}
+	if (body.monitored !== undefined) {
+		updateData.monitored = body.monitored;
+	}
+	if (body.scoringProfileId !== undefined) {
+		updateData.scoringProfileId = body.scoringProfileId;
+	}
+	if (body.minimumAvailability !== undefined) {
+		updateData.minimumAvailability = body.minimumAvailability;
+	}
+	if (body.rootFolderId !== undefined) {
+		updateData.rootFolderId = body.rootFolderId;
+	}
+	if (body.wantsSubtitles !== undefined) {
+		updateData.wantsSubtitles = body.wantsSubtitles;
+	}
+	if (body.languageProfileId !== undefined) {
+		updateData.languageProfileId = body.languageProfileId;
+	}
 
-		if (Object.keys(updateData).length === 0) {
-			return json({ success: false, error: 'No valid fields to update' }, { status: 400 });
-		}
+	await db.update(movies).set(updateData).where(eq(movies.id, params.id));
 
-		await db.update(movies).set(updateData).where(eq(movies.id, params.id));
+	// Check if subtitle monitoring was just enabled
+	if (currentMovie?.hasFile) {
+		const wasEnabled = currentMovie.wantsSubtitles === true && currentMovie.languageProfileId;
+		const newWantsSubtitles = body.wantsSubtitles ?? currentMovie.wantsSubtitles;
+		const newProfileId = body.languageProfileId ?? currentMovie.languageProfileId;
+		const isNowEnabled = newWantsSubtitles === true && newProfileId;
 
-		// Check if subtitle monitoring was just enabled
-		if (currentMovie?.hasFile) {
-			const wasEnabled = currentMovie.wantsSubtitles === true && currentMovie.languageProfileId;
-			const newWantsSubtitles = wantsSubtitles ?? currentMovie.wantsSubtitles;
-			const newProfileId = languageProfileId ?? currentMovie.languageProfileId;
-			const isNowEnabled = newWantsSubtitles === true && newProfileId;
-
-			// Trigger subtitle search if just enabled (wasn't before, is now)
-			if (!wasEnabled && isNowEnabled) {
-				const settings = await monitoringScheduler.getSettings();
-				if (settings.subtitleSearchOnImportEnabled) {
-					logger.info(
+		// Trigger subtitle search if just enabled (wasn't before, is now)
+		if (!wasEnabled && isNowEnabled) {
+			const settings = await monitoringScheduler.getSettings();
+			if (settings.subtitleSearchOnImportEnabled) {
+				logger.info(
+					{
+						movieId: params.id
+					},
+					'[API] Subtitle monitoring enabled for movie, triggering search'
+				);
+				// Fire-and-forget: don't await
+				searchSubtitlesForNewMedia('movie', params.id).catch((err) => {
+					logger.warn(
 						{
-							movieId: params.id
+							movieId: params.id,
+							error: err instanceof Error ? err.message : String(err)
 						},
-						'[API] Subtitle monitoring enabled for movie, triggering search'
+						'[API] Background subtitle search failed'
 					);
-					// Fire-and-forget: don't await
-					searchSubtitlesForNewMedia('movie', params.id).catch((err) => {
-						logger.warn(
-							{
-								movieId: params.id,
-								error: err instanceof Error ? err.message : String(err)
-							},
-							'[API] Background subtitle search failed'
-						);
-					});
-				}
+				});
 			}
 		}
-
-		libraryMediaEvents.emitMovieUpdated(params.id);
-
-		return json({ success: true });
-	} catch (error) {
-		logger.error('[API] Error updating movie', error instanceof Error ? error : undefined);
-		return json(
-			{
-				success: false,
-				error: error instanceof Error ? error.message : 'Failed to update movie'
-			},
-			{ status: 500 }
-		);
 	}
+
+	libraryMediaEvents.emitMovieUpdated(params.id);
+
+	return json({ success: true });
 };
 
 // Alias PUT to PATCH for convenience

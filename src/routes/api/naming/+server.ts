@@ -4,28 +4,23 @@ import { normalizeNamingConfig, normalizeNamingPresetSelection } from '$lib/nami
 import { namingSettingsService } from '$lib/server/library/naming/NamingSettingsService';
 import { DEFAULT_NAMING_CONFIG } from '$lib/server/library/naming/NamingService';
 import { namingSettingsUpdateSchema } from '$lib/validation/schemas';
-import { logger } from '$lib/logging';
 import { requireAdmin } from '$lib/server/auth/authorization.js';
 import { resetRenamePreviewService } from '$lib/server/library/naming/RenamePreviewService.js';
+import { parseBody } from '$lib/server/api/validate.js';
 
 /**
  * GET /api/naming
  * Returns current naming configuration
  */
 export const GET: RequestHandler = async () => {
-	try {
-		const config = await namingSettingsService.getConfig();
-		const presetSelection = await namingSettingsService.getPresetSelection();
+	const config = await namingSettingsService.getConfig();
+	const presetSelection = await namingSettingsService.getPresetSelection();
 
-		return json({
-			config,
-			presetSelection,
-			defaults: DEFAULT_NAMING_CONFIG
-		});
-	} catch (error) {
-		logger.error('Error getting naming config', error instanceof Error ? error : undefined);
-		return json({ error: 'Failed to get naming configuration' }, { status: 500 });
-	}
+	return json({
+		config,
+		presetSelection,
+		defaults: DEFAULT_NAMING_CONFIG
+	});
 };
 
 /**
@@ -37,34 +32,21 @@ export const PUT: RequestHandler = async (event) => {
 	if (authError) return authError;
 
 	const { request } = event;
-	try {
-		const body = await request.json();
-		const validation = namingSettingsUpdateSchema.safeParse(body);
+	const validation = await parseBody(request, namingSettingsUpdateSchema);
 
-		if (!validation.success) {
-			return json(
-				{ error: 'Invalid request body', details: validation.error.issues },
-				{ status: 400 }
-			);
-		}
+	const updatedSettings = await namingSettingsService.updateSettings({
+		config: normalizeNamingConfig(validation.config),
+		presetSelection: normalizeNamingPresetSelection(validation.presetSelection)
+	});
 
-		const updatedSettings = await namingSettingsService.updateSettings({
-			config: normalizeNamingConfig(validation.data.config),
-			presetSelection: normalizeNamingPresetSelection(validation.data.presetSelection)
-		});
+	// Invalidate cached NamingService so subsequent operations use the new config
+	resetRenamePreviewService();
 
-		// Invalidate cached NamingService so subsequent operations use the new config
-		resetRenamePreviewService();
-
-		return json({
-			success: true,
-			config: updatedSettings.config,
-			presetSelection: updatedSettings.presetSelection
-		});
-	} catch (error) {
-		logger.error('Error updating naming config', error instanceof Error ? error : undefined);
-		return json({ error: 'Failed to update naming configuration' }, { status: 500 });
-	}
+	return json({
+		success: true,
+		config: updatedSettings.config,
+		presetSelection: updatedSettings.presetSelection
+	});
 };
 
 /**
@@ -75,21 +57,16 @@ export const DELETE: RequestHandler = async (event) => {
 	const authError = requireAdmin(event);
 	if (authError) return authError;
 
-	try {
-		const defaultConfig = await namingSettingsService.resetToDefaults();
-		const presetSelection = await namingSettingsService.getPresetSelection();
+	const defaultConfig = await namingSettingsService.resetToDefaults();
+	const presetSelection = await namingSettingsService.getPresetSelection();
 
-		// Invalidate cached NamingService so subsequent operations use the default config
-		resetRenamePreviewService();
+	// Invalidate cached NamingService so subsequent operations use the default config
+	resetRenamePreviewService();
 
-		return json({
-			success: true,
-			config: defaultConfig,
-			presetSelection,
-			message: 'Naming settings reset to defaults'
-		});
-	} catch (error) {
-		logger.error('Error resetting naming config', error instanceof Error ? error : undefined);
-		return json({ error: 'Failed to reset naming configuration' }, { status: 500 });
-	}
+	return json({
+		success: true,
+		config: defaultConfig,
+		presetSelection,
+		message: 'Naming settings reset to defaults'
+	});
 };

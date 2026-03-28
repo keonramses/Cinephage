@@ -1125,9 +1125,12 @@ async function handleStreamingGrab(data: GrabRequest): Promise<Response> {
 			},
 			'[Grab] Failed to add streaming file to database'
 		);
-		return json({ success: false, error: `Database error: ${message}` } satisfies GrabResponse, {
-			status: 500
-		});
+		return json(
+			{ success: false, error: 'Failed to save streaming file to database' } satisfies GrabResponse,
+			{
+				status: 500
+			}
+		);
 	}
 }
 

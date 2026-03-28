@@ -7,6 +7,7 @@ import { eq } from 'drizzle-orm';
 import { tmdbApiKeySchema } from '$lib/validation/schemas';
 import { tmdb } from '$lib/server/tmdb';
 import { z } from 'zod';
+import { parseBody } from '$lib/server/api/validate.js';
 
 const tmdbSettingsSchema = z.object({
 	apiKey: z.string().optional().default('')
@@ -33,25 +34,9 @@ export const PUT: RequestHandler = async (event) => {
 	if (authError) return authError;
 
 	const { request } = event;
-	let body: unknown;
-	try {
-		body = await request.json();
-	} catch {
-		return json({ error: 'Invalid JSON body' }, { status: 400 });
-	}
+	const parsedBody = await parseBody(request, tmdbSettingsSchema);
 
-	const parsedBody = tmdbSettingsSchema.safeParse(body);
-	if (!parsedBody.success) {
-		return json(
-			{
-				error: 'Validation failed',
-				details: parsedBody.error.flatten()
-			},
-			{ status: 400 }
-		);
-	}
-
-	const apiKey = parsedBody.data.apiKey.trim();
+	const apiKey = parsedBody.apiKey.trim();
 	if (!apiKey) {
 		return json({ success: true, unchanged: true });
 	}
