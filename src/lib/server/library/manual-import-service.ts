@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { basename, dirname, extname, join, resolve } from 'node:path';
+import { basename, dirname, extname, join, relative, resolve } from 'node:path';
 import { readdir, stat, unlink } from 'node:fs/promises';
 import { eq, inArray } from 'drizzle-orm';
 import { db } from '$lib/server/db/index.js';
@@ -45,6 +45,7 @@ interface SuggestedMatch {
 	year?: number;
 	confidence: number;
 	mediaType: MediaType;
+	isAnime?: boolean;
 }
 
 export interface ManualImportMatch extends SuggestedMatch {
@@ -134,10 +135,18 @@ export class ManualImportService {
 		const normalizedSourcePath = resolve(sourcePath);
 		const detectionGroupPaths = await this.resolveDetectionGroupPaths(normalizedSourcePath);
 		const groups: ManualImportDetectionGroup[] = [];
+		const matchCache = new Map<string, SuggestedMatch[]>();
 
 		for (const groupPath of detectionGroupPaths) {
 			try {
-				groups.push(await this.detectGroupFromPath(groupPath, preferredMediaType));
+				groups.push(
+					await this.detectGroupFromPath(
+						groupPath,
+						preferredMediaType,
+						normalizedSourcePath,
+						matchCache
+					)
+				);
 			} catch (error) {
 				logger.warn(
 					{
@@ -153,6 +162,8 @@ export class ManualImportService {
 			throw new Error('No media files found in selected directory');
 		}
 
+		this.applySeriesConsensusMatches(groups);
+
 		const selectedGroup = groups[0];
 		return {
 			...selectedGroup,
@@ -165,7 +176,9 @@ export class ManualImportService {
 
 	private async detectGroupFromPath(
 		groupPath: string,
-		preferredMediaType?: MediaType
+		preferredMediaType: MediaType | undefined,
+		sourceRootPath: string,
+		matchCache: Map<string, SuggestedMatch[]>
 	): Promise<ManualImportDetectionGroup> {
 		const normalizedGroupPath = resolve(groupPath);
 		const sourceFiles = await this.resolveSourceFiles(normalizedGroupPath);
@@ -178,13 +191,20 @@ export class ManualImportService {
 		});
 		const parsedTitle = parsed.cleanTitle || fileStem;
 		const inferredMediaType: MediaType = preferredMediaType || (tvIdentifier ? 'tv' : 'movie');
+		const titleCandidates = this.buildTitleCandidatesForMatching({
+			parsedTitle,
+			groupPath: normalizedGroupPath,
+			selectedFilePath: selectedFile.path,
+			sourceRootPath
+		});
 		const detectedSeasons = this.extractDetectedSeasons(sourceFiles);
 		const suggestedSeason = extractSeasonFromPath(selectedFile.path);
 		const matches = await this.findMatches(
-			parsedTitle,
+			titleCandidates,
 			parsed.year,
 			inferredMediaType,
-			selectedFile.path
+			selectedFile.path,
+			matchCache
 		);
 		const enrichedMatches = await this.enrichMatchesWithLibraryStatus(matches);
 		const sourceStats = await stat(normalizedGroupPath);
@@ -211,6 +231,185 @@ export class ManualImportService {
 			inferredMediaType,
 			matches: enrichedMatches
 		};
+	}
+
+	private buildTitleCandidatesForMatching(input: {
+		parsedTitle: string;
+		groupPath: string;
+		selectedFilePath: string;
+		sourceRootPath: string;
+	}): string[] {
+		const candidates: string[] = [];
+		this.pushTitleCandidate(candidates, input.parsedTitle);
+
+		const pathCandidates = new Set<string>();
+		const selectedFileParent = dirname(input.selectedFilePath);
+		pathCandidates.add(selectedFileParent);
+		pathCandidates.add(dirname(selectedFileParent));
+		pathCandidates.add(dirname(input.groupPath));
+		pathCandidates.add(input.groupPath);
+
+		const relativeToRoot = relative(input.sourceRootPath, input.selectedFilePath);
+		if (!relativeToRoot.startsWith('..')) {
+			const segments = relativeToRoot.split(/[\\/]/).filter(Boolean).slice(0, -1);
+			for (const segment of segments) {
+				pathCandidates.add(segment);
+			}
+		}
+
+		for (const candidatePath of pathCandidates) {
+			const segment = basename(candidatePath);
+			const fromSegment = this.extractTitleCandidateFromSegment(segment);
+			if (fromSegment) {
+				this.pushTitleCandidate(candidates, fromSegment);
+			}
+		}
+
+		if (candidates.length === 0) {
+			this.pushTitleCandidate(candidates, input.parsedTitle);
+		}
+
+		return candidates.slice(0, 5);
+	}
+
+	private extractTitleCandidateFromSegment(segment: string): string | null {
+		const stem = getMediaParseStem(segment);
+		const parsed = parseRelease(stem);
+		const parsedTitle = parsed.cleanTitle?.trim();
+		if (parsedTitle && this.isMeaningfulTitleCandidate(parsedTitle)) {
+			return parsedTitle;
+		}
+
+		const sanitized = stem
+			.replace(/[._]+/g, ' ')
+			.replace(/\b(?:s\d{1,3}|season\s*\d{1,3})\b/gi, ' ')
+			.replace(/\s+/g, ' ')
+			.trim();
+
+		if (!this.isMeaningfulTitleCandidate(sanitized)) {
+			return null;
+		}
+
+		return sanitized;
+	}
+
+	private isMeaningfulTitleCandidate(candidate: string): boolean {
+		const trimmed = candidate.trim();
+		if (trimmed.length < 2) return false;
+		if (/^\d+$/.test(trimmed)) return false;
+		if (/^(?:s\d{1,3}|season\s*\d{1,3})$/i.test(trimmed)) return false;
+		return true;
+	}
+
+	private pushTitleCandidate(target: string[], candidate: string | undefined | null): void {
+		if (!candidate) return;
+		const trimmed = candidate.trim();
+		if (!this.isMeaningfulTitleCandidate(trimmed)) {
+			return;
+		}
+
+		const normalizedCandidate = this.normalizeTitle(trimmed);
+		if (!normalizedCandidate) return;
+		const alreadyIncluded = target.some(
+			(existing) => this.normalizeTitle(existing) === normalizedCandidate
+		);
+		if (alreadyIncluded) return;
+		target.push(trimmed);
+	}
+
+	private applySeriesConsensusMatches(groups: ManualImportDetectionGroup[]): void {
+		const buckets = new Map<string, ManualImportDetectionGroup[]>();
+
+		for (const group of groups) {
+			if (group.inferredMediaType !== 'tv' || group.matches.length === 0) {
+				continue;
+			}
+			const bucketKey = this.getTvSeriesConsensusBucketKey(group);
+			const bucket = buckets.get(bucketKey) ?? [];
+			bucket.push(group);
+			buckets.set(bucketKey, bucket);
+		}
+
+		for (const bucketGroups of buckets.values()) {
+			if (bucketGroups.length < 2) {
+				continue;
+			}
+
+			const consensus = new Map<
+				number,
+				{ match: ManualImportMatch; score: number; support: number; topSupport: number }
+			>();
+			for (const group of bucketGroups) {
+				group.matches.slice(0, 5).forEach((match, index) => {
+					const existing = consensus.get(match.tmdbId);
+					const rankWeight = index === 0 ? 1 : index === 1 ? 0.7 : index === 2 ? 0.5 : 0.35;
+					const weightedScore = rankWeight * (match.confidence || 0);
+
+					if (existing) {
+						existing.score += weightedScore;
+						existing.support += 1;
+						if (index === 0) {
+							existing.topSupport += 1;
+						}
+						return;
+					}
+
+					consensus.set(match.tmdbId, {
+						match,
+						score: weightedScore,
+						support: 1,
+						topSupport: index === 0 ? 1 : 0
+					});
+				});
+			}
+
+			const bestConsensus = [...consensus.values()].sort(
+				(a, b) => b.topSupport - a.topSupport || b.support - a.support || b.score - a.score
+			)[0];
+
+			if (!bestConsensus) {
+				continue;
+			}
+			if (
+				bestConsensus.topSupport < 2 &&
+				bestConsensus.support < Math.ceil(bucketGroups.length * 0.6)
+			) {
+				continue;
+			}
+
+			for (const group of bucketGroups) {
+				const topMatch = group.matches[0];
+				if (!topMatch) continue;
+				if (topMatch.tmdbId === bestConsensus.match.tmdbId) continue;
+
+				const existingConsensusMatch = group.matches.find(
+					(match) => match.tmdbId === bestConsensus.match.tmdbId
+				);
+				const shouldApply =
+					Boolean(existingConsensusMatch) ||
+					topMatch.confidence < 0.9 ||
+					bestConsensus.match.confidence - topMatch.confidence > 0.15;
+
+				if (!shouldApply) {
+					continue;
+				}
+
+				const mergedMatches = [
+					existingConsensusMatch ?? bestConsensus.match,
+					...group.matches.filter((match) => match.tmdbId !== bestConsensus.match.tmdbId)
+				];
+				group.matches = mergedMatches.slice(0, 5);
+			}
+		}
+	}
+
+	private getTvSeriesConsensusBucketKey(group: ManualImportDetectionGroup): string {
+		let bucketPath = group.sourceType === 'file' ? dirname(group.sourcePath) : group.sourcePath;
+		const folderName = basename(bucketPath);
+		if (this.isSeasonLikeFolderName(folderName)) {
+			bucketPath = dirname(bucketPath);
+		}
+		return resolve(bucketPath);
 	}
 
 	async executeImport(request: ExecuteManualImportRequest): Promise<ExecuteManualImportResult> {
@@ -1432,10 +1631,11 @@ export class ManualImportService {
 	}
 
 	private async findMatches(
-		title: string,
+		titleCandidates: string[],
 		year: number | undefined,
 		mediaType: MediaType,
-		filePath: string
+		filePath: string,
+		matchCache?: Map<string, SuggestedMatch[]>
 	): Promise<SuggestedMatch[]> {
 		try {
 			const extractedIds = extractExternalIds(filePath);
@@ -1460,38 +1660,56 @@ export class ManualImportService {
 					return [imdb];
 				}
 			}
+			const candidates =
+				titleCandidates.length > 0 ? titleCandidates : [basename(getMediaParseStem(filePath))];
+			const aggregatedMatches = new Map<number, SuggestedMatch>();
 
-			const results =
-				mediaType === 'movie'
-					? await tmdb.searchMovies(title, year, true)
-					: await tmdb.searchTv(title, year, true);
+			for (const candidate of candidates) {
+				const cacheKey = `${mediaType}:${year ?? 'na'}:${candidate.toLowerCase()}`;
+				let cachedMatches = matchCache?.get(cacheKey);
 
-			if (!results.results || results.results.length === 0) {
-				return [];
+				if (!cachedMatches) {
+					const results =
+						mediaType === 'movie'
+							? await tmdb.searchMovies(candidate, year, true)
+							: await tmdb.searchTv(candidate, year, true);
+
+					cachedMatches =
+						results.results?.slice(0, 10).map((result) => {
+							const resultTitle = result.title || result.name || '';
+							const resultDate = result.release_date || result.first_air_date;
+							const resultYear = resultDate ? parseInt(resultDate.split('-')[0], 10) : undefined;
+
+							return {
+								tmdbId: result.id,
+								title: resultTitle,
+								year: resultYear,
+								confidence: this.calculateMatchConfidence(candidate, year, resultTitle, resultYear),
+								mediaType,
+								isAnime: this.classifyTmdbResultAnime(result, mediaType)
+							} satisfies SuggestedMatch;
+						}) ?? [];
+
+					matchCache?.set(cacheKey, cachedMatches);
+				}
+
+				for (const match of cachedMatches) {
+					const existing = aggregatedMatches.get(match.tmdbId);
+					if (!existing || match.confidence > existing.confidence) {
+						aggregatedMatches.set(match.tmdbId, { ...match });
+					}
+				}
 			}
 
-			const matches = results.results.slice(0, 5).map((result) => {
-				const resultTitle = result.title || result.name || '';
-				const resultDate = result.release_date || result.first_air_date;
-				const resultYear = resultDate ? parseInt(resultDate.split('-')[0], 10) : undefined;
-
-				return {
-					tmdbId: result.id,
-					title: resultTitle,
-					year: resultYear,
-					confidence: this.calculateMatchConfidence(title, year, resultTitle, resultYear),
-					mediaType
-				} satisfies SuggestedMatch;
-			});
-
+			const matches = [...aggregatedMatches.values()];
 			matches.sort((a, b) => b.confidence - a.confidence);
-			return matches;
+			return matches.slice(0, 5);
 		} catch (error) {
 			logger.error(
 				{
 					err: error instanceof Error ? error : undefined,
 					...{
-						title,
+						titleCandidates,
 						mediaType
 					}
 				},
@@ -1513,7 +1731,15 @@ export class ManualImportService {
 					title: movie.title,
 					year: movie.release_date ? parseInt(movie.release_date.split('-')[0], 10) : undefined,
 					confidence: 1,
-					mediaType
+					mediaType,
+					isAnime: isLikelyAnimeMedia({
+						genres: movie.genres,
+						originalLanguage: movie.original_language,
+						originCountries: movie.production_countries?.map((country) => country.iso_3166_1),
+						productionCountries: movie.production_countries,
+						title: movie.title,
+						originalTitle: movie.original_title
+					})
 				};
 			}
 			const show = await tmdb.getTVShow(tmdbId);
@@ -1522,7 +1748,14 @@ export class ManualImportService {
 				title: show.name,
 				year: show.first_air_date ? parseInt(show.first_air_date.split('-')[0], 10) : undefined,
 				confidence: 1,
-				mediaType
+				mediaType,
+				isAnime: isLikelyAnimeMedia({
+					genres: show.genres,
+					originalLanguage: show.original_language,
+					originCountries: show.origin_country,
+					title: show.name,
+					originalTitle: show.original_name
+				})
 			};
 		} catch {
 			return null;
@@ -1541,7 +1774,8 @@ export class ManualImportService {
 				title: show.name,
 				year: show.first_air_date ? parseInt(show.first_air_date.split('-')[0], 10) : undefined,
 				confidence: 1,
-				mediaType: 'tv'
+				mediaType: 'tv',
+				isAnime: this.classifyTmdbResultAnime(show, 'tv')
 			};
 		} catch {
 			return null;
@@ -1562,7 +1796,8 @@ export class ManualImportService {
 					title: movie.title,
 					year: movie.release_date ? parseInt(movie.release_date.split('-')[0], 10) : undefined,
 					confidence: 1,
-					mediaType: 'movie'
+					mediaType: 'movie',
+					isAnime: this.classifyTmdbResultAnime(movie, 'movie')
 				};
 			}
 
@@ -1573,7 +1808,8 @@ export class ManualImportService {
 					title: show.name,
 					year: show.first_air_date ? parseInt(show.first_air_date.split('-')[0], 10) : undefined,
 					confidence: 1,
-					mediaType: 'tv'
+					mediaType: 'tv',
+					isAnime: this.classifyTmdbResultAnime(show, 'tv')
 				};
 			}
 
@@ -1584,7 +1820,8 @@ export class ManualImportService {
 					title: movie.title,
 					year: movie.release_date ? parseInt(movie.release_date.split('-')[0], 10) : undefined,
 					confidence: 1,
-					mediaType: 'movie'
+					mediaType: 'movie',
+					isAnime: this.classifyTmdbResultAnime(movie, 'movie')
 				};
 			}
 
@@ -1595,13 +1832,49 @@ export class ManualImportService {
 					title: show.name,
 					year: show.first_air_date ? parseInt(show.first_air_date.split('-')[0], 10) : undefined,
 					confidence: 1,
-					mediaType: 'tv'
+					mediaType: 'tv',
+					isAnime: this.classifyTmdbResultAnime(show, 'tv')
 				};
 			}
 		} catch {
 			return null;
 		}
 		return null;
+	}
+
+	private classifyTmdbResultAnime(result: Record<string, unknown>, mediaType: MediaType): boolean {
+		const genreIds = Array.isArray(result.genre_ids)
+			? result.genre_ids.filter((value): value is number => typeof value === 'number')
+			: [];
+		const originCountries = Array.isArray(result.origin_country)
+			? result.origin_country.filter((value): value is string => typeof value === 'string')
+			: [];
+		const originalLanguage =
+			typeof result.original_language === 'string' ? result.original_language : null;
+		const title =
+			mediaType === 'movie'
+				? typeof result.title === 'string'
+					? result.title
+					: null
+				: typeof result.name === 'string'
+					? result.name
+					: null;
+		const originalTitle =
+			mediaType === 'movie'
+				? typeof result.original_title === 'string'
+					? result.original_title
+					: null
+				: typeof result.original_name === 'string'
+					? result.original_name
+					: null;
+
+		return isLikelyAnimeMedia({
+			genres: genreIds.map((id) => ({ id })),
+			originalLanguage,
+			originCountries,
+			title,
+			originalTitle
+		});
 	}
 
 	private calculateMatchConfidence(

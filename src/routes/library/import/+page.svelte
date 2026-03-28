@@ -5,6 +5,8 @@
 	import { ConfirmationModal } from '$lib/components/ui/modal';
 	import { resolvePath } from '$lib/utils/routing';
 	import { getResponseErrorMessage, readResponsePayload } from '$lib/utils/http';
+	import { sortRootFoldersForMediaType } from '$lib/utils/root-folders.js';
+	import { isLikelyAnimeMedia } from '$lib/shared/anime-classification.js';
 	import { toasts } from '$lib/stores/toast.svelte';
 	import {
 		ArrowUp,
@@ -35,6 +37,7 @@
 		name: string;
 		path: string;
 		mediaType: string;
+		mediaSubType?: string | null;
 		isDefault?: boolean;
 		readOnly?: boolean;
 	}
@@ -44,6 +47,7 @@
 		title: string;
 		year?: number;
 		mediaType: MediaType;
+		isAnime?: boolean;
 		confidence: number;
 		inLibrary: boolean;
 		libraryId?: string;
@@ -142,6 +146,7 @@
 
 	let rootFolders = $state<RootFolder[]>([]);
 	let loadingRootFolders = $state(true);
+	let enforceAnimeSubtype = $state(false);
 
 	let detecting = $state(false);
 	let detection = $state<DetectionResult | null>(null);
@@ -166,11 +171,13 @@
 	let searchingMatches = $state(false);
 	let matchCandidates = $state<MatchResult[]>([]);
 	let importTarget = $state<'new' | 'existing'>('new');
+	let applySelectedMatchToSeasonOnSelect = $state(false);
 
 	let seasonNumber = $state(1);
 	let episodeNumber = $state(1);
 	let batchSeasonOverride = $state<number | null>(null);
 	let selectedRootFolder = $state('');
+	let bulkDestinationBySectionId = $state<Record<string, string>>({});
 	let executingImport = $state(false);
 	let executeResult = $state<ExecuteResult | null>(null);
 	let executeError = $state<string | null>(null);
@@ -241,7 +248,7 @@
 	);
 	const step2Ready = $derived(Boolean(activeGroup && selectedMatch && !isActiveGroupImported));
 	const rootFoldersForType = $derived(
-		rootFolders.filter((folder) => folder.mediaType === selectedMediaType && !folder.readOnly)
+		getWritableRootFoldersForType(selectedMediaType, selectedMatch)
 	);
 	const isBatchTvImport = $derived(
 		Boolean(activeGroup && selectedMediaType === 'tv' && activeGroup.detectedFileCount > 1)
@@ -319,11 +326,11 @@
 			);
 		});
 
-		return filtered.sort((a, b) => {
-			if (selectedGroupId === a.id) return -1;
-			if (selectedGroupId === b.id) return 1;
-			return a.displayName.localeCompare(b.displayName, undefined, { numeric: true });
-		});
+		return filtered.sort(
+			(a, b) =>
+				a.displayName.localeCompare(b.displayName, undefined, { numeric: true }) ||
+				a.id.localeCompare(b.id, undefined, { numeric: true })
+		);
 	});
 	const filteredDetectionGroupsByMedia = $derived.by(() =>
 		filteredDetectionGroups.filter((group) => {
@@ -376,6 +383,13 @@
 			) ?? activeReviewTvSection.seasonSections[0]
 		);
 	});
+	const canApplyMatchSelectionToActiveSeason = $derived.by(() =>
+		Boolean(
+			selectedMediaType === 'tv' &&
+			activeReviewSeasonSection &&
+			getSkippableSeasonGroups(activeReviewSeasonSection).length > 0
+		)
+	);
 	const hasMultipleReviewTvSeries = $derived.by(() => reviewTvSections.length > 1);
 
 	const importMovieSections = $derived.by(() =>
@@ -477,14 +491,55 @@
 
 	$effect(() => {
 		let nextRootFolder = selectedRootFolder;
-		if (rootFoldersForType.length === 1) {
-			nextRootFolder = rootFoldersForType[0].id;
-		} else if (!rootFoldersForType.some((folder) => folder.id === selectedRootFolder)) {
+		if (rootFoldersForType.length === 0) {
 			nextRootFolder = '';
+		} else if (!rootFoldersForType.some((folder) => folder.id === selectedRootFolder)) {
+			nextRootFolder =
+				getRecommendedRootFolderId(rootFoldersForType, {
+					preferAnime: selectedMatch?.isAnime === true
+				}) ?? '';
 		}
 
 		if (nextRootFolder !== selectedRootFolder) {
 			selectedRootFolder = nextRootFolder;
+			persistActiveGroupState();
+		}
+	});
+
+	$effect(() => {
+		if (!detection || detectionGroups.length === 0) return;
+		if (Object.keys(groupReviewState).length === 0) return;
+
+		let updated = false;
+		const nextState: Record<string, GroupReviewState> = { ...groupReviewState };
+
+		for (const group of detectionGroups) {
+			const state = nextState[group.id];
+			if (!state) continue;
+
+			const folders = getWritableRootFoldersForType(state.selectedMediaType, state.selectedMatch);
+			const hasValidSelection =
+				state.selectedRootFolder.length > 0 &&
+				folders.some((folder) => folder.id === state.selectedRootFolder);
+			const recommendedRootFolder =
+				getRecommendedRootFolderId(folders, {
+					preferAnime: state.selectedMatch?.isAnime === true
+				}) ?? '';
+
+			if (!hasValidSelection && state.selectedRootFolder !== recommendedRootFolder) {
+				nextState[group.id] = {
+					...state,
+					selectedRootFolder: recommendedRootFolder
+				};
+				updated = true;
+			}
+		}
+
+		if (updated) {
+			groupReviewState = nextState;
+			if (selectedGroupId && nextState[selectedGroupId]) {
+				selectedRootFolder = nextState[selectedGroupId].selectedRootFolder;
+			}
 		}
 	});
 
@@ -517,6 +572,12 @@
 		if (!reviewTvSections.some((section) => section.id === reviewSelectedSeriesSectionId)) {
 			reviewSelectedSeriesSectionId = reviewTvSections[0].id;
 			reviewSelectedSeasonSectionKey = null;
+		}
+	});
+
+	$effect(() => {
+		if (!canApplyMatchSelectionToActiveSeason) {
+			applySelectedMatchToSeasonOnSelect = false;
 		}
 	});
 
@@ -562,6 +623,36 @@
 		if (step !== 3) {
 			return;
 		}
+
+		const nextSelections = { ...bulkDestinationBySectionId };
+		let changed = false;
+
+		for (const section of importSelectionSections) {
+			const options = getSectionDestinationOptions(section);
+			if (options.length === 0) {
+				if (nextSelections[section.id]) {
+					delete nextSelections[section.id];
+					changed = true;
+				}
+				continue;
+			}
+
+			const current = nextSelections[section.id];
+			if (!current || !options.some((folder) => folder.id === current)) {
+				nextSelections[section.id] = getRecommendedSectionDestinationId(section, options);
+				changed = true;
+			}
+		}
+
+		if (changed) {
+			bulkDestinationBySectionId = nextSelections;
+		}
+	});
+
+	$effect(() => {
+		if (step !== 3) {
+			return;
+		}
 		const activeSection = activeImportTvSection;
 		if (
 			!activeSection ||
@@ -596,20 +687,35 @@
 	async function loadRootFolders() {
 		loadingRootFolders = true;
 		try {
-			const response = await fetch('/api/root-folders');
-			const payload = await readResponsePayload<RootFolder[] | { folders?: RootFolder[] }>(
-				response
+			const [foldersResponse, classificationResponse] = await Promise.all([
+				fetch('/api/root-folders'),
+				fetch('/api/settings/library/classification')
+			]);
+
+			const foldersPayload = await readResponsePayload<RootFolder[] | { folders?: RootFolder[] }>(
+				foldersResponse
 			);
-			if (!response.ok) {
-				throw new Error(getResponseErrorMessage(payload, 'Failed to load root folders'));
+			const classificationPayload = await readResponsePayload<{
+				enforceAnimeSubtype?: boolean;
+			}>(classificationResponse);
+
+			if (!foldersResponse.ok) {
+				throw new Error(getResponseErrorMessage(foldersPayload, 'Failed to load root folders'));
 			}
-			if (Array.isArray(payload)) {
-				rootFolders = payload;
-			} else if (payload && typeof payload === 'object') {
-				rootFolders = payload.folders ?? [];
+			if (Array.isArray(foldersPayload)) {
+				rootFolders = foldersPayload;
+			} else if (foldersPayload && typeof foldersPayload === 'object') {
+				rootFolders = foldersPayload.folders ?? [];
 			} else {
 				rootFolders = [];
 			}
+
+			enforceAnimeSubtype = Boolean(
+				classificationResponse.ok &&
+				classificationPayload &&
+				typeof classificationPayload === 'object' &&
+				classificationPayload.enforceAnimeSubtype === true
+			);
 		} catch {
 			toasts.error(m.toast_library_import_failedToLoadRootFolders());
 		} finally {
@@ -738,6 +844,12 @@
 	function createInitialGroupState(group: DetectionGroup): GroupReviewState {
 		const initialCandidates = group.matches ?? [];
 		const initialMatch = initialCandidates[0] ?? null;
+		const initialRootFolder = getRecommendedRootFolderId(
+			getWritableRootFoldersForType(group.inferredMediaType, initialMatch),
+			{
+				preferAnime: initialMatch?.isAnime === true
+			}
+		);
 		return {
 			selectedMediaType: group.inferredMediaType,
 			selectedMatch: initialMatch,
@@ -747,7 +859,7 @@
 			seasonNumber: group.parsedSeason ?? 1,
 			episodeNumber: group.parsedEpisode ?? 1,
 			batchSeasonOverride: group.suggestedSeason ?? null,
-			selectedRootFolder: ''
+			selectedRootFolder: initialRootFolder ?? ''
 		};
 	}
 
@@ -791,6 +903,45 @@
 				selectedRootFolder
 			}
 		};
+	}
+
+	function handleSeasonNumberChange() {
+		if (!selectedGroupId) {
+			return;
+		}
+
+		const group = detectionGroups.find((item) => item.id === selectedGroupId);
+		if (!group) {
+			persistActiveGroupState();
+			return;
+		}
+
+		let nextBatchSeasonOverride = batchSeasonOverride;
+		if (selectedMediaType === 'tv' && !isBatchTvImport && typeof group.parsedSeason !== 'number') {
+			nextBatchSeasonOverride = seasonNumber >= 0 ? seasonNumber : null;
+			batchSeasonOverride = nextBatchSeasonOverride;
+		}
+
+		groupReviewState = {
+			...groupReviewState,
+			[selectedGroupId]: {
+				selectedMediaType,
+				selectedMatch,
+				searchQuery,
+				matchCandidates,
+				importTarget,
+				seasonNumber,
+				episodeNumber,
+				batchSeasonOverride: nextBatchSeasonOverride,
+				selectedRootFolder
+			}
+		};
+	}
+
+	function canApplyActiveSeasonOverride(): boolean {
+		if (!activeGroup) return false;
+		if (selectedMediaType !== 'tv' || isBatchTvImport) return false;
+		return typeof activeGroup.parsedSeason !== 'number';
 	}
 
 	function shouldPreserveSelectedItemEditor(nextGroupId: string): boolean {
@@ -857,8 +1008,54 @@
 		step = 2;
 	}
 
-	function getWritableRootFoldersForType(mediaType: MediaType): RootFolder[] {
-		return rootFolders.filter((folder) => folder.mediaType === mediaType && !folder.readOnly);
+	function getRequiredRootFolderSubType(
+		match: MatchResult | null | undefined
+	): 'standard' | 'anime' | undefined {
+		if (!enforceAnimeSubtype) return undefined;
+		if (match?.isAnime === true) return 'anime';
+		if (match?.isAnime === false) return 'standard';
+		return undefined;
+	}
+
+	function getWritableRootFoldersForType(
+		mediaType: MediaType,
+		match: MatchResult | null = null
+	): RootFolder[] {
+		const writableFolders = rootFolders.filter((folder) => !folder.readOnly);
+		return sortRootFoldersForMediaType(
+			writableFolders,
+			mediaType,
+			getRequiredRootFolderSubType(match)
+		);
+	}
+
+	function getRecommendedRootFolderId(
+		folders: RootFolder[],
+		options?: { preferAnime?: boolean }
+	): string | undefined {
+		if (folders.length === 0) return undefined;
+
+		const preferAnime = options?.preferAnime === true;
+		if (preferAnime) {
+			return (
+				folders.find(
+					(folder) => folder.isDefault && (folder.mediaSubType ?? 'standard') === 'anime'
+				)?.id ??
+				folders.find(
+					(folder) => folder.isDefault && (folder.mediaSubType ?? 'standard') === 'standard'
+				)?.id ??
+				folders.find((folder) => folder.isDefault)?.id ??
+				folders[0].id
+			);
+		}
+
+		return (
+			folders.find(
+				(folder) => folder.isDefault && (folder.mediaSubType ?? 'standard') === 'standard'
+			)?.id ??
+			folders.find((folder) => folder.isDefault)?.id ??
+			folders[0].id
+		);
 	}
 
 	function isGroupImported(groupId: string): boolean {
@@ -1144,6 +1341,199 @@
 		skippedGroupIds = nextSkippedIds;
 	}
 
+	function canApplySelectedMatchToSeason(
+		seasonSection: TvSeasonSection | null | undefined,
+		match: MatchResult | null = selectedMatch
+	): boolean {
+		if (!seasonSection || !match) return false;
+		if (match.mediaType !== 'tv') return false;
+		return getSkippableSeasonGroups(seasonSection).length > 0;
+	}
+
+	function applySelectedMatchToSeason(
+		seasonSection: TvSeasonSection | null | undefined,
+		matchToApply: MatchResult | null = selectedMatch,
+		options?: { showToast?: boolean }
+	): boolean {
+		const showToast = options?.showToast ?? true;
+		if (!seasonSection) return false;
+		if (!matchToApply || matchToApply.mediaType !== 'tv') {
+			if (showToast) {
+				toasts.warning(m.toast_library_import_selectTvMatchForSeasonApply());
+			}
+			return false;
+		}
+		const selectedTvMatch = matchToApply;
+
+		const groups = getSkippableSeasonGroups(seasonSection);
+		if (groups.length === 0) return false;
+
+		const foldersForTv = getWritableRootFoldersForType('tv', selectedTvMatch);
+		const recommendedRootFolder =
+			getRecommendedRootFolderId(foldersForTv, {
+				preferAnime: selectedTvMatch.isAnime === true
+			}) ?? '';
+		const nextState = { ...groupReviewState };
+
+		for (const group of groups) {
+			const state = getGroupState(group);
+			const hasSelectedMatch = state.matchCandidates.some(
+				(match) =>
+					match.mediaType === selectedTvMatch.mediaType && match.tmdbId === selectedTvMatch.tmdbId
+			);
+			const nextCandidates = hasSelectedMatch
+				? state.matchCandidates
+				: [selectedTvMatch, ...state.matchCandidates];
+			const hasValidRootFolder =
+				state.selectedRootFolder.length > 0 &&
+				foldersForTv.some((folder) => folder.id === state.selectedRootFolder);
+
+			nextState[group.id] = {
+				...state,
+				selectedMediaType: 'tv',
+				selectedMatch: selectedTvMatch,
+				searchQuery: selectedTvMatch.title,
+				matchCandidates: nextCandidates,
+				importTarget: selectedTvMatch.inLibrary ? 'existing' : 'new',
+				selectedRootFolder: selectedTvMatch.inLibrary
+					? state.selectedRootFolder
+					: hasValidRootFolder
+						? state.selectedRootFolder
+						: recommendedRootFolder
+			};
+		}
+
+		groupReviewState = nextState;
+		if (activeGroup && nextState[activeGroup.id]) {
+			loadGroupState(activeGroup.id);
+		}
+
+		if (showToast) {
+			toasts.success(m.toast_library_import_appliedMatchToSeason({ count: groups.length }));
+		}
+		return true;
+	}
+
+	function getSectionDestinationGroups(section: DetectionSection): DetectionGroup[] {
+		return section.items.filter((group) => !isGroupImported(group.id) && !isGroupSkipped(group.id));
+	}
+
+	function getSectionDestinationEligibleGroups(section: DetectionSection): DetectionGroup[] {
+		return getSectionDestinationGroups(section).filter((group) => {
+			const state = getGroupState(group);
+			return !(state.selectedMatch?.inLibrary && state.importTarget === 'existing');
+		});
+	}
+
+	function getSectionDestinationOptions(section: DetectionSection): RootFolder[] {
+		const groups = getSectionDestinationEligibleGroups(section);
+
+		if (groups.length === 0) return [];
+
+		const allowedFolderIds: string[] = [];
+		for (const group of groups) {
+			const state = getGroupState(group);
+			const groupFolders = getWritableRootFoldersForType(
+				state.selectedMediaType,
+				state.selectedMatch
+			);
+			for (const folder of groupFolders) {
+				if (!allowedFolderIds.includes(folder.id)) {
+					allowedFolderIds.push(folder.id);
+				}
+			}
+		}
+
+		const sortedFolders = sortRootFoldersForMediaType(
+			rootFolders.filter((folder) => !folder.readOnly),
+			section.mediaType
+		);
+		return sortedFolders.filter((folder) => allowedFolderIds.includes(folder.id));
+	}
+
+	function getRecommendedSectionDestinationId(
+		section: DetectionSection,
+		options: RootFolder[]
+	): string {
+		const shouldPreferAnime = getSectionDestinationGroups(section).some(
+			(group) => getGroupState(group).selectedMatch?.isAnime === true
+		);
+		return getRecommendedRootFolderId(options, { preferAnime: shouldPreferAnime }) ?? '';
+	}
+
+	function updateSectionDestination(sectionId: string, value: string) {
+		bulkDestinationBySectionId = {
+			...bulkDestinationBySectionId,
+			[sectionId]: value
+		};
+	}
+
+	function canApplySelectedDestinationToMedia(section: DetectionSection): boolean {
+		const selectedDestination = bulkDestinationBySectionId[section.id] ?? '';
+		if (!selectedDestination) return false;
+
+		const groups = getSectionDestinationEligibleGroups(section);
+		if (groups.length === 0) return false;
+
+		return groups.some((group) => {
+			const state = getGroupState(group);
+			const folders = getWritableRootFoldersForType(state.selectedMediaType, state.selectedMatch);
+			return folders.some((folder) => folder.id === selectedDestination);
+		});
+	}
+
+	function applySelectedDestinationToMedia(section: DetectionSection) {
+		const selectedDestination = bulkDestinationBySectionId[section.id] ?? '';
+		if (!selectedDestination) {
+			toasts.warning(m.toast_library_import_selectDestinationFirst());
+			return;
+		}
+
+		const groups = getSectionDestinationEligibleGroups(section);
+		if (groups.length === 0) return;
+
+		let updatedCount = 0;
+		let restrictedCount = 0;
+		const nextState = { ...groupReviewState };
+
+		for (const group of groups) {
+			const state = getGroupState(group);
+
+			const folders = getWritableRootFoldersForType(state.selectedMediaType, state.selectedMatch);
+			if (!folders.some((folder) => folder.id === selectedDestination)) {
+				restrictedCount += 1;
+				continue;
+			}
+
+			const nextImportTarget = state.selectedMatch?.inLibrary ? state.importTarget : 'new';
+			if (
+				state.selectedRootFolder === selectedDestination &&
+				state.importTarget === nextImportTarget
+			) {
+				continue;
+			}
+
+			nextState[group.id] = {
+				...state,
+				selectedRootFolder: selectedDestination,
+				importTarget: nextImportTarget
+			};
+			updatedCount += 1;
+		}
+
+		if (updatedCount > 0) {
+			groupReviewState = nextState;
+			if (activeGroup && nextState[activeGroup.id]) {
+				loadGroupState(activeGroup.id);
+			}
+			toasts.success(m.toast_library_import_appliedDestinationToMedia({ count: updatedCount }));
+		}
+
+		if (restrictedCount > 0) {
+			toasts.warning(m.toast_library_import_destinationRestrictedForMediaItems());
+		}
+	}
+
 	function selectImportSeriesSection(sectionId: string) {
 		if (importSelectedSeriesSectionId === sectionId) {
 			return;
@@ -1183,7 +1573,7 @@
 			return match.inLibrary;
 		}
 
-		const folders = getWritableRootFoldersForType(state.selectedMediaType);
+		const folders = getWritableRootFoldersForType(state.selectedMediaType, state.selectedMatch);
 		if (folders.length === 0) return false;
 		if (folders.length === 1) return true;
 		return state.selectedRootFolder.length > 0;
@@ -1214,7 +1604,10 @@
 		}
 		const resolvedImportTarget = state.selectedMatch.inLibrary ? 'existing' : state.importTarget;
 
-		const foldersForType = getWritableRootFoldersForType(state.selectedMediaType);
+		const foldersForType = getWritableRootFoldersForType(
+			state.selectedMediaType,
+			state.selectedMatch
+		);
 		const isBatchTv = state.selectedMediaType === 'tv' && group.detectedFileCount > 1;
 
 		return {
@@ -1423,11 +1816,31 @@
 				const date = (item.release_date || item.first_air_date) as string | undefined;
 				const year = date ? parseInt(date.split('-')[0], 10) : undefined;
 				const status = statusMap[tmdbId];
+				const genreIds = Array.isArray(item.genre_ids)
+					? item.genre_ids.filter((value): value is number => typeof value === 'number')
+					: [];
+				const originCountries = Array.isArray(item.origin_country)
+					? item.origin_country.filter((value): value is string => typeof value === 'string')
+					: [];
+				const isAnime = isLikelyAnimeMedia({
+					genres: genreIds.map((id) => ({ id })),
+					originalLanguage:
+						typeof item.original_language === 'string' ? item.original_language : null,
+					originCountries,
+					title: typeof item.title === 'string' ? item.title : null,
+					originalTitle:
+						typeof item.original_title === 'string'
+							? item.original_title
+							: typeof item.original_name === 'string'
+								? item.original_name
+								: null
+				});
 				return {
 					tmdbId,
 					title: (item.title || item.name || m.common_unknown()) as string,
 					year,
 					mediaType: selectedMediaType,
+					isAnime,
 					confidence: 0,
 					inLibrary: Boolean(status?.inLibrary),
 					libraryId: status?.libraryId
@@ -1448,6 +1861,23 @@
 	function chooseMatch(match: MatchResult) {
 		selectedMatch = match;
 		importTarget = match.inLibrary ? 'existing' : 'new';
+		if (importTarget === 'new') {
+			selectedRootFolder =
+				getRecommendedRootFolderId(getWritableRootFoldersForType(selectedMediaType, match), {
+					preferAnime: match.isAnime === true
+				}) ?? '';
+		}
+
+		if (
+			applySelectedMatchToSeasonOnSelect &&
+			canApplySelectedMatchToSeason(activeReviewSeasonSection, match)
+		) {
+			const applied = applySelectedMatchToSeason(activeReviewSeasonSection, match);
+			if (applied) {
+				return;
+			}
+		}
+
 		persistActiveGroupState();
 	}
 
@@ -1460,6 +1890,8 @@
 		selectedMatch = null;
 		matchCandidates = [];
 		importTarget = 'new';
+		selectedRootFolder =
+			getRecommendedRootFolderId(getWritableRootFoldersForType(nextType, null)) ?? '';
 		batchSeasonOverride = nextType === 'tv' ? (activeGroup?.suggestedSeason ?? null) : null;
 		persistActiveGroupState();
 	}
@@ -2008,7 +2440,7 @@
 															>
 																{isGroupSkipped(group.id)
 																	? m.action_select()
-																	: m.library_import_filterSkipped()}
+																	: m.library_import_skipItem()}
 															</button>
 														{/if}
 													</div>
@@ -2111,15 +2543,27 @@
 																total: getSkippableSeasonGroups(activeReviewSeasonSection).length
 															})}
 														</div>
-														<button
-															type="button"
-															class="btn btn-ghost btn-xs"
-															onclick={() => toggleSeasonSectionSkipped(activeReviewSeasonSection)}
-														>
-															{isSeasonSectionFullySkipped(activeReviewSeasonSection)
-																? m.library_import_selectSeason()
-																: m.library_import_skipSeason()}
-														</button>
+														<div class="flex flex-wrap items-center gap-2">
+															<button
+																type="button"
+																class="btn btn-ghost btn-xs"
+																disabled={!canApplySelectedMatchToSeason(activeReviewSeasonSection)}
+																onclick={() =>
+																	applySelectedMatchToSeason(activeReviewSeasonSection)}
+															>
+																{m.library_import_applyMatchToSeason()}
+															</button>
+															<button
+																type="button"
+																class="btn btn-ghost btn-xs"
+																onclick={() =>
+																	toggleSeasonSectionSkipped(activeReviewSeasonSection)}
+															>
+																{isSeasonSectionFullySkipped(activeReviewSeasonSection)
+																	? m.library_import_selectSeason()
+																	: m.library_import_skipSeason()}
+															</button>
+														</div>
 													</div>
 												{/if}
 
@@ -2182,7 +2626,7 @@
 																	>
 																		{isGroupSkipped(group.id)
 																			? m.action_select()
-																			: m.library_import_filterSkipped()}
+																			: m.library_import_skipItem()}
 																	</button>
 																{/if}
 															</div>
@@ -2307,8 +2751,19 @@
 											min="0"
 											class="input-bordered input input-sm"
 											bind:value={seasonNumber}
-											onchange={persistActiveGroupState}
+											onchange={handleSeasonNumberChange}
 										/>
+										{#if canApplyActiveSeasonOverride()}
+											<div class="mt-2">
+												<button
+													type="button"
+													class="btn btn-ghost btn-xs"
+													onclick={handleSeasonNumberChange}
+												>
+													{m.action_apply()}
+												</button>
+											</div>
+										{/if}
 									</label>
 									<label class="form-control">
 										<span class="label-text text-xs">{m.library_import_episodeLabel()}</span>
@@ -2446,6 +2901,23 @@
 									{/if}</strong
 								>".
 							</span>
+						</div>
+					{/if}
+					{#if canApplyMatchSelectionToActiveSeason}
+						<div class="mt-3 mb-3 rounded-lg border border-base-300 bg-base-200/40 p-3">
+							<label class="flex cursor-pointer items-center justify-between gap-3">
+								<span class="text-sm font-medium">
+									{m.library_import_matchEntireSelectedSeason()}
+								</span>
+								<input
+									type="checkbox"
+									class="toggle toggle-sm"
+									bind:checked={applySelectedMatchToSeasonOnSelect}
+								/>
+							</label>
+							<p class="mt-1 text-xs text-base-content/70">
+								{m.library_import_matchEntireSelectedSeasonHint()}
+							</p>
 						</div>
 					{/if}
 
@@ -2685,6 +3157,56 @@
 															})}
 												</div>
 											</div>
+
+											{@const mediaDestinationOptions =
+												getSectionDestinationOptions(activeImportTvSection)}
+											{@const mediaDestinationEligibleCount =
+												getSectionDestinationEligibleGroups(activeImportTvSection).length}
+											{#if mediaDestinationOptions.length > 0}
+												<div
+													class="mt-2 flex flex-wrap items-end gap-2 rounded-md border border-base-300 bg-base-200/40 p-2"
+												>
+													<div class="min-w-64 flex-1">
+														<div class="pb-1 text-xs text-base-content/80">
+															{m.library_import_destinationRootFolder()}
+														</div>
+														<select
+															class="select-bordered select w-full select-xs"
+															value={bulkDestinationBySectionId[activeImportTvSection.id] ?? ''}
+															onchange={(event) =>
+																updateSectionDestination(
+																	activeImportTvSection.id,
+																	(event.target as HTMLSelectElement).value
+																)}
+														>
+															<option disabled value=""
+																>{m.library_import_selectRootFolder()}</option
+															>
+															{#each mediaDestinationOptions as folder (folder.id)}
+																<option value={folder.id}>{folder.name} - {folder.path}</option>
+															{/each}
+														</select>
+													</div>
+													<button
+														type="button"
+														class="btn btn-ghost btn-xs"
+														disabled={!canApplySelectedDestinationToMedia(activeImportTvSection)}
+														onclick={() => applySelectedDestinationToMedia(activeImportTvSection)}
+													>
+														{m.library_import_applyDestinationToMedia()}
+													</button>
+												</div>
+											{:else}
+												<div
+													class="mt-2 rounded-md border border-base-300 bg-base-200/40 p-2 text-xs text-base-content/70"
+												>
+													{#if mediaDestinationEligibleCount === 0}
+														{m.library_import_destinationNotNeededForExistingMedia()}
+													{:else}
+														{m.library_import_noCommonDestinationForMedia()}
+													{/if}
+												</div>
+											{/if}
 
 											{#if activeImportTvSection.seasonSections}
 												<div class="mt-2 flex flex-wrap gap-2">
