@@ -15,6 +15,10 @@ import {
 	findOverlappingRootFolder,
 	getRootFolderOverlapMessage
 } from '$lib/server/filesystem/root-folder-overlap.js';
+import {
+	isAnimeRootFolderEnforcementEnabled,
+	setAnimeRootFolderEnforcement
+} from '$lib/server/library/anime-root-enforcement-settings.js';
 import * as fs from 'fs/promises';
 import * as path from 'path';
 import { getLibraryScheduler } from '$lib/server/library/library-scheduler.js';
@@ -39,6 +43,15 @@ export interface RootFolderInput {
 	readOnly?: boolean;
 	preserveSymlinks?: boolean;
 	defaultMonitored?: boolean;
+}
+
+export interface DeleteRootFolderResult {
+	autoDisabledAnimeEnforcement: boolean;
+}
+
+export interface UpdateRootFolderResult {
+	folder: RootFolder;
+	autoDisabledAnimeEnforcement: boolean;
 }
 
 /**
@@ -189,7 +202,10 @@ export class RootFolderService {
 	/**
 	 * Update a root folder.
 	 */
-	async updateFolder(id: string, updates: Partial<RootFolderInput>): Promise<RootFolder> {
+	async updateFolder(
+		id: string,
+		updates: Partial<RootFolderInput>
+	): Promise<UpdateRootFolderResult> {
 		const existing = await this.getFolder(id);
 		if (!existing) {
 			throw new Error(`Root folder not found: ${id}`);
@@ -246,18 +262,51 @@ export class RootFolderService {
 			throw new Error('Failed to update root folder');
 		}
 
-		return updated;
+		const autoDisabledAnimeEnforcement = await this.disableAnimeEnforcementIfNoAnimeFolders();
+
+		return { folder: updated, autoDisabledAnimeEnforcement };
 	}
 
 	/**
 	 * Delete a root folder.
 	 */
-	async deleteFolder(id: string): Promise<void> {
+	async deleteFolder(id: string): Promise<DeleteRootFolderResult> {
+		const existing = await this.getFolder(id);
+		if (!existing) {
+			throw new Error(`Root folder not found: ${id}`);
+		}
+
 		// Stop watching before delete
 		await libraryWatcherService.unwatchFolder(id);
 
 		await db.delete(rootFoldersTable).where(eq(rootFoldersTable.id, id));
 		logger.info({ id }, 'Root folder deleted');
+
+		const autoDisabledAnimeEnforcement = await this.disableAnimeEnforcementIfNoAnimeFolders();
+
+		return { autoDisabledAnimeEnforcement };
+	}
+
+	private async disableAnimeEnforcementIfNoAnimeFolders(): Promise<boolean> {
+		const remainingAnimeFolders = await db
+			.select({ id: rootFoldersTable.id })
+			.from(rootFoldersTable)
+			.where(eq(rootFoldersTable.mediaSubType, 'anime'))
+			.limit(1);
+
+		if (remainingAnimeFolders.length > 0) {
+			return false;
+		}
+
+		if (await isAnimeRootFolderEnforcementEnabled()) {
+			await setAnimeRootFolderEnforcement(false);
+			logger.warn(
+				'Anime root folder enforcement auto-disabled because no anime subtype root folders remain'
+			);
+			return true;
+		}
+
+		return false;
 	}
 
 	/**

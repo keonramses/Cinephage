@@ -1,5 +1,5 @@
 import { db } from '$lib/server/db';
-import { settings } from '$lib/server/db/schema';
+import { rootFolders, settings } from '$lib/server/db/schema';
 import { eq } from 'drizzle-orm';
 
 export const ANIME_ROOT_FOLDER_ENFORCEMENT_KEY = 'enforce_anime_root_folder';
@@ -25,4 +25,23 @@ export async function setAnimeRootFolderEnforcement(enabled: boolean): Promise<v
 			target: settings.key,
 			set: { value: enabled ? 'true' : 'false' }
 		});
+}
+
+export async function getEffectiveAnimeRootFolderEnforcement(): Promise<boolean> {
+	const [enabled, hasAnimeSubtypeFolder] = await Promise.all([
+		isAnimeRootFolderEnforcementEnabled(),
+		db
+			.select({ id: rootFolders.id })
+			.from(rootFolders)
+			.where(eq(rootFolders.mediaSubType, 'anime'))
+			.limit(1)
+			.then((rows) => rows.length > 0)
+	]);
+
+	if (enabled && !hasAnimeSubtypeFolder) {
+		await setAnimeRootFolderEnforcement(false);
+		return false;
+	}
+
+	return enabled;
 }

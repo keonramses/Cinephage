@@ -400,7 +400,22 @@
 		{ value: 'size-asc', label: m.library_movies_sortSizeAsc() }
 	];
 
+	const showLibrarySubtypeFilter = $derived(data.libraryNav?.hasAnimeMovies === true);
+
 	const filterOptions = $derived([
+		...(showLibrarySubtypeFilter
+			? [
+					{
+						key: 'librarySubtype',
+						label: m.library_movies_filterLibrary(),
+						options: [
+							{ value: 'all', label: m.library_movies_filterAllLibraries() },
+							{ value: 'standard', label: m.nav_movies() },
+							{ value: 'anime', label: m.nav_animeMovies() }
+						]
+					}
+				]
+			: []),
 		{
 			key: 'monitored',
 			label: m.library_movies_filterMonitored(),
@@ -471,7 +486,13 @@
 
 	function updateUrlParam(key: string, value: string) {
 		const url = new URL($page.url);
-		if (value === 'all' || (key === 'sort' && value === 'title-asc')) {
+		if (key === 'librarySubtype') {
+			if (value === 'standard') {
+				url.searchParams.delete(key);
+			} else {
+				url.searchParams.set(key, value);
+			}
+		} else if (value === 'all' || (key === 'sort' && value === 'title-asc')) {
 			url.searchParams.delete(key);
 		} else {
 			url.searchParams.set(key, value);
@@ -480,10 +501,15 @@
 	}
 
 	function clearFilters() {
-		goto(resolve('/library/movies'), { keepFocus: true, noScroll: true });
+		const url = new URL(resolve('/library/movies'), $page.url.origin);
+		if (data.filters.librarySubtype === 'anime') {
+			url.searchParams.set('librarySubtype', 'anime');
+		}
+		goto(resolvePath(url.pathname + url.search), { keepFocus: true, noScroll: true });
 	}
 
 	const currentFilters = $derived({
+		librarySubtype: data.filters.librarySubtype,
 		monitored: data.filters.monitored,
 		fileStatus: data.filters.fileStatus,
 		qualityProfile: data.filters.qualityProfile,
@@ -650,6 +676,7 @@
 					{filterOptions}
 					currentSort={data.filters.sort}
 					{currentFilters}
+					hiddenActiveFilterKeys={['librarySubtype']}
 					onSortChange={(sort) => updateUrlParam('sort', sort)}
 					onFilterChange={(key, value) => updateUrlParam(key, value)}
 					onClearFilters={clearFilters}
