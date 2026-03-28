@@ -44,6 +44,11 @@ export const load: PageServerLoad = async ({ url }) => {
 	const resolution = url.searchParams.get('resolution') || 'all';
 	const videoCodec = url.searchParams.get('videoCodec') || 'all';
 	const hdrFormat = url.searchParams.get('hdrFormat') || 'all';
+	const rawLibrarySubtype = url.searchParams.get('librarySubtype');
+	const librarySubtype =
+		rawLibrarySubtype === 'all' || rawLibrarySubtype === 'anime' || rawLibrarySubtype === 'standard'
+			? rawLibrarySubtype
+			: 'standard';
 
 	try {
 		// Fetch all series with their root folder info
@@ -66,6 +71,7 @@ export const load: PageServerLoad = async ({ url }) => {
 				rootFolderId: series.rootFolderId,
 				rootFolderPath: rootFolders.path,
 				rootFolderMediaType: rootFolders.mediaType,
+				rootFolderMediaSubType: rootFolders.mediaSubType,
 				scoringProfileId: series.scoringProfileId,
 				monitored: series.monitored,
 				seasonFolder: series.seasonFolder,
@@ -148,21 +154,32 @@ export const load: PageServerLoad = async ({ url }) => {
 			);
 		}
 
-		const seriesWithStats: LibrarySeries[] = allSeries.map((s) => {
-			const derivedEpisodeCount = episodeTotalsBySeries.get(s.id) ?? 0;
-			const derivedEpisodeFileCount = episodeFilesBySeries.get(s.id)?.size ?? 0;
-			return {
-				...s,
-				episodeCount: derivedEpisodeCount,
-				episodeFileCount: derivedEpisodeFileCount,
-				missingRootFolder: !s.rootFolderId || !s.rootFolderPath || s.rootFolderMediaType !== 'tv',
-				percentComplete:
-					derivedEpisodeCount > 0
-						? Math.round((derivedEpisodeFileCount / derivedEpisodeCount) * 100)
-						: 0,
-				totalSize: seriesTotalSizeMap.get(s.id) ?? 0
-			};
-		}) as LibrarySeries[];
+		const seriesWithStats: (LibrarySeries & { rootFolderMediaSubType?: string | null })[] =
+			allSeries.map((s) => {
+				const derivedEpisodeCount = episodeTotalsBySeries.get(s.id) ?? 0;
+				const derivedEpisodeFileCount = episodeFilesBySeries.get(s.id)?.size ?? 0;
+				return {
+					...s,
+					episodeCount: derivedEpisodeCount,
+					episodeFileCount: derivedEpisodeFileCount,
+					missingRootFolder: !s.rootFolderId || !s.rootFolderPath || s.rootFolderMediaType !== 'tv',
+					percentComplete:
+						derivedEpisodeCount > 0
+							? Math.round((derivedEpisodeFileCount / derivedEpisodeCount) * 100)
+							: 0,
+					totalSize: seriesTotalSizeMap.get(s.id) ?? 0
+				};
+			}) as (LibrarySeries & { rootFolderMediaSubType?: string | null })[];
+
+		const librarySubtypeCounts = {
+			all: seriesWithStats.length,
+			standard: seriesWithStats.filter(
+				(show) => (show.rootFolderMediaSubType ?? 'standard') === 'standard'
+			).length,
+			anime: seriesWithStats.filter(
+				(show) => (show.rootFolderMediaSubType ?? 'standard') === 'anime'
+			).length
+		};
 
 		// Extract unique file attribute values for filter dropdowns
 		const uniqueResolutions = new Set<string>();
@@ -244,8 +261,15 @@ export const load: PageServerLoad = async ({ url }) => {
 			}
 		}
 
-		// Apply filters
-		let filteredSeries = seriesWithStats;
+		const seriesInSelectedSubtype =
+			librarySubtype === 'all'
+				? seriesWithStats
+				: seriesWithStats.filter(
+						(show) => (show.rootFolderMediaSubType ?? 'standard') === librarySubtype
+					);
+
+		// Apply filters (within selected library subtype scope)
+		let filteredSeries = seriesInSelectedSubtype;
 
 		// Filter by monitored status
 		if (monitored === 'monitored') {
@@ -341,10 +365,11 @@ export const load: PageServerLoad = async ({ url }) => {
 		return {
 			series: filteredSeries,
 			total: filteredSeries.length,
-			totalUnfiltered: seriesWithStats.length,
+			totalUnfiltered: seriesInSelectedSubtype.length,
 			downloadingSeriesIds: [...downloadingSeriesIds],
 			filters: {
 				sort,
+				librarySubtype,
 				monitored,
 				status,
 				progress,
@@ -353,6 +378,7 @@ export const load: PageServerLoad = async ({ url }) => {
 				videoCodec,
 				hdrFormat
 			},
+			librarySubtypeCounts,
 			qualityProfiles,
 			uniqueResolutions: sortedResolutions,
 			uniqueCodecs: [...uniqueCodecs].sort(),
@@ -370,6 +396,7 @@ export const load: PageServerLoad = async ({ url }) => {
 			downloadingSeriesIds: [] as string[],
 			filters: {
 				sort,
+				librarySubtype,
 				monitored,
 				status,
 				progress,
@@ -377,6 +404,11 @@ export const load: PageServerLoad = async ({ url }) => {
 				resolution,
 				videoCodec,
 				hdrFormat
+			},
+			librarySubtypeCounts: {
+				all: 0,
+				standard: 0,
+				anime: 0
 			},
 			qualityProfiles: emptyProfiles,
 			uniqueResolutions: emptyStrings,

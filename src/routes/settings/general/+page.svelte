@@ -130,10 +130,24 @@
 	let deleteFolderTarget = $state<RootFolder | null>(null);
 	let enforceAnimeSubtype = $state(false);
 	let savingAnimeSubtype = $state(false);
+	const hasAnimeSubtypeFolder = $derived(
+		data.rootFolders.some((folder) => folder.mediaSubType === 'anime')
+	);
 
 	$effect(() => {
 		enforceAnimeSubtype = data.enforceAnimeSubtype ?? false;
 	});
+
+	function showAnimeEnforcementAutoDisabledWarning(payload: unknown) {
+		if (
+			payload &&
+			typeof payload === 'object' &&
+			'autoDisabledAnimeEnforcement' in payload &&
+			payload.autoDisabledAnimeEnforcement === true
+		) {
+			toasts.warning(m.settings_general_animeRootEnforcementAutoDisabled());
+		}
+	}
 
 	// Root Folder Functions
 	function openAddFolderModal() {
@@ -225,6 +239,7 @@
 			const payload = await readResponsePayload<{
 				success?: boolean;
 				folder?: { id?: string };
+				autoDisabledAnimeEnforcement?: boolean;
 				error?: string;
 			}>(response);
 
@@ -235,6 +250,7 @@
 
 			await invalidateAll();
 			closeFolderModal();
+			showAnimeEnforcementAutoDisabledWarning(payload);
 
 			// Auto-scan newly created folder
 			if (
@@ -262,12 +278,13 @@
 				method: 'DELETE',
 				headers: { Accept: 'application/json' }
 			});
+			const payload = await readResponsePayload<Record<string, unknown>>(response);
 
 			if (!response.ok) {
-				const payload = await readResponsePayload<Record<string, unknown>>(response);
 				throw new Error(getResponseErrorMessage(payload, 'Failed to delete root folder'));
 			}
 
+			showAnimeEnforcementAutoDisabledWarning(payload);
 			await invalidateAll();
 			closeFolderModal();
 		} catch (error) {
@@ -290,12 +307,13 @@
 				method: 'DELETE',
 				headers: { Accept: 'application/json' }
 			});
+			const payload = await readResponsePayload<Record<string, unknown>>(response);
 
 			if (!response.ok) {
-				const payload = await readResponsePayload<Record<string, unknown>>(response);
 				throw new Error(getResponseErrorMessage(payload, 'Failed to delete root folder'));
 			}
 
+			showAnimeEnforcementAutoDisabledWarning(payload);
 			await invalidateAll();
 			confirmFolderDeleteOpen = false;
 			deleteFolderTarget = null;
@@ -307,6 +325,11 @@
 	}
 
 	async function updateAnimeSubtypeEnforcement(enabled: boolean) {
+		if (enabled && !hasAnimeSubtypeFolder) {
+			toasts.warning(m.settings_general_animeRootEnforcementNeedsAnimeFolder());
+			return;
+		}
+
 		const previous = enforceAnimeSubtype;
 		enforceAnimeSubtype = enabled;
 		savingAnimeSubtype = true;
@@ -363,7 +386,7 @@
 					type="checkbox"
 					class="toggle mt-0.5 toggle-primary"
 					checked={enforceAnimeSubtype}
-					disabled={savingAnimeSubtype}
+					disabled={savingAnimeSubtype || !hasAnimeSubtypeFolder}
 					onchange={(event) =>
 						updateAnimeSubtypeEnforcement((event.currentTarget as HTMLInputElement).checked)}
 				/>
@@ -372,6 +395,11 @@
 					<div class="text-sm text-base-content/70">
 						{m.settings_general_enforceAnimeRootFoldersDesc()}
 					</div>
+					{#if !hasAnimeSubtypeFolder}
+						<div class="mt-1 text-sm text-warning">
+							{m.settings_general_animeRootEnforcementNeedsAnimeFolder()}
+						</div>
+					{/if}
 				</div>
 			</label>
 		</div>

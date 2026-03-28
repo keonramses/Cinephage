@@ -18,7 +18,7 @@ import { searchOnAdd } from './searchOnAdd.js';
 import { SearchWorker, workerManager } from '$lib/server/workers/index.js';
 import { ValidationError, NotFoundError, ExternalServiceError } from '$lib/errors';
 import { createChildLogger } from '$lib/logging';
-import { isAnimeRootFolderEnforcementEnabled } from './anime-root-enforcement-settings.js';
+import { getEffectiveAnimeRootFolderEnforcement } from './anime-root-enforcement-settings.js';
 
 const logger = createChildLogger({ logDomain: 'scans' as const });
 
@@ -101,7 +101,7 @@ export async function validateRootFolder(
 }
 
 export async function getAnimeSubtypeEnforcement(): Promise<boolean> {
-	return isAnimeRootFolderEnforcementEnabled();
+	return getEffectiveAnimeRootFolderEnforcement();
 }
 
 /**

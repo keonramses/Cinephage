@@ -18,6 +18,7 @@
 		filterOptions,
 		currentSort = 'title-asc',
 		currentFilters = {},
+		hiddenActiveFilterKeys = [],
 		onSortChange,
 		onFilterChange,
 		onClearFilters
@@ -26,25 +27,29 @@
 		filterOptions: FilterOption[];
 		currentSort: string;
 		currentFilters: Record<string, string>;
+		hiddenActiveFilterKeys?: string[];
 		onSortChange: (sort: string) => void;
 		onFilterChange: (key: string, value: string) => void;
 		onClearFilters: () => void;
 	} = $props();
 
-	// Check if any non-default filters are active
-	const hasActiveFilters = $derived(
-		Object.entries(currentFilters).some(([, value]) => value !== 'all')
+	const visibleActiveFilterEntries = $derived(
+		Object.entries(currentFilters).filter(
+			([key, value]) => !hiddenActiveFilterKeys.includes(key) && value !== 'all'
+		)
 	);
 
+	// Check if any non-default filters are active
+	const hasActiveFilters = $derived(visibleActiveFilterEntries.length > 0);
+
 	// Count active filters
-	const activeFilterCount = $derived(
-		Object.values(currentFilters).filter((v) => v !== 'all').length
-	);
+	const activeFilterCount = $derived(visibleActiveFilterEntries.length);
 
 	// Get labels for active filters
 	const activeFilterLabels = $derived(() => {
 		const labels: string[] = [];
 		for (const filter of filterOptions) {
+			if (hiddenActiveFilterKeys.includes(filter.key)) continue;
 			const value = currentFilters[filter.key];
 			if (value && value !== 'all') {
 				const option = filter.options.find((o) => o.value === value);

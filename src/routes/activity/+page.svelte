@@ -925,7 +925,9 @@
 			const totalDeleted =
 				typeof payload.totalDeleted === 'number'
 					? payload.totalDeleted
-					: (payload.deletedDownloadHistory ?? 0) + (payload.deletedMonitoringHistory ?? 0);
+					: (payload.deletedDownloadHistory ?? 0) +
+						(payload.deletedMonitoringHistory ?? 0) +
+						(payload.deletedTaskHistory ?? 0);
 			toasts.success(m.toast_activity_deletedEntries({ count: totalDeleted }));
 			selectedHistoryIds.clear();
 		} catch (error) {
@@ -970,7 +972,9 @@
 			const totalDeleted =
 				typeof payload.totalDeleted === 'number'
 					? payload.totalDeleted
-					: (payload.deletedDownloadHistory ?? 0) + (payload.deletedMonitoringHistory ?? 0);
+					: (payload.deletedDownloadHistory ?? 0) +
+						(payload.deletedMonitoringHistory ?? 0) +
+						(payload.deletedTaskHistory ?? 0);
 			const skippedQueue = typeof payload.skippedQueue === 'number' ? payload.skippedQueue : 0;
 			const skippedRetryableFailed =
 				typeof payload.skippedRetryableFailed === 'number' ? payload.skippedRetryableFailed : 0;

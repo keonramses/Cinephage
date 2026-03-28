@@ -30,8 +30,8 @@ export const PUT: RequestHandler = async (event) => {
 	const service = getRootFolderService();
 
 	try {
-		const updated = await service.updateFolder(params.id, data);
-		return json({ success: true, folder: updated });
+		const result = await service.updateFolder(params.id, data);
+		return json({ success: true, ...result });
 	} catch (error) {
 		if (isAppError(error)) {
 			return json(error.toJSON(), { status: error.statusCode });
@@ -55,8 +55,8 @@ export const DELETE: RequestHandler = async (event) => {
 	const service = getRootFolderService();
 
 	try {
-		await service.deleteFolder(params.id);
-		return json({ success: true });
+		const result = await service.deleteFolder(params.id);
+		return json({ success: true, ...result });
 	} catch (error) {
 		if (error instanceof Error && error.message.includes('not found')) {
 			throw new NotFoundError('Root folder', params.id);

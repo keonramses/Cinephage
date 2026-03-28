@@ -404,7 +404,22 @@
 		{ value: 'size-asc', label: m.library_tv_sortSizeAsc() }
 	];
 
+	const showLibrarySubtypeFilter = $derived(data.libraryNav?.hasAnimeSeries === true);
+
 	const filterOptions = $derived([
+		...(showLibrarySubtypeFilter
+			? [
+					{
+						key: 'librarySubtype',
+						label: m.library_tv_filterLibrary(),
+						options: [
+							{ value: 'all', label: m.library_tv_filterAllLibraries() },
+							{ value: 'standard', label: m.nav_tvShows() },
+							{ value: 'anime', label: m.nav_animeSeries() }
+						]
+					}
+				]
+			: []),
 		{
 			key: 'monitored',
 			label: m.library_tv_filterMonitored(),
@@ -485,7 +500,13 @@
 
 	function updateUrlParam(key: string, value: string) {
 		const url = new URL($page.url);
-		if (value === 'all' || (key === 'sort' && value === 'title-asc')) {
+		if (key === 'librarySubtype') {
+			if (value === 'standard') {
+				url.searchParams.delete(key);
+			} else {
+				url.searchParams.set(key, value);
+			}
+		} else if (value === 'all' || (key === 'sort' && value === 'title-asc')) {
 			url.searchParams.delete(key);
 		} else {
 			url.searchParams.set(key, value);
@@ -494,10 +515,15 @@
 	}
 
 	function clearFilters() {
-		goto(resolve('/library/tv'), { keepFocus: true, noScroll: true });
+		const url = new URL(resolve('/library/tv'), $page.url.origin);
+		if (data.filters.librarySubtype === 'anime') {
+			url.searchParams.set('librarySubtype', 'anime');
+		}
+		goto(resolvePath(url.pathname + url.search), { keepFocus: true, noScroll: true });
 	}
 
 	const currentFilters = $derived({
+		librarySubtype: data.filters.librarySubtype,
 		monitored: data.filters.monitored,
 		status: data.filters.status,
 		progress: data.filters.progress,
@@ -665,6 +691,7 @@
 					{filterOptions}
 					currentSort={data.filters.sort}
 					{currentFilters}
+					hiddenActiveFilterKeys={['librarySubtype']}
 					onSortChange={(sort) => updateUrlParam('sort', sort)}
 					onFilterChange={(key, value) => updateUrlParam(key, value)}
 					onClearFilters={clearFilters}

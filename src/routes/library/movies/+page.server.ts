@@ -42,6 +42,11 @@ export const load: PageServerLoad = async ({ url }) => {
 	const resolution = url.searchParams.get('resolution') || 'all';
 	const videoCodec = url.searchParams.get('videoCodec') || 'all';
 	const hdrFormat = url.searchParams.get('hdrFormat') || 'all';
+	const rawLibrarySubtype = url.searchParams.get('librarySubtype');
+	const librarySubtype =
+		rawLibrarySubtype === 'all' || rawLibrarySubtype === 'anime' || rawLibrarySubtype === 'standard'
+			? rawLibrarySubtype
+			: 'standard';
 
 	try {
 		// Fetch all movies with their root folder info
@@ -62,6 +67,7 @@ export const load: PageServerLoad = async ({ url }) => {
 				rootFolderId: movies.rootFolderId,
 				rootFolderPath: rootFolders.path,
 				rootFolderMediaType: rootFolders.mediaType,
+				rootFolderMediaSubType: rootFolders.mediaSubType,
 				scoringProfileId: movies.scoringProfileId,
 				monitored: movies.monitored,
 				minimumAvailability: movies.minimumAvailability,
@@ -102,24 +108,35 @@ export const load: PageServerLoad = async ({ url }) => {
 			bucket.push(f);
 		}
 
-		const moviesWithFiles: LibraryMovie[] = allMovies.map((movie) => {
-			const files = filesByMovieId.get(movie.id) ?? [];
-			return {
-				...movie,
-				missingRootFolder:
-					!movie.rootFolderId || !movie.rootFolderPath || movie.rootFolderMediaType !== 'movie',
-				files: files.map((f) => ({
-					id: f.id,
-					relativePath: f.relativePath,
-					size: f.size,
-					dateAdded: f.dateAdded,
-					quality: f.quality as MovieFile['quality'],
-					mediaInfo: f.mediaInfo as MovieFile['mediaInfo'],
-					releaseGroup: f.releaseGroup,
-					edition: f.edition
-				}))
-			} as LibraryMovie;
-		});
+		const moviesWithFiles: (LibraryMovie & { rootFolderMediaSubType?: string | null })[] =
+			allMovies.map((movie) => {
+				const files = filesByMovieId.get(movie.id) ?? [];
+				return {
+					...movie,
+					missingRootFolder:
+						!movie.rootFolderId || !movie.rootFolderPath || movie.rootFolderMediaType !== 'movie',
+					files: files.map((f) => ({
+						id: f.id,
+						relativePath: f.relativePath,
+						size: f.size,
+						dateAdded: f.dateAdded,
+						quality: f.quality as MovieFile['quality'],
+						mediaInfo: f.mediaInfo as MovieFile['mediaInfo'],
+						releaseGroup: f.releaseGroup,
+						edition: f.edition
+					}))
+				} as LibraryMovie & { rootFolderMediaSubType?: string | null };
+			});
+
+		const librarySubtypeCounts = {
+			all: moviesWithFiles.length,
+			standard: moviesWithFiles.filter(
+				(movie) => (movie.rootFolderMediaSubType ?? 'standard') === 'standard'
+			).length,
+			anime: moviesWithFiles.filter(
+				(movie) => (movie.rootFolderMediaSubType ?? 'standard') === 'anime'
+			).length
+		};
 
 		// Extract unique file attribute values for filter dropdowns
 		const uniqueResolutions = new Set<string>();
@@ -177,8 +194,15 @@ export const load: PageServerLoad = async ({ url }) => {
 			}))
 		];
 
-		// Apply filters
-		let filteredMovies = moviesWithFiles;
+		const moviesInSelectedSubtype =
+			librarySubtype === 'all'
+				? moviesWithFiles
+				: moviesWithFiles.filter(
+						(movie) => (movie.rootFolderMediaSubType ?? 'standard') === librarySubtype
+					);
+
+		// Apply filters (within selected library subtype scope)
+		let filteredMovies = moviesInSelectedSubtype;
 
 		// Filter by monitored status
 		if (monitored === 'monitored') {
@@ -262,10 +286,11 @@ export const load: PageServerLoad = async ({ url }) => {
 		return {
 			movies: filteredMovies,
 			total: filteredMovies.length,
-			totalUnfiltered: moviesWithFiles.length,
+			totalUnfiltered: moviesInSelectedSubtype.length,
 			downloadingMovieIds: [...downloadingMovieIds],
 			filters: {
 				sort,
+				librarySubtype,
 				monitored,
 				fileStatus,
 				qualityProfile: effectiveQualityProfileFilter,
@@ -273,6 +298,7 @@ export const load: PageServerLoad = async ({ url }) => {
 				videoCodec,
 				hdrFormat
 			},
+			librarySubtypeCounts,
 			qualityProfiles,
 			uniqueResolutions: sortedResolutions,
 			uniqueCodecs: [...uniqueCodecs].sort(),
@@ -290,12 +316,18 @@ export const load: PageServerLoad = async ({ url }) => {
 			downloadingMovieIds: [] as string[],
 			filters: {
 				sort,
+				librarySubtype,
 				monitored,
 				fileStatus,
 				qualityProfile,
 				resolution,
 				videoCodec,
 				hdrFormat
+			},
+			librarySubtypeCounts: {
+				all: 0,
+				standard: 0,
+				anime: 0
 			},
 			qualityProfiles: emptyProfiles,
 			uniqueResolutions: emptyStrings,

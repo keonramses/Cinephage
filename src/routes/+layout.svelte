@@ -42,7 +42,30 @@
 		Shield
 	} from 'lucide-svelte';
 
-	let { children } = $props();
+	type MenuChildItem = {
+		href: string;
+		label: () => string;
+		icon?: typeof Home;
+		match?: (url: URL) => boolean;
+		isSubtype?: boolean;
+	};
+
+	type MenuItem = {
+		href?: string;
+		label: () => string;
+		icon: typeof Home;
+		children?: MenuChildItem[];
+	};
+
+	let { children, data } = $props<{
+		children: import('svelte').Snippet;
+		data: {
+			libraryNav?: {
+				hasAnimeMovies?: boolean;
+				hasAnimeSeries?: boolean;
+			};
+		};
+	}>();
 	let isMobileDrawerOpen = $state(false);
 	let isLoggingOut = $state(false);
 
@@ -74,6 +97,27 @@
 		}
 	}
 
+	function isChildActive(child: MenuChildItem): boolean {
+		if (child.match) return child.match($page.url);
+		const [childPath, childQuery] = child.href.split('?');
+		if ($page.url.pathname !== childPath) return false;
+		if (!childQuery) return true;
+		const queryParams = new URLSearchParams(childQuery);
+		for (const [key, value] of queryParams) {
+			if ($page.url.searchParams.get(key) !== value) return false;
+		}
+		return true;
+	}
+
+	function isItemActive(item: MenuItem): boolean {
+		if (item.children) {
+			return item.children.some((child) => isChildActive(child));
+		}
+		if (!item.href) return false;
+		if (item.href === '/') return $page.url.pathname === '/';
+		return $page.url.pathname === item.href || $page.url.pathname.startsWith(`${item.href}/`);
+	}
+
 	async function handleLogout(): Promise<void> {
 		if (isLoggingOut) return;
 		isLoggingOut = true;
@@ -88,46 +132,88 @@
 	}
 
 	// Menu items using translation functions
-	const menuItems = $derived([
-		{ href: '/', label: m.nav_home, icon: Home },
-		{ href: '/discover', label: m.nav_discover, icon: Compass },
-		{
-			label: m.nav_library,
-			icon: Library,
-			children: [
-				{ href: '/library/movies', label: m.nav_movies, icon: Clapperboard },
-				{ href: '/library/tv', label: m.nav_tvShows, icon: Tv },
-				{ href: '/library/import', label: m.nav_import, icon: Download },
-				{ href: '/library/unmatched', label: m.nav_unmatchedFiles, icon: FileQuestion }
-			]
-		},
-		{ href: '/activity', label: m.nav_activity, icon: Activity },
-		{
-			label: m.nav_liveTv,
-			icon: Radio,
-			children: [
-				{ href: '/livetv/channels', label: m.nav_channels, icon: Tv },
-				{ href: '/livetv/epg', label: m.nav_epg, icon: Calendar },
-				{ href: '/livetv/accounts', label: m.nav_accounts, icon: User }
-			]
-		},
-		{ href: '/smartlists', label: m.nav_smartLists, icon: List },
-		{
-			label: m.nav_settings,
-			icon: Settings,
-			children: [
-				{ href: '/settings/general', label: m.nav_mediaStorage, icon: FolderCog },
-				{ href: '/settings/system', label: m.nav_system, icon: Server },
-				{ href: '/settings/logs', label: m.nav_logs, icon: ScrollText },
-				{ href: '/settings/naming', label: m.nav_naming, icon: FileSignature },
-				{ href: '/settings/quality', label: m.nav_qualitySettings, icon: Shield },
-				{ href: '/settings/integrations', label: m.nav_integrations, icon: Puzzle },
-				{ href: '/settings/tasks', label: m.nav_tasks, icon: ListTodo },
-				{ href: '/settings/filters', label: m.nav_globalFilters, icon: Filter },
-				{ href: '/profile', label: m.nav_profile, icon: User }
-			]
-		}
-	]);
+	const menuItems = $derived.by<MenuItem[]>(() => {
+		const hasAnimeMovies = data.libraryNav?.hasAnimeMovies === true;
+		const hasAnimeSeries = data.libraryNav?.hasAnimeSeries === true;
+
+		const libraryChildren: MenuChildItem[] = [
+			{
+				href: '/library/movies',
+				label: m.nav_movies,
+				icon: Clapperboard,
+				match: (url: URL) =>
+					url.pathname === '/library/movies' && url.searchParams.get('librarySubtype') !== 'anime'
+			},
+			...(hasAnimeMovies
+				? [
+						{
+							href: '/library/movies?librarySubtype=anime',
+							label: m.nav_animeMovies,
+							isSubtype: true,
+							match: (url: URL) =>
+								url.pathname === '/library/movies' &&
+								url.searchParams.get('librarySubtype') === 'anime'
+						}
+					]
+				: []),
+			{
+				href: '/library/tv',
+				label: m.nav_tvShows,
+				icon: Tv,
+				match: (url: URL) =>
+					url.pathname === '/library/tv' && url.searchParams.get('librarySubtype') !== 'anime'
+			},
+			...(hasAnimeSeries
+				? [
+						{
+							href: '/library/tv?librarySubtype=anime',
+							label: m.nav_animeSeries,
+							isSubtype: true,
+							match: (url: URL) =>
+								url.pathname === '/library/tv' && url.searchParams.get('librarySubtype') === 'anime'
+						}
+					]
+				: []),
+			{ href: '/library/import', label: m.nav_import, icon: Download },
+			{ href: '/library/unmatched', label: m.nav_unmatchedFiles, icon: FileQuestion }
+		];
+
+		return [
+			{ href: '/', label: m.nav_home, icon: Home },
+			{ href: '/discover', label: m.nav_discover, icon: Compass },
+			{
+				label: m.nav_library,
+				icon: Library,
+				children: libraryChildren
+			},
+			{ href: '/activity', label: m.nav_activity, icon: Activity },
+			{
+				label: m.nav_liveTv,
+				icon: Radio,
+				children: [
+					{ href: '/livetv/channels', label: m.nav_channels, icon: Tv },
+					{ href: '/livetv/epg', label: m.nav_epg, icon: Calendar },
+					{ href: '/livetv/accounts', label: m.nav_accounts, icon: User }
+				]
+			},
+			{ href: '/smartlists', label: m.nav_smartLists, icon: List },
+			{
+				label: m.nav_settings,
+				icon: Settings,
+				children: [
+					{ href: '/settings/general', label: m.nav_mediaStorage, icon: FolderCog },
+					{ href: '/settings/system', label: m.nav_system, icon: Server },
+					{ href: '/settings/logs', label: m.nav_logs, icon: ScrollText },
+					{ href: '/settings/naming', label: m.nav_naming, icon: FileSignature },
+					{ href: '/settings/quality', label: m.nav_qualitySettings, icon: Shield },
+					{ href: '/settings/integrations', label: m.nav_integrations, icon: Puzzle },
+					{ href: '/settings/tasks', label: m.nav_tasks, icon: ListTodo },
+					{ href: '/settings/filters', label: m.nav_globalFilters, icon: Filter },
+					{ href: '/profile', label: m.nav_profile, icon: User }
+				]
+			}
+		];
+	});
 
 	let appVersion = $state('');
 
@@ -317,8 +403,11 @@
 						<li>
 							{#if item.children}
 								{#if layoutState.isSidebarExpanded}
-									<details>
-										<summary class="flex items-center gap-4 px-4 py-3">
+									<details open={isItemActive(item)}>
+										<summary
+											class="flex items-center gap-4 px-4 py-3"
+											class:active-nav={isItemActive(item)}
+										>
 											<item.icon class="h-5 w-5 shrink-0" />
 											<span class="truncate">{item.label()}</span>
 										</summary>
@@ -328,10 +417,14 @@
 													<a
 														href={buildNavHref(child.href)}
 														class="flex items-center gap-4 px-4 py-2"
-														class:active={$page.url.pathname === child.href}
+														class:pl-8={child.isSubtype}
+														class:active={isChildActive(child)}
 														onclick={(event) => handleNavClick(event, child.href)}
 													>
 														{#if child.icon}<child.icon class="h-4 w-4 shrink-0" />{/if}
+														{#if child.isSubtype}
+															<span class="font-mono text-xs text-base-content/40">|-</span>
+														{/if}
 														<span class="truncate">{child.label()}</span>
 													</a>
 												</li>
@@ -341,6 +434,7 @@
 								{:else}
 									<button
 										class="flex items-center gap-4 px-4 py-3"
+										class:active-nav={isItemActive(item)}
 										onclick={() => layoutState.toggleSidebar()}
 										title={item.label()}
 									>
@@ -349,11 +443,11 @@
 								{/if}
 							{:else}
 								<a
-									href={buildNavHref(item.href)}
+									href={buildNavHref(item.href!)}
 									class="flex items-center gap-4 px-4 py-3"
-									class:active={$page.url.pathname === item.href}
+									class:active={isItemActive(item)}
 									title={!layoutState.isSidebarExpanded ? item.label() : ''}
-									onclick={(event) => handleNavClick(event, item.href)}
+									onclick={(event) => handleNavClick(event, item.href!)}
 								>
 									<item.icon class="h-5 w-5 shrink-0" />
 									{#if layoutState.isSidebarExpanded}

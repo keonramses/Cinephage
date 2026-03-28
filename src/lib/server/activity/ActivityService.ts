@@ -91,14 +91,17 @@ const MIN_ACTIVITY_RETENTION_DAYS = 1;
 interface DeleteHistoryResult {
 	deletedDownloadHistory: number;
 	deletedMonitoringHistory: number;
+	deletedTaskHistory: number;
 	skippedQueue: number;
 	skippedUnknown: number;
 	skippedRetryableFailed: number;
+	skippedRunningTasks: number;
 }
 
 interface PurgeHistoryResult {
 	deletedDownloadHistory: number;
 	deletedMonitoringHistory: number;
+	deletedTaskHistory: number;
 	totalDeleted: number;
 	cutoff?: string;
 }
@@ -317,6 +320,7 @@ export class ActivityService {
 	async deleteHistoryActivities(activityIds: string[]): Promise<DeleteHistoryResult> {
 		const historyIds = new Set<string>();
 		const monitoringIds = new Set<string>();
+		const taskIds = new Set<string>();
 		let skippedQueue = 0;
 		let skippedUnknown = 0;
 
@@ -347,13 +351,24 @@ export class ActivityService {
 				continue;
 			}
 
+			if (id.startsWith('task-')) {
+				const taskId = id.slice('task-'.length).trim();
+				if (taskId) {
+					taskIds.add(taskId);
+				}
+				continue;
+			}
+
 			skippedUnknown += 1;
 		}
 
 		const historyIdList = Array.from(historyIds);
 		const monitoringIdList = Array.from(monitoringIds);
+		const taskIdList = Array.from(taskIds);
 		let eligibleHistoryIdList = historyIdList;
+		let eligibleTaskIdList = taskIdList;
 		let skippedRetryableFailed = 0;
+		let skippedRunningTasks = 0;
 
 		if (historyIdList.length > 0) {
 			const requestedHistoryRows = await db
@@ -391,32 +406,77 @@ export class ActivityService {
 			eligibleHistoryIdList = historyIdList.filter((id) => !protectedHistoryIds.has(id));
 		}
 
-		const { deletedDownloadHistory, deletedMonitoringHistory } = await db.transaction((tx) => {
-			const deletedDownloadHistory =
-				eligibleHistoryIdList.length > 0
-					? tx
-							.delete(downloadHistory)
-							.where(inArray(downloadHistory.id, eligibleHistoryIdList))
-							.run().changes
-					: 0;
+		if (taskIdList.length > 0) {
+			const requestedTaskRows = await db
+				.select({
+					id: taskHistory.id,
+					taskId: taskHistory.taskId,
+					status: taskHistory.status
+				})
+				.from(taskHistory)
+				.where(inArray(taskHistory.id, taskIdList))
+				.all();
 
-			const deletedMonitoringHistory =
-				monitoringIdList.length > 0
-					? tx
-							.delete(monitoringHistory)
-							.where(inArray(monitoringHistory.id, monitoringIdList))
-							.run().changes
-					: 0;
+			const protectedTaskIds = new Set<string>();
+			for (const row of requestedTaskRows) {
+				// Only media-move task history is represented in Activity rows.
+				// Also do not allow deleting running task rows.
+				if (!row.taskId.startsWith('media-move:')) {
+					protectedTaskIds.add(row.id);
+					continue;
+				}
+				if (row.status === 'running') {
+					protectedTaskIds.add(row.id);
+					skippedRunningTasks += 1;
+				}
+			}
 
-			return { deletedDownloadHistory, deletedMonitoringHistory };
-		});
+			eligibleTaskIdList = taskIdList.filter((id) => !protectedTaskIds.has(id));
+		}
+
+		const { deletedDownloadHistory, deletedMonitoringHistory, deletedTaskHistory } =
+			await db.transaction((tx) => {
+				const deletedDownloadHistory =
+					eligibleHistoryIdList.length > 0
+						? tx
+								.delete(downloadHistory)
+								.where(inArray(downloadHistory.id, eligibleHistoryIdList))
+								.run().changes
+						: 0;
+
+				const deletedMonitoringHistory =
+					monitoringIdList.length > 0
+						? tx
+								.delete(monitoringHistory)
+								.where(inArray(monitoringHistory.id, monitoringIdList))
+								.run().changes
+						: 0;
+
+				const deletedTaskHistory =
+					eligibleTaskIdList.length > 0
+						? tx
+								.delete(taskHistory)
+								.where(
+									and(
+										inArray(taskHistory.id, eligibleTaskIdList),
+										sql`${taskHistory.taskId} LIKE 'media-move:%'`,
+										inArray(taskHistory.status, ['completed', 'failed', 'cancelled'])
+									)
+								)
+								.run().changes
+						: 0;
+
+				return { deletedDownloadHistory, deletedMonitoringHistory, deletedTaskHistory };
+			});
 
 		return {
 			deletedDownloadHistory,
 			deletedMonitoringHistory,
+			deletedTaskHistory,
 			skippedQueue,
 			skippedUnknown,
-			skippedRetryableFailed
+			skippedRetryableFailed,
+			skippedRunningTasks
 		};
 	}
 
@@ -426,39 +486,64 @@ export class ActivityService {
 		cutoffDate.setDate(cutoffDate.getDate() - normalizedRetentionDays);
 		const cutoffIso = cutoffDate.toISOString();
 
-		const { deletedDownloadHistory, deletedMonitoringHistory } = await db.transaction((tx) => {
-			const deletedDownloadHistory = tx
-				.delete(downloadHistory)
-				.where(lt(downloadHistory.createdAt, cutoffIso))
-				.run().changes;
-			const deletedMonitoringHistory = tx
-				.delete(monitoringHistory)
-				.where(lt(monitoringHistory.executedAt, cutoffIso))
-				.run().changes;
+		const { deletedDownloadHistory, deletedMonitoringHistory, deletedTaskHistory } =
+			await db.transaction((tx) => {
+				const deletedDownloadHistory = tx
+					.delete(downloadHistory)
+					.where(lt(downloadHistory.createdAt, cutoffIso))
+					.run().changes;
+				const deletedMonitoringHistory = tx
+					.delete(monitoringHistory)
+					.where(lt(monitoringHistory.executedAt, cutoffIso))
+					.run().changes;
 
-			return { deletedDownloadHistory, deletedMonitoringHistory };
-		});
+				const deletedTaskHistory = tx
+					.delete(taskHistory)
+					.where(
+						and(
+							sql`${taskHistory.taskId} LIKE 'media-move:%'`,
+							inArray(taskHistory.status, ['completed', 'failed', 'cancelled']),
+							lt(taskHistory.startedAt, cutoffIso)
+						)
+					)
+					.run().changes;
+
+				return { deletedDownloadHistory, deletedMonitoringHistory, deletedTaskHistory };
+			});
 
 		return {
 			deletedDownloadHistory,
 			deletedMonitoringHistory,
-			totalDeleted: deletedDownloadHistory + deletedMonitoringHistory,
+			deletedTaskHistory,
+			totalDeleted: deletedDownloadHistory + deletedMonitoringHistory + deletedTaskHistory,
 			cutoff: cutoffIso
 		};
 	}
 
 	async purgeAllHistory(): Promise<PurgeHistoryResult> {
-		const { deletedDownloadHistory, deletedMonitoringHistory } = await db.transaction((tx) => {
-			const deletedDownloadHistory = tx.delete(downloadHistory).run().changes;
-			const deletedMonitoringHistory = tx.delete(monitoringHistory).run().changes;
+		const { deletedDownloadHistory, deletedMonitoringHistory, deletedTaskHistory } =
+			await db.transaction((tx) => {
+				const deletedDownloadHistory = tx.delete(downloadHistory).run().changes;
+				const deletedMonitoringHistory = tx.delete(monitoringHistory).run().changes;
 
-			return { deletedDownloadHistory, deletedMonitoringHistory };
-		});
+				const deletedTaskHistory = tx
+					.delete(taskHistory)
+					.where(
+						and(
+							sql`${taskHistory.taskId} LIKE 'media-move:%'`,
+							inArray(taskHistory.status, ['completed', 'failed', 'cancelled'])
+						)
+					)
+					.run().changes;
+
+				return { deletedDownloadHistory, deletedMonitoringHistory, deletedTaskHistory };
+			});
 
 		return {
 			deletedDownloadHistory,
 			deletedMonitoringHistory,
-			totalDeleted: deletedDownloadHistory + deletedMonitoringHistory
+			deletedTaskHistory,
+			totalDeleted: deletedDownloadHistory + deletedMonitoringHistory + deletedTaskHistory
 		};
 	}
 

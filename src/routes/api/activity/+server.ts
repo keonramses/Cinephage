@@ -134,7 +134,8 @@ export const DELETE: RequestHandler = async (event) => {
 
 	try {
 		const result = await activityService.deleteHistoryActivities(parsed.data.activityIds);
-		const totalDeleted = result.deletedDownloadHistory + result.deletedMonitoringHistory;
+		const totalDeleted =
+			result.deletedDownloadHistory + result.deletedMonitoringHistory + result.deletedTaskHistory;
 		if (totalDeleted > 0) {
 			activityStreamEvents.emitRefresh({
 				action: 'delete_selected',
