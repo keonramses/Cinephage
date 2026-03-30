@@ -235,6 +235,12 @@
 	function closeTmdbModal() {
 		tmdbError = null;
 		tmdbModalOpen = false;
+
+		const url = new URL($page.url);
+		if (url.searchParams.get('open') === 'tmdb') {
+			url.searchParams.delete('open');
+			goto(url.toString(), { replaceState: true, noScroll: true });
+		}
 	}
 
 	async function handleTmdbSave() {
@@ -328,6 +334,14 @@
 		if (activeTab === 'captcha' && !captchaDataLoaded) {
 			loadCaptchaData();
 			captchaDataLoaded = true;
+		}
+	});
+
+	$effect(() => {
+		const shouldOpenTmdbModal =
+			activeTab === 'tmdb' && $page.url.searchParams.get('open') === 'tmdb';
+		if (shouldOpenTmdbModal && !tmdbModalOpen) {
+			openTmdbModal();
 		}
 	});
 
