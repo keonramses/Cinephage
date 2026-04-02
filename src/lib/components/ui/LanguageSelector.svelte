@@ -17,7 +17,8 @@
 
 	const languageNames: Record<string, string> = {
 		en: 'English',
-		de: 'Deutsch'
+		de: 'Deutsch',
+		es: 'Español'
 	};
 
 	async function handleLanguageChange(locale: Locale) {
