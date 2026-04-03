@@ -1,5 +1,4 @@
 import type { Plugin } from 'vite';
-import devtoolsJson from 'vite-plugin-devtools-json';
 import tailwindcss from '@tailwindcss/vite';
 import { defineConfig } from 'vitest/config';
 import { sveltekit } from '@sveltejs/kit/vite';
@@ -40,12 +39,10 @@ export default defineConfig({
 		paraglideVitePlugin({
 			project: './project.inlang',
 			outdir: './src/lib/paraglide',
-			outputStructure: 'locale-modules',
 			strategy: ['cookie', 'globalVariable', 'baseLocale']
 		}),
 		tailwindcss(),
 		sveltekit(),
-		devtoolsJson(),
 		eagerInitPlugin()
 	],
 	css: {
