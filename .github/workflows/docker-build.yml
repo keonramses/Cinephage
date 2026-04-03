@@ -2,7 +2,7 @@
 #
 # Triggers:
 # - Pull requests to main: Build only (validates Dockerfile)
-# - Push to main: Build and push internal main candidate tags
+# - Push to main: Build and push with edge channel tags
 # - Runs only when Docker-relevant files change (paths filter)
 #
 # Images are pushed to ghcr.io/<owner>/cinephage
@@ -70,21 +70,19 @@ jobs:
       app_version: ${{ steps.meta.outputs.app_version }}
       arch_tag_amd64: ${{ steps.meta.outputs.arch_tag_amd64 }}
       arch_tag_arm64: ${{ steps.meta.outputs.arch_tag_arm64 }}
-      image_source: ${{ steps.meta.outputs.image_source }}
-      image_revision: ${{ steps.meta.outputs.image_revision }}
-      image_created: ${{ steps.meta.outputs.image_created }}
 
     steps:
       - name: Compute version and arch tags
         id: meta
         run: |
           RUN_DATE="$(date +%Y%m%d)"
-          IMAGE_CREATED="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 
-          if [ "${{ github.ref }}" = "refs/heads/dev" ]; then
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ -n "${{ github.event.inputs.tag }}" ]; then
+            APP_VERSION="${{ github.event.inputs.tag }}"
+          elif [ "${{ github.ref }}" = "refs/heads/dev" ]; then
             APP_VERSION="dev-${RUN_DATE}-${{ github.run_number }}"
           elif [ "${{ github.ref }}" = "refs/heads/main" ]; then
-            APP_VERSION="main-${RUN_DATE}-${{ github.run_number }}"
+            APP_VERSION="edge-${RUN_DATE}-${{ github.run_number }}"
           else
             APP_VERSION="sha-${GITHUB_SHA::7}"
           fi
@@ -94,9 +92,6 @@ jobs:
             echo "app_version=${APP_VERSION}"
             echo "arch_tag_amd64=${APP_VERSION}-amd64"
             echo "arch_tag_arm64=${APP_VERSION}-arm64"
-            echo "image_source=https://github.com/${GITHUB_REPOSITORY}"
-            echo "image_revision=${GITHUB_SHA}"
-            echo "image_created=${IMAGE_CREATED}"
           } >> "$GITHUB_OUTPUT"
 
   build-amd64:
@@ -168,9 +163,6 @@ jobs:
           tags: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME_LC }}:${{ needs.prepare.outputs.arch_tag_amd64 }}
           build-args: |
             APP_VERSION=${{ needs.prepare.outputs.app_version }}
-            APP_SOURCE=${{ needs.prepare.outputs.image_source }}
-            VCS_REF=${{ needs.prepare.outputs.image_revision }}
-            BUILD_CREATED=${{ needs.prepare.outputs.image_created }}
           cache-from: type=gha,scope=amd64
           cache-to: type=gha,mode=max,scope=amd64
 
@@ -215,9 +207,6 @@ jobs:
           tags: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME_LC }}:${{ needs.prepare.outputs.arch_tag_arm64 }}
           build-args: |
             APP_VERSION=${{ needs.prepare.outputs.app_version }}
-            APP_SOURCE=${{ needs.prepare.outputs.image_source }}
-            VCS_REF=${{ needs.prepare.outputs.image_revision }}
-            BUILD_CREATED=${{ needs.prepare.outputs.image_created }}
           cache-from: type=gha,scope=arm64
           cache-to: type=gha,mode=max,scope=arm64
 
@@ -250,7 +239,9 @@ jobs:
         with:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME_LC }}
           tags: |
-            type=raw,value=main-${{ needs.prepare.outputs.run_date }}-${{ github.run_number }},enable=${{ github.ref == 'refs/heads/main' }}
+            type=raw,value=${{ github.event.inputs.tag }},enable=${{ github.event_name == 'workflow_dispatch' && github.event.inputs.tag != '' }}
+            type=raw,value=edge-${{ needs.prepare.outputs.run_date }}-${{ github.run_number }},enable=${{ github.ref == 'refs/heads/main' }}
+            type=raw,value=edge,enable=${{ github.ref == 'refs/heads/main' }}
             type=raw,value=dev-${{ needs.prepare.outputs.run_date }}-${{ github.run_number }},enable=${{ github.ref == 'refs/heads/dev' }}
             type=raw,value=dev,enable=${{ github.ref == 'refs/heads/dev' }}
           labels: |
