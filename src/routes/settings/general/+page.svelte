@@ -2,6 +2,7 @@
 	import * as m from '$lib/paraglide/messages.js';
 	import { goto, invalidateAll } from '$app/navigation';
 	import { page } from '$app/stores';
+	import { SvelteURL } from 'svelte/reactivity';
 	import {
 		Plus,
 		HardDrive,
@@ -796,7 +797,6 @@
 	error={folderSaveError}
 	onClose={closeFolderModal}
 	onSave={handleFolderSave}
-	onDelete={() => {}}
 	onValidatePath={handleValidatePath}
 />
 
