@@ -77,6 +77,8 @@ export const load: PageServerLoad = async () => {
 				},
 				activeDownloads: 0,
 				queuedDownloads: 0,
+				stalledDownloads: 0,
+				pausedDownloads: 0,
 				downloadSpeedBytes: 0,
 				downloadAvgProgress: 0,
 				movingDownloads: 0,
