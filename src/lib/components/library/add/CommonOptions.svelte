@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { FolderOpen, BarChart3, Search, Subtitles } from 'lucide-svelte';
+	import { FolderOpen, BarChart3, Search, Captions } from 'lucide-svelte';
 	import { resolve } from '$app/paths';
 	import { sortRootFoldersForMediaType } from '$lib/utils/root-folders.js';
 	import * as m from '$lib/paraglide/messages.js';
@@ -170,7 +170,7 @@
 	/>
 	<div class="min-w-0">
 		<span class="flex items-center gap-2 text-sm font-medium">
-			<Subtitles class="h-4 w-4 shrink-0" />
+			<Captions class="h-4 w-4 shrink-0" />
 			{m.library_add_autoDownloadSubtitles()}
 		</span>
 		<p class="text-xs text-base-content/60">

@@ -126,6 +126,7 @@ export interface RootFolder {
 	preserveSymlinks: boolean;
 	defaultMonitored: boolean;
 	freeSpaceBytes?: number | null;
+	totalSpaceBytes?: number | null;
 	freeSpaceFormatted?: string;
 	accessible: boolean;
 	lastCheckedAt?: string | null;

@@ -5,7 +5,16 @@
 	import QualityBadge from './QualityBadge.svelte';
 	import MediaInfoPopover from './MediaInfoPopover.svelte';
 	import { SubtitleDisplay } from '$lib/components/subtitles';
-	import { File, Trash2, Calendar, HardDrive, Subtitles, Download, Loader2 } from 'lucide-svelte';
+	import {
+		File,
+		Trash2,
+		Calendar,
+		HardDrive,
+		Captions,
+		CaptionsOff,
+		Download,
+		Loader2
+	} from 'lucide-svelte';
 	import { normalizeLanguageCode } from '$lib/shared/languages';
 
 	interface Subtitle {
@@ -214,8 +223,13 @@
 	<!-- Subtitles section -->
 	<div class="mt-3 flex flex-wrap items-center justify-between gap-2 border-t border-base-300 pt-3">
 		<div class="flex min-w-0 flex-1 items-center gap-2">
-			<Subtitles size={14} class="text-base-content/50" />
-			<SubtitleDisplay subtitles={allSubtitles} size="sm" showSyncStatus={true} />
+			{#if allSubtitles.length > 0}
+				<Captions size={14} class="text-base-content/50" />
+				<SubtitleDisplay subtitles={allSubtitles} size="sm" showSyncStatus={true} />
+			{:else}
+				<CaptionsOff size={14} class="text-base-content/50" />
+				<SubtitleDisplay subtitles={allSubtitles} size="sm" showSyncStatus={true} />
+			{/if}
 		</div>
 		{#if onSubtitleSearch || onSubtitleAutoSearch}
 			<div class="flex flex-wrap items-center gap-1">
@@ -225,7 +239,7 @@
 						onclick={onSubtitleSearch}
 						title={m.library_fileCard_searchSubtitles()}
 					>
-						<Subtitles size={12} />
+						<Captions size={12} />
 						{m.library_fileCard_search()}
 					</button>
 				{/if}

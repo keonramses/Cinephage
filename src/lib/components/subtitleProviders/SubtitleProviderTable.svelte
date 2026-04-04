@@ -3,7 +3,7 @@
 	import {
 		ChevronUp,
 		ChevronDown,
-		Subtitles,
+		Captions,
 		GripVertical,
 		Loader2,
 		FlaskConical,
@@ -195,7 +195,7 @@
 
 {#if providers.length === 0}
 	<div class="flex flex-col items-center justify-center py-12 text-base-content/50">
-		<Subtitles class="mb-4 h-12 w-12" />
+		<Captions class="mb-4 h-12 w-12" />
 		<p class="text-lg font-medium">{m.subtitleProviders_table_noProvidersTitle()}</p>
 		<p class="text-sm">{m.subtitleProviders_table_noProvidersDescription()}</p>
 	</div>

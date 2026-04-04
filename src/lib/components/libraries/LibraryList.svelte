@@ -1,4 +1,5 @@
 <script lang="ts">
+	import * as m from '$lib/paraglide/messages.js';
 	import {
 		Film,
 		Tv,
@@ -53,10 +54,17 @@
 	}
 
 	function formatRootFolderSummary(rootFolders: LibraryRootFolder[] | undefined) {
-		if (!rootFolders || rootFolders.length === 0) return 'No root folders assigned';
+		if (!rootFolders || rootFolders.length === 0) return m.settings_general_noRootFoldersAssigned();
 		const names = rootFolders.map((folder) => folder.name);
 		if (names.length <= 2) return names.join(', ');
-		return `${names.slice(0, 2).join(', ')} +${names.length - 2} more`;
+		return m.settings_general_rootFoldersSummaryMore({
+			names: names.slice(0, 2).join(', '),
+			count: names.length - 2
+		});
+	}
+
+	function hasAssignedRootFolders(rootFolders: LibraryRootFolder[] | undefined): boolean {
+		return (rootFolders?.length ?? 0) > 0;
 	}
 
 	function getStatusBadgeClass(enabled: boolean): string {
@@ -69,7 +77,7 @@
 		[
 			{
 				id: 'movie',
-				title: 'Movie Libraries',
+				title: m.settings_general_movieLibraries(),
 				icon: Film,
 				sectionClasses: 'bg-primary/15 text-primary',
 				cardClasses: 'bg-primary/20 text-primary',
@@ -77,7 +85,7 @@
 			},
 			{
 				id: 'tv',
-				title: 'TV Libraries',
+				title: m.settings_general_tvLibraries(),
 				icon: Tv,
 				sectionClasses: 'bg-secondary/15 text-secondary',
 				cardClasses: 'bg-secondary/20 text-secondary',
@@ -89,7 +97,7 @@
 
 {#if libraries.length === 0}
 	<div class="rounded-lg border border-dashed border-base-300 p-6 text-sm text-base-content/60">
-		No libraries configured.
+		{m.settings_general_noLibrariesConfigured()}
 	</div>
 {:else}
 	<div class="space-y-6">
@@ -118,18 +126,31 @@
 											<h4 class="flex flex-wrap items-center gap-2">
 												<span class="font-semibold">{library.name}</span>
 												{#if library.isSystem}
-													<span class="badge badge-outline badge-sm">System</span>
+													<span class="badge badge-outline badge-sm"
+														>{m.settings_general_badgeSystem()}</span
+													>
 												{/if}
 												{#if library.mediaSubType === 'anime'}
-													<span class="badge badge-sm badge-accent">Anime</span>
+													<span class="badge badge-sm badge-accent"
+														>{m.settings_general_badgeAnime()}</span
+													>
 												{/if}
 											</h4>
 											<p class="text-sm text-base-content/60">
-												Root folders:
-												{formatRootFolderSummary(library.rootFolders)}
+												{m.settings_general_rootFoldersLabel()}:
+												<span
+													class={hasAssignedRootFolders(library.rootFolders)
+														? ''
+														: 'badge badge-warning '}
+												>
+													{formatRootFolderSummary(library.rootFolders)}
+												</span>
 											</p>
 											<p class="text-xs text-base-content/50">
-												{usage?.itemCount ?? 0} items • {formatBytes(usage?.usedBytes ?? 0)}
+												{m.settings_general_itemsUsed({
+													count: usage?.itemCount ?? 0,
+													used: formatBytes(usage?.usedBytes ?? 0)
+												})}
 											</p>
 										</div>
 									</div>
@@ -138,7 +159,7 @@
 										<button
 											class="btn btn-square btn-ghost btn-sm"
 											onclick={() => onEdit(library)}
-											title="Edit"
+											title={m.action_edit()}
 										>
 											<Settings class="h-4 w-4" />
 										</button>
@@ -146,7 +167,7 @@
 											<button
 												class="btn btn-square text-error btn-ghost btn-sm"
 												onclick={() => onDelete(library)}
-												title="Delete"
+												title={m.action_delete()}
 											>
 												<Trash2 class="h-4 w-4" />
 											</button>
@@ -157,7 +178,10 @@
 								<div class="mt-3 grid grid-cols-3 gap-2 border-t border-base-300 pt-3">
 									<div
 										class="flex flex-col items-center gap-1 rounded-lg"
-										title={`Monitored by default: ${library.defaultMonitored ? 'Enabled' : 'Disabled'}`}
+										title={m.settings_general_statusTooltip({
+											label: m.settings_general_monitorByDefault(),
+											status: library.defaultMonitored ? m.common_enabled() : m.common_disabled()
+										})}
 									>
 										<span
 											class={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-medium ${getStatusBadgeClass(
@@ -173,7 +197,10 @@
 									</div>
 									<div
 										class="flex flex-col items-center gap-1 rounded-lg"
-										title={`Search on add: ${library.defaultSearchOnAdd ? 'Enabled' : 'Disabled'}`}
+										title={m.settings_general_statusTooltip({
+											label: m.settings_general_searchOnAddLabel(),
+											status: library.defaultSearchOnAdd ? m.common_enabled() : m.common_disabled()
+										})}
 									>
 										<span
 											class={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-medium ${getStatusBadgeClass(
@@ -189,7 +216,12 @@
 									</div>
 									<div
 										class="flex flex-col items-center gap-1 rounded-lg"
-										title={`Subtitles by default: ${library.defaultWantsSubtitles ? 'Enabled' : 'Disabled'}`}
+										title={m.settings_general_statusTooltip({
+											label: m.settings_general_wantSubtitles(),
+											status: library.defaultWantsSubtitles
+												? m.common_enabled()
+												: m.common_disabled()
+										})}
 									>
 										<span
 											class={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-medium ${getStatusBadgeClass(

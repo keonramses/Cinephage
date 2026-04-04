@@ -113,7 +113,9 @@
 													</span>
 												{/if}
 												{#if (folder.mediaSubType ?? 'standard') === 'anime'}
-													<span class="badge badge-sm badge-accent">Anime</span>
+													<span class="badge badge-sm badge-accent"
+														>{m.settings_general_badgeAnime()}</span
+													>
 												{/if}
 											</h3>
 											<p class="max-w-full font-mono text-sm break-all text-base-content/60">
@@ -126,14 +128,14 @@
 										<button
 											class="btn btn-square btn-ghost btn-sm"
 											onclick={() => onEdit(folder)}
-											title="Edit"
+											title={m.action_edit()}
 										>
 											<Settings class="h-4 w-4" />
 										</button>
 										<button
 											class="btn btn-square text-error btn-ghost btn-sm"
 											onclick={() => onDelete(folder)}
-											title="Delete"
+											title={m.action_delete()}
 										>
 											<Trash2 class="h-4 w-4" />
 										</button>
@@ -143,7 +145,10 @@
 								<div class="mt-3 grid grid-cols-4 gap-2 border-t border-base-300 pt-3">
 									<div
 										class="flex flex-col items-center gap-1 rounded-lg"
-										title={`Preserve Symlinks: ${folder.preserveSymlinks ? 'Enabled' : 'Disabled'}`}
+										title={m.settings_general_statusTooltip({
+											label: m.rootFolders_preserveSymlinksLabel(),
+											status: folder.preserveSymlinks ? m.common_enabled() : m.common_disabled()
+										})}
 									>
 										<span
 											class={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-medium ${
@@ -161,7 +166,10 @@
 									</div>
 									<div
 										class="flex flex-col items-center gap-1 rounded-lg"
-										title={`Monitor New Content: ${folder.defaultMonitored ? 'Enabled' : 'Disabled'}`}
+										title={m.settings_general_statusTooltip({
+											label: m.rootFolders_monitorNewContent(),
+											status: folder.defaultMonitored ? m.common_enabled() : m.common_disabled()
+										})}
 									>
 										<span
 											class={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-medium ${
@@ -179,7 +187,10 @@
 									</div>
 									<div
 										class="flex flex-col items-center gap-1 rounded-lg"
-										title={`Path Accessible: ${folder.accessible ? 'Yes' : 'No'}`}
+										title={m.settings_general_statusTooltip({
+											label: m.settings_general_pathAccessible(),
+											status: folder.accessible ? m.settings_general_yes() : m.settings_general_no()
+										})}
 									>
 										<span
 											class={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-medium ${

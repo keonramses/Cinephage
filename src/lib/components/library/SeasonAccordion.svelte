@@ -9,7 +9,7 @@
 		Zap,
 		Loader2,
 		Trash2,
-		Subtitles
+		Captions
 	} from 'lucide-svelte';
 	import EpisodeRow from './EpisodeRow.svelte';
 	import AutoSearchStatus from './AutoSearchStatus.svelte';
@@ -292,7 +292,7 @@
 										? 'text-warning/70'
 										: 'text-base-content/50'}"
 							>
-								<Subtitles size={12} />
+								<Captions size={12} />
 								{subtitleCoverage.withSubs}/{subtitleCoverage.total}
 							</span>
 						{/if}

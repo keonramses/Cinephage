@@ -1,7 +1,7 @@
 <script lang="ts">
 	import * as m from '$lib/paraglide/messages.js';
 	import type { MediaInfo } from '$lib/types/library';
-	import { Info, Monitor, Volume2, Subtitles, Clock } from 'lucide-svelte';
+	import { Info, Monitor, Volume2, Captions, Clock } from 'lucide-svelte';
 
 	interface Props {
 		mediaInfo: MediaInfo;
@@ -120,7 +120,7 @@
 			<!-- Subtitles Section -->
 			{#if mediaInfo.subtitleLanguages && mediaInfo.subtitleLanguages.length > 0}
 				<div class="flex items-start gap-2">
-					<Subtitles size={14} class="mt-0.5 shrink-0 text-accent" />
+					<Captions size={14} class="mt-0.5 shrink-0 text-accent" />
 					<div class="flex-1">
 						<div class="font-medium">{m.library_mediaInfo_subtitles()}</div>
 						<div class="text-base-content/70">

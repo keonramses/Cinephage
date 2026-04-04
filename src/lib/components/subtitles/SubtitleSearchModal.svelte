@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { SvelteSet, SvelteMap } from 'svelte/reactivity';
-	import { X, Search, Loader2, RefreshCw, Subtitles } from 'lucide-svelte';
+	import { X, Search, Loader2, RefreshCw, Captions } from 'lucide-svelte';
 	import SubtitleSearchResultRow from './SubtitleSearchResultRow.svelte';
 	import ModalWrapper from '$lib/components/ui/modal/ModalWrapper.svelte';
 
@@ -226,7 +226,7 @@
 	<div class="mb-4 flex items-center justify-between">
 		<div>
 			<h3 id="subtitle-search-modal-title" class="flex items-center gap-2 text-lg font-bold">
-				<Subtitles size={20} class="text-primary" />
+				<Captions size={20} class="text-primary" />
 				Subtitle Search
 			</h3>
 			<p class="text-sm text-base-content/60">{title}</p>

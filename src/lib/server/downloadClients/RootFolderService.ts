@@ -481,6 +481,18 @@ export class RootFolderService {
 	}
 
 	/**
+	 * Get total filesystem capacity for a path in bytes.
+	 */
+	async getTotalSpace(folderPath: string): Promise<number> {
+		try {
+			const stats = await fs.statfs(folderPath);
+			return stats.blocks * stats.bsize;
+		} catch {
+			return 0;
+		}
+	}
+
+	/**
 	 * Refresh free space for all folders.
 	 */
 	async refreshFreeSpace(): Promise<void> {
@@ -564,6 +576,7 @@ export class RootFolderService {
 		// Check current accessibility
 		let accessible: boolean;
 		let freeSpaceBytes: number | null = null;
+		let totalSpaceBytes: number | null = null;
 		let freeSpaceFormatted: string | undefined;
 		const isReadOnly = !!row.readOnly;
 
@@ -587,6 +600,7 @@ export class RootFolderService {
 				} else {
 					freeSpaceBytes = row.freeSpaceBytes;
 				}
+				totalSpaceBytes = await this.getTotalSpace(row.path);
 
 				if (freeSpaceBytes) {
 					freeSpaceFormatted = this.formatBytes(freeSpaceBytes);
@@ -607,6 +621,7 @@ export class RootFolderService {
 			preserveSymlinks: !!row.preserveSymlinks,
 			defaultMonitored: row.defaultMonitored ?? true,
 			freeSpaceBytes,
+			totalSpaceBytes,
 			freeSpaceFormatted,
 			accessible,
 			lastCheckedAt: row.lastCheckedAt ?? undefined,

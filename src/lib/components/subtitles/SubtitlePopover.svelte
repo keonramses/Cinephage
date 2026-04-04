@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { RefreshCw, Trash2, Search, Subtitles, Loader2, Clock3 } from 'lucide-svelte';
+	import { RefreshCw, Trash2, Search, Captions, CaptionsOff, Loader2, Clock3 } from 'lucide-svelte';
 	import SubtitleBadge from './SubtitleBadge.svelte';
 	import SubtitleSyncBadge from './SubtitleSyncBadge.svelte';
 
@@ -75,13 +75,13 @@
 		<!-- No subtitles at all -->
 		<div class="space-y-3">
 			<div class="py-2 text-center text-sm text-base-content/50">
-				<Subtitles size={20} class="mx-auto mb-1 text-base-content/30" />
+				<CaptionsOff size={20} class="mx-auto mb-1 text-base-content/30" />
 				No subtitles
 			</div>
 			<div class="flex gap-2">
 				{#if onAutoSearch}
 					<button class="btn flex-1 gap-1 btn-xs btn-primary" onclick={onAutoSearch}>
-						<Subtitles size={12} />
+						<Captions size={12} />
 						Auto-download
 					</button>
 				{/if}
@@ -188,7 +188,7 @@
 				<div class="flex gap-2">
 					{#if onAutoSearch}
 						<button class="btn flex-1 gap-1 btn-ghost btn-xs" onclick={onAutoSearch}>
-							<Subtitles size={12} />
+							<Captions size={12} />
 							Auto-download
 						</button>
 					{/if}

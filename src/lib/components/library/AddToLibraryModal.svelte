@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { X, Loader2, Search } from 'lucide-svelte';
 	import { toasts } from '$lib/stores/toast.svelte';
-	import { SvelteSet } from 'svelte/reactivity';
+	import { SvelteMap, SvelteSet } from 'svelte/reactivity';
 	import ModalWrapper from '$lib/components/ui/modal/ModalWrapper.svelte';
 	import CommonOptions from './add/CommonOptions.svelte';
 	import { sortRootFoldersForMediaType } from '$lib/utils/root-folders.js';
@@ -142,7 +142,7 @@
 		sortRootFoldersForMediaType(rootFolders, mediaType, requiredMediaSubType)
 	);
 	const rootFolderLibraryMap = $derived.by(() => {
-		const assignments = new Map<string, LibraryEntity>();
+		const assignments = new SvelteMap<string, LibraryEntity>();
 		for (const library of libraries) {
 			for (const rootFolder of library.rootFolders ?? []) {
 				assignments.set(rootFolder.id, library);

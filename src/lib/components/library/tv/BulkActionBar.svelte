@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { X, Download, Loader2, Subtitles, RefreshCw } from 'lucide-svelte';
+	import { X, Download, Loader2, Captions, RefreshCw } from 'lucide-svelte';
 	import * as m from '$lib/paraglide/messages.js';
 
 	interface Props {
@@ -58,7 +58,7 @@
 							<Loader2 size={16} class="animate-spin" />
 							{m.common_downloading()}
 						{:else}
-							<Subtitles size={16} />
+							<Captions size={16} />
 							<span class="hidden sm:inline">{m.library_bulkActionBar_autoDownloadSubs()}</span>
 							<span class="sm:hidden">{m.library_bulkActionBar_subsShort()}</span>
 						{/if}

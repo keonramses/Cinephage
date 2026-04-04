@@ -435,13 +435,23 @@
 
 			if (!response.ok) {
 				const payload = await readResponsePayload<Record<string, unknown>>(response);
-				throw new Error(getResponseErrorMessage(payload, 'Failed to save anime subtype setting'));
+				throw new Error(
+					getResponseErrorMessage(payload, m.settings_general_failedToSaveAnimeSubtypeSetting())
+				);
 			}
 
-			toasts.success(`Anime root folder enforcement ${enabled ? 'enabled' : 'disabled'}`);
+			toasts.success(
+				enabled
+					? m.settings_general_animeRootEnforcementEnabled()
+					: m.settings_general_animeRootEnforcementDisabled()
+			);
 		} catch (error) {
 			enforceAnimeSubtype = previous;
-			toasts.error(error instanceof Error ? error.message : 'Failed to save anime subtype setting');
+			toasts.error(
+				error instanceof Error
+					? error.message
+					: m.settings_general_failedToSaveAnimeSubtypeSetting()
+			);
 		} finally {
 			savingAnimeSubtype = false;
 		}
@@ -477,6 +487,18 @@
 			defaultWantsSubtitles: library.defaultWantsSubtitles
 		};
 		libraryModalOpen = true;
+	}
+
+	function openEditLibraryModalById(libraryId: string) {
+		const library = data.libraries.find((item) => item.id === libraryId);
+		if (!library) return;
+		openEditLibraryModal(library as LibraryEntity);
+	}
+
+	function openEditFolderModalById(folderId: string) {
+		const folder = data.rootFolders.find((item) => item.id === folderId);
+		if (!folder) return;
+		openEditFolderModal(folder);
 	}
 
 	function closeLibraryModal() {
@@ -518,15 +540,23 @@
 			const payload = await readResponsePayload<Record<string, unknown>>(response);
 
 			if (!response.ok) {
-				librarySaveError = getResponseErrorMessage(payload, 'Failed to save library');
+				librarySaveError = getResponseErrorMessage(
+					payload,
+					m.settings_general_failedToSaveLibrary()
+				);
 				return;
 			}
 
 			await invalidateAll();
 			closeLibraryModal();
-			toasts.success(`Library ${libraryModalMode === 'add' ? 'created' : 'updated'}`);
+			toasts.success(
+				libraryModalMode === 'add'
+					? m.settings_general_libraryCreated()
+					: m.settings_general_libraryUpdated()
+			);
 		} catch (error) {
-			librarySaveError = error instanceof Error ? error.message : 'Failed to save library';
+			librarySaveError =
+				error instanceof Error ? error.message : m.settings_general_failedToSaveLibrary();
 		} finally {
 			librarySaving = false;
 		}
@@ -568,23 +598,27 @@
 			const payload = await readResponsePayload<Record<string, unknown>>(response);
 
 			if (!response.ok) {
-				throw new Error(getResponseErrorMessage(payload, 'Failed to delete library'));
+				throw new Error(
+					getResponseErrorMessage(payload, m.settings_general_failedToDeleteLibrary())
+				);
 			}
 
 			await invalidateAll();
 			closeLibraryDeleteModal();
-			toasts.success('Library deleted');
+			toasts.success(m.settings_general_libraryDeleted());
 		} catch (error) {
-			toasts.error(error instanceof Error ? error.message : 'Failed to delete library');
+			toasts.error(
+				error instanceof Error ? error.message : m.settings_general_failedToDeleteLibrary()
+			);
 		} finally {
 			deleteLibraryLoading = false;
 		}
 	}
 
 	const activeTabActionLabel = $derived.by(() => {
-		if (activeTab === 'libraries') return 'Create library';
+		if (activeTab === 'libraries') return m.settings_general_addLibrary();
 		if (activeTab === 'rootFolders') return m.settings_general_addFolder();
-		return 'Run library scan';
+		return m.settings_general_runLibraryScan();
 	});
 
 	function handleActiveTabAction() {
@@ -601,10 +635,10 @@
 </script>
 
 <svelte:head>
-	<title>Library & Storage</title>
+	<title>{m.settings_general_heading()}</title>
 </svelte:head>
 
-<SettingsPage title="Library & Storage" subtitle="Manage libraries, root folders, and storage.">
+<SettingsPage title={m.settings_general_heading()} subtitle={m.settings_general_subtitle()}>
 	<div class="overflow-x-auto">
 		<div role="tablist" class="tabs-boxed tabs inline-flex min-w-max flex-nowrap">
 			<button
@@ -615,7 +649,7 @@
 				onclick={() => void setTab('libraries')}
 			>
 				<Library class="h-4 w-4" />
-				Libraries
+				{m.settings_general_tabLibraries()}
 			</button>
 			<button
 				type="button"
@@ -625,7 +659,7 @@
 				onclick={() => void setTab('rootFolders')}
 			>
 				<FolderOpen class="h-4 w-4" />
-				Root Folders
+				{m.settings_general_tabRootFolders()}
 			</button>
 			<button
 				type="button"
@@ -635,15 +669,15 @@
 				onclick={() => void setTab('maintenance')}
 			>
 				<Settings class="h-4 w-4" />
-				Storage Maintenance
+				{m.settings_general_tabMaintenance()}
 			</button>
 		</div>
 	</div>
 
 	{#if activeTab === 'libraries'}
 		<SettingsSection
-			title="Libraries"
-			description="Create Movie and TV libraries, and attach root folders."
+			title={m.settings_general_librariesTitle()}
+			description={m.settings_general_librariesDescription()}
 			variant="flat"
 		>
 			{#snippet actions()}
@@ -663,8 +697,8 @@
 		</SettingsSection>
 	{:else if activeTab === 'rootFolders'}
 		<SettingsSection
-			title="Root Folders"
-			description="Configure media library folders where content will be organized."
+			title={m.settings_general_rootFoldersTitle()}
+			description={m.settings_general_rootFoldersDescription()}
 			variant="flat"
 		>
 			{#snippet actions()}
@@ -706,8 +740,8 @@
 		</SettingsSection>
 	{:else}
 		<SettingsSection
-			title="Storage Maintenance"
-			description="Review scan progress, storage totals, and library or root-folder usage."
+			title={m.settings_general_maintenanceTitle()}
+			description={m.settings_general_maintenanceDescription()}
 			variant="flat"
 		>
 			{#snippet actions()}
@@ -728,12 +762,17 @@
 
 			<StorageMaintenanceSection
 				storage={data.storage}
+				libraries={data.libraries}
+				rootFolders={data.rootFolders}
 				rootFolderCount={data.rootFolders.length}
 				{scanning}
 				{scanProgress}
 				{scanError}
 				{scanSuccess}
 				{formatBytes}
+				onEditLibrary={openEditLibraryModalById}
+				onEditRootFolder={openEditFolderModalById}
+				onScanRootFolder={triggerLibraryScan}
 			/>
 		</SettingsSection>
 	{/if}
@@ -780,22 +819,20 @@
 
 			{#if deleteLibraryTargetOption?.selectionMode === 'system'}
 				<div class="rounded-lg border border-base-300 bg-base-200 p-3 text-sm text-base-content/80">
-					Attached root folders will be moved to <strong
-						>{deleteLibraryTargetOption.targetLibraryName}</strong
-					>.
+					{m.settings_general_attachedRootFoldersWillMoveTo()}
+					<strong>{deleteLibraryTargetOption.targetLibraryName}</strong>.
 				</div>
 			{:else if deleteLibraryTargetOption?.selectionMode === 'choose-custom'}
 				<div class="space-y-3">
 					<div
 						class="rounded-lg border border-base-300 bg-base-200 p-3 text-sm text-base-content/80"
 					>
-						By default, attached root folders will be moved to <strong
-							>{deleteLibraryTargetOption.targetLibraryName}</strong
-						>.
+						{m.settings_general_attachedRootFoldersDefaultMoveTo()}
+						<strong>{deleteLibraryTargetOption.targetLibraryName}</strong>.
 					</div>
 					<div class="space-y-2">
 						<p class="text-sm text-base-content/80">
-							Optional: choose a different compatible custom library.
+							{m.settings_general_optionalChooseCompatibleLibrary()}
 						</p>
 						<select
 							class="select-bordered select w-full"
@@ -840,7 +877,9 @@
 		labelledBy="library-edit-modal-title"
 	>
 		<ModalHeader
-			title={libraryModalMode === 'add' ? 'Create Library' : 'Edit Library'}
+			title={libraryModalMode === 'add'
+				? m.settings_general_libraryModalCreateTitle()
+				: m.settings_general_libraryModalEditPlainTitle()}
 			onClose={closeLibraryModal}
 		/>
 		<div class="space-y-4">
@@ -854,7 +893,7 @@
 			<div class="grid gap-4 md:grid-cols-2">
 				<div class="form-control">
 					<label class="label py-1" for="library-name">
-						<span class="label-text">Library name</span>
+						<span class="label-text">{m.settings_general_libraryName()}</span>
 					</label>
 					<input
 						id="library-name"
@@ -866,7 +905,7 @@
 
 				<div class="form-control">
 					<label class="label py-1" for="library-media-type">
-						<span class="label-text">Media type</span>
+						<span class="label-text">{m.settings_general_mediaType()}</span>
 					</label>
 					<select
 						id="library-media-type"
@@ -874,14 +913,14 @@
 						bind:value={libraryForm.mediaType}
 						disabled={editingLibraryIsSystem}
 					>
-						<option value="movie">Movies</option>
-						<option value="tv">TV</option>
+						<option value="movie">{m.rootFolders_movies()}</option>
+						<option value="tv">{m.rootFolders_tvShows()}</option>
 					</select>
 				</div>
 
 				<div class="form-control">
 					<label class="label py-1" for="library-classification">
-						<span class="label-text">Classification</span>
+						<span class="label-text">{m.settings_general_classification()}</span>
 					</label>
 					<select
 						id="library-classification"
@@ -889,8 +928,8 @@
 						bind:value={libraryForm.mediaSubType}
 						disabled={editingLibraryIsSystem}
 					>
-						<option value="standard">Standard</option>
-						<option value="anime">Anime</option>
+						<option value="standard">{m.settings_general_standard()}</option>
+						<option value="anime">{m.settings_general_badgeAnime()}</option>
 					</select>
 				</div>
 
@@ -899,14 +938,15 @@
 						<div class="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
 							<div class="space-y-1">
 								<div class="flex items-center gap-2">
-									<span class="text-sm font-medium text-base-content">Root Folders</span>
+									<span class="text-sm font-medium text-base-content"
+										>{m.settings_general_rootFoldersLabel()}</span
+									>
 									<span class="badge badge-ghost badge-sm">
-										{selectedLibraryRootFolderCount} selected
+										{m.settings_general_selectedCount({ count: selectedLibraryRootFolderCount })}
 									</span>
 								</div>
 								<p class="text-xs text-base-content/60">
-									Attach the root folders this library can use. Each root folder can belong to only
-									one library at a time.
+									{m.settings_general_rootFoldersHelper()}
 								</p>
 							</div>
 						</div>
@@ -923,7 +963,9 @@
 								</div>
 							{:else}
 								<div class="rounded-lg bg-base-200 px-3 py-2 text-sm text-base-content/70">
-									{selectedLibraryRootFolderCount} root folders selected
+									{m.settings_general_rootFoldersSelected({
+										count: selectedLibraryRootFolderCount
+									})}
 								</div>
 							{/if}
 						{/if}
@@ -935,10 +977,20 @@
 								>
 									<AlertCircle class="mt-0.5 h-4 w-4 shrink-0 text-base-content/50" />
 									<div class="space-y-1 text-sm text-base-content/70">
-										<div class="font-medium text-base-content">No matching root folders</div>
+										<div class="font-medium text-base-content">
+											{m.settings_general_noMatchingRootFolders()}
+										</div>
 										<div>
-											Create a {libraryForm.mediaSubType === 'anime' ? 'anime' : 'standard'}
-											{libraryForm.mediaType === 'movie' ? 'movie' : 'TV'} root folder to attach it here.
+											{m.settings_general_createCompatibleRootFolder({
+												classification:
+													libraryForm.mediaSubType === 'anime'
+														? m.settings_general_badgeAnime()
+														: m.settings_general_standard().toLowerCase(),
+												mediaType:
+													libraryForm.mediaType === 'movie'
+														? m.rootFolders_movies().toLowerCase()
+														: m.settings_general_tv().toLowerCase()
+											})}
 										</div>
 									</div>
 								</div>
@@ -966,7 +1018,7 @@
 											<div class="flex flex-wrap items-center justify-between gap-2">
 												<span class="font-medium text-base-content">{folder.name}</span>
 												{#if selectedLibraryRootFolderIds.has(folder.id)}
-													<span class="badge badge-sm badge-primary">Selected</span>
+													<span class="badge badge-sm badge-primary">{m.action_select()}</span>
 												{/if}
 											</div>
 											<div class="truncate text-xs text-base-content/60">{folder.path}</div>
@@ -988,7 +1040,7 @@
 						class="checkbox shrink-0 checkbox-sm checkbox-primary"
 						bind:checked={libraryForm.defaultMonitored}
 					/>
-					<span class="label-text text-base-content">Monitor by default</span>
+					<span class="label-text text-base-content">{m.settings_general_monitorByDefault()}</span>
 				</label>
 				<label
 					class="label cursor-pointer justify-start gap-3 rounded-lg border border-base-300 p-3"
@@ -998,7 +1050,7 @@
 						class="checkbox shrink-0 checkbox-sm checkbox-primary"
 						bind:checked={libraryForm.defaultSearchOnAdd}
 					/>
-					<span class="label-text text-base-content">Search on add</span>
+					<span class="label-text text-base-content">{m.settings_general_searchOnAddLabel()}</span>
 				</label>
 				<label
 					class="label cursor-pointer justify-start gap-3 rounded-lg border border-base-300 p-3"
@@ -1008,7 +1060,7 @@
 						class="checkbox shrink-0 checkbox-sm checkbox-primary"
 						bind:checked={libraryForm.defaultWantsSubtitles}
 					/>
-					<span class="label-text text-base-content">Want subtitles</span>
+					<span class="label-text text-base-content">{m.settings_general_wantSubtitles()}</span>
 				</label>
 			</div>
 		</div>
@@ -1017,7 +1069,7 @@
 			onCancel={closeLibraryModal}
 			onSave={saveLibrary}
 			saving={librarySaving}
-			saveLabel="Save library"
+			saveLabel={m.settings_general_saveLibrary()}
 		/>
 	</ModalWrapper>
 {/if}

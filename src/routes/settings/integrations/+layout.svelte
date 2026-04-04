@@ -5,7 +5,7 @@
 		Database,
 		Download,
 		Server,
-		Subtitles,
+		Captions,
 		Languages,
 		Monitor,
 		Archive,
@@ -35,7 +35,7 @@
 		{
 			href: '/settings/integrations/subtitle-providers',
 			label: m.nav_subtitleProviders(),
-			icon: Subtitles
+			icon: Captions
 		},
 		{
 			href: '/settings/integrations/language-profiles',
