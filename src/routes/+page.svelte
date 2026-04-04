@@ -225,6 +225,22 @@
 		return Boolean(activity.seriesId || activity.mediaId);
 	}
 
+	function getCompactProgressLabel(activity: UnifiedActivity): string | null {
+		if (!activity.statusReason) {
+			return null;
+		}
+
+		if (activity.status === 'failed') {
+			return m.status_error();
+		}
+
+		if (activity.status === 'search_error') {
+			return m.status_searchError();
+		}
+
+		return activity.statusReason;
+	}
+
 	function formatBytes(bytes: number): string {
 		if (bytes === 0) return '0 B';
 		const units = ['B', 'KB', 'MB', 'GB', 'TB', 'PB'];
@@ -892,12 +908,12 @@
 													value={activity.downloadProgress}
 													max="100"
 												></progress>
-											{:else if activity.statusReason}
+											{:else if getCompactProgressLabel(activity)}
 												<span
 													class="max-w-16 truncate text-xs text-base-content/50"
 													title={activity.statusReason}
 												>
-													{activity.statusReason}
+													{getCompactProgressLabel(activity)}
 												</span>
 											{:else}
 												<span class="text-xs text-base-content/50">{config.label}</span>

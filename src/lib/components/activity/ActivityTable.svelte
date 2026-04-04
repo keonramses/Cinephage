@@ -28,6 +28,7 @@
 	import { createProgressiveRenderer } from '$lib/utils/progressive-render.svelte.js';
 	import {
 		statusConfig,
+		getCompactProgressLabel,
 		getStatusLabel,
 		formatRelativeTime,
 		formatTimestamp,
@@ -735,12 +736,12 @@
 										max="100"
 									></progress>
 								</div>
-							{:else if activity.statusReason}
+							{:else if getCompactProgressLabel(activity)}
 								<span
 									class="max-w-32 truncate text-xs text-base-content/60"
 									title={activity.statusReason}
 								>
-									{activity.statusReason}
+									{getCompactProgressLabel(activity)}
 								</span>
 							{:else}
 								<span class="text-sm">{getStatusLabel(activity, config.label)}</span>

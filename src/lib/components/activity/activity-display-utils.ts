@@ -82,6 +82,29 @@ export function getStatusLabel(activity: UnifiedActivity, fallbackLabel?: string
 }
 
 /**
+ * Compact progress-cell text for table layouts.
+ *
+ * Failed queue items may carry very long client error messages which do not fit
+ * well in summary tables. In those cases we surface a short status label and
+ * leave the full reason for the expanded detail view / tooltip.
+ */
+export function getCompactProgressLabel(activity: UnifiedActivity): string | null {
+	if (!activity.statusReason) {
+		return null;
+	}
+
+	if (activity.status === 'failed') {
+		return m.status_error();
+	}
+
+	if (activity.status === 'search_error') {
+		return m.status_searchError();
+	}
+
+	return activity.statusReason;
+}
+
+/**
  * Human-readable relative timestamp ("3m ago", "2d ago", etc.).
  *
  * Returns `'-'` when `dateStr` is null/undefined so callers don't need to
