@@ -10,7 +10,7 @@
  */
 
 import { db } from '$lib/server/db/index.js';
-import { rootFolders, languageProfiles } from '$lib/server/db/schema.js';
+import { rootFolders, languageProfiles, scoringProfiles } from '$lib/server/db/schema.js';
 import { eq } from 'drizzle-orm';
 import { tmdb } from '$lib/server/tmdb.js';
 import { qualityFilter } from '$lib/server/quality/index.js';
@@ -108,7 +108,23 @@ export async function getAnimeSubtypeEnforcement(): Promise<boolean> {
  * Get the effective scoring profile ID (provided or default)
  */
 export async function getEffectiveScoringProfileId(providedProfileId?: string): Promise<string> {
+	// Ensure built-in profiles exist as valid FK targets before resolving the final profile ID.
+	await qualityFilter.seedDefaultScoringProfiles();
+
 	if (providedProfileId) {
+		const existingProfile = await db
+			.select({ id: scoringProfiles.id })
+			.from(scoringProfiles)
+			.where(eq(scoringProfiles.id, providedProfileId))
+			.limit(1)
+			.get();
+
+		if (!existingProfile) {
+			throw new ValidationError('Selected quality profile is no longer valid. Refresh and try again.', {
+				scoringProfileId: providedProfileId
+			});
+		}
+
 		return providedProfileId;
 	}
 
