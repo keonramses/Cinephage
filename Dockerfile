@@ -20,6 +20,8 @@ RUN npm ci
 COPY src ./src
 COPY static ./static
 COPY data ./data
+COPY messages ./messages
+COPY project.inlang ./project.inlang
 COPY scripts/fix-tv-subtitle-paths.js ./scripts/fix-tv-subtitle-paths.js
 COPY server.js svelte.config.js tsconfig.json vite.config.ts ./
 
