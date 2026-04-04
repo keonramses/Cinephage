@@ -19,7 +19,6 @@
 		error?: string | null;
 		onClose: () => void;
 		onSave: (data: RootFolderFormData) => void;
-		onDelete?: () => void;
 		onValidatePath: (
 			path: string,
 			readOnly?: boolean,

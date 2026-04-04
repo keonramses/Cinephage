@@ -211,13 +211,13 @@
 
 	$effect(() => {
 		if (activeTab === 'maintenance' || !$page.url.hash) return;
-		const url = new URL($page.url);
+		const url = new SvelteURL($page.url);
 		url.hash = '';
 		goto(url.toString(), { replaceState: true, noScroll: true, keepFocus: true });
 	});
 
 	function setTab(tab: TabId) {
-		const url = new URL($page.url);
+		const url = new SvelteURL($page.url);
 		url.searchParams.set('tab', tab);
 		if (tab !== 'maintenance') {
 			url.hash = '';
