@@ -875,7 +875,12 @@ export class RenamePreviewService {
 
 	private async recalculateSeriesEpisodeCounts(seriesId: string): Promise<void> {
 		const allEpisodes = db.select().from(episodes).where(eq(episodes.seriesId, seriesId)).all();
-		const regularEpisodes = allEpisodes.filter((episode) => episode.seasonNumber !== 0);
+
+		const today = new Date().toISOString().split('T')[0];
+		const isAired = (ep: typeof episodes.$inferSelect) =>
+			Boolean(ep.airDate && ep.airDate !== '' && ep.airDate <= today);
+
+		const regularEpisodes = allEpisodes.filter((e) => e.seasonNumber !== 0 && isAired(e));
 		const regularEpisodesWithFiles = regularEpisodes.filter((episode) => episode.hasFile);
 
 		db.update(series)
@@ -888,6 +893,7 @@ export class RenamePreviewService {
 
 		const seasonCounts = new Map<number, { total: number; withFiles: number }>();
 		for (const episode of allEpisodes) {
+			if (!isAired(episode)) continue;
 			const existing = seasonCounts.get(episode.seasonNumber) ?? { total: 0, withFiles: 0 };
 			existing.total += 1;
 			if (episode.hasFile) {

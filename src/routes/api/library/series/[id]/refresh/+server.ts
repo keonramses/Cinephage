@@ -235,17 +235,22 @@ export const POST: RequestHandler = async ({ params, request }) => {
 				// Update series episode counts (include specials if monitorSpecials is enabled)
 				const allEpisodes = await db.select().from(episodes).where(eq(episodes.seriesId, id));
 				const monitorSpecials = seriesData.monitorSpecials ?? false;
-				const episodesForStats = monitorSpecials
-					? allEpisodes
-					: allEpisodes.filter((e) => e.seasonNumber !== 0);
+				const today = new Date().toISOString().split('T')[0];
+				const isAired = (episode: typeof episodes.$inferSelect) =>
+					episode.airDate && episode.airDate !== '' && episode.airDate <= today;
+
+				const episodesForStats = allEpisodes.filter(
+					(e) => isAired(e) && (monitorSpecials || e.seasonNumber !== 0)
+				);
 				const episodeCount = episodesForStats.length;
 				const episodeFileCount = episodesForStats.filter((e) => e.hasFile).length;
 
 				await db.update(series).set({ episodeCount, episodeFileCount }).where(eq(series.id, id));
 
-				// Update each season's episode counts
+				// Update each season's episode counts (only aired episodes)
 				const seasonEpisodeCounts = new Map<string, { total: number; withFiles: number }>();
 				for (const ep of allEpisodes) {
+					if (!isAired(ep)) continue;
 					if (ep.seasonId) {
 						const current = seasonEpisodeCounts.get(ep.seasonId) || { total: 0, withFiles: 0 };
 						current.total++;

@@ -711,7 +711,7 @@ class CascadingSearchStrategy {
 	}
 
 	/**
-	 * Get total episode counts for multiple seasons
+	 * Get total episode counts for multiple seasons (aired episodes only)
 	 */
 	private async getSeasonTotalCounts(
 		seriesId: string,
@@ -721,12 +721,17 @@ class CascadingSearchStrategy {
 
 		if (seasonNumbers.length === 0) return counts;
 
+		const today = new Date().toISOString().split('T')[0];
+		const isAired = (ep: { airDate: string | null }) =>
+			Boolean(ep.airDate && ep.airDate !== '' && ep.airDate <= today);
+
 		const allEpisodes = await db.query.episodes.findMany({
 			where: and(eq(episodes.seriesId, seriesId), inArray(episodes.seasonNumber, seasonNumbers)),
-			columns: { seasonNumber: true }
+			columns: { seasonNumber: true, airDate: true }
 		});
 
 		for (const ep of allEpisodes) {
+			if (!isAired(ep)) continue;
 			counts.set(ep.seasonNumber, (counts.get(ep.seasonNumber) || 0) + 1);
 		}
 
@@ -734,14 +739,18 @@ class CascadingSearchStrategy {
 	}
 
 	/**
-	 * Get total episode count for a single season
+	 * Get total episode count for a single season (aired episodes only)
 	 */
 	private async getSeasonTotalCount(seriesId: string, seasonNumber: number): Promise<number> {
+		const today = new Date().toISOString().split('T')[0];
+		const isAired = (ep: { airDate: string | null }) =>
+			Boolean(ep.airDate && ep.airDate !== '' && ep.airDate <= today);
+
 		const seasonEpisodes = await db.query.episodes.findMany({
 			where: and(eq(episodes.seriesId, seriesId), eq(episodes.seasonNumber, seasonNumber)),
-			columns: { id: true }
+			columns: { id: true, airDate: true }
 		});
-		return seasonEpisodes.length;
+		return seasonEpisodes.filter(isAired).length;
 	}
 
 	/**

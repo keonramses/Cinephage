@@ -1665,14 +1665,12 @@ export class SmartListService {
 			const seriesDetails = await tmdb.getTVShow(tmdbId);
 			if (!seriesDetails.seasons) return;
 
-			let totalEpisodes = 0;
-
 			for (const seasonInfo of seriesDetails.seasons) {
 				// Skip specials (season 0) by default
 				const isSpecials = seasonInfo.season_number === 0;
 				const seasonMonitored = monitored && !isSpecials;
 
-				// Create season
+				// Create season (episodeCount will be recalculated after episodes are inserted)
 				const [newSeason] = await db
 					.insert(seasons)
 					.values({
@@ -1682,7 +1680,7 @@ export class SmartListService {
 						overview: seasonInfo.overview ?? null,
 						posterPath: seasonInfo.poster_path ?? null,
 						airDate: seasonInfo.air_date ?? null,
-						episodeCount: seasonInfo.episode_count ?? 0,
+						episodeCount: 0, // Will be recalculated to only aired episodes
 						monitored: seasonMonitored
 					})
 					.returning();
@@ -1707,7 +1705,18 @@ export class SmartListService {
 
 						if (episodesToInsert.length > 0) {
 							await db.insert(episodes).values(episodesToInsert);
-							totalEpisodes += episodesToInsert.length;
+							// Only count aired episodes (exclude specials and unaired)
+							const today = new Date().toISOString().split('T')[0];
+							const airedCount = episodesToInsert.filter(
+								(ep) =>
+									ep.seasonNumber !== 0 && ep.airDate && ep.airDate !== '' && ep.airDate <= today
+							).length;
+
+							// Update season episodeCount to only aired episodes
+							await db
+								.update(seasons)
+								.set({ episodeCount: airedCount })
+								.where(eq(seasons.id, newSeason.id));
 						}
 					}
 				} catch (_err) {
@@ -1721,11 +1730,21 @@ export class SmartListService {
 				}
 			}
 
-			// Update series episode count
+			// Update series episode count (only count aired episodes)
+			const today = new Date().toISOString().split('T')[0];
+			const isAired = (ep: typeof episodes.$inferSelect) =>
+				Boolean(ep.airDate && ep.airDate !== '' && ep.airDate <= today);
+
+			const allSeriesEpisodes = await db
+				.select()
+				.from(episodes)
+				.where(eq(episodes.seriesId, seriesId));
+			const airedEpisodes = allSeriesEpisodes.filter((e) => e.seasonNumber !== 0 && isAired(e));
+
 			await db
 				.update(series)
 				.set({
-					episodeCount: totalEpisodes
+					episodeCount: airedEpisodes.length
 				})
 				.where(eq(series.id, seriesId));
 		} catch (error) {

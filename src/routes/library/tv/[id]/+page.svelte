@@ -25,6 +25,7 @@
 	import { getPrimaryAutoSearchIssue } from '$lib/utils/autoSearchIssues';
 	import { layoutState, deriveMobileSseStatus } from '$lib/layout.svelte';
 	import * as m from '$lib/paraglide/messages.js';
+	import { calculateEpisodeStats } from '$lib/utils/episode-stats.svelte';
 
 	let { data }: { data: PageData } = $props();
 
@@ -54,14 +55,14 @@
 
 	function computeSeriesEpisodeStats(seasonList: PageData['seasons']) {
 		const regularSeasons = seasonList.filter((season) => season.seasonNumber > 0);
-		const totalEpisodes = regularSeasons.reduce((sum, season) => sum + season.episodes.length, 0);
-		const totalFiles = regularSeasons.reduce(
-			(sum, season) => sum + season.episodes.filter((episode) => episode.file !== null).length,
-			0
-		);
-		const percentComplete = totalEpisodes > 0 ? Math.round((totalFiles / totalEpisodes) * 100) : 0;
+		const allEpisodes = regularSeasons.flatMap((season) => season.episodes);
+		const stats = calculateEpisodeStats(allEpisodes);
 
-		return { totalEpisodes, totalFiles, percentComplete };
+		return {
+			totalEpisodes: stats.totalAired,
+			totalFiles: stats.downloaded,
+			percentComplete: stats.percentComplete
+		};
 	}
 
 	// Keep series completion counters aligned with the actual episode rows shown in seasons.

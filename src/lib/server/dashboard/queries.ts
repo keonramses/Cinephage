@@ -279,7 +279,8 @@ export async function getRecentlyAdded() {
 				db
 					.select({
 						id: episodes.id,
-						seriesId: episodes.seriesId
+						seriesId: episodes.seriesId,
+						airDate: episodes.airDate
 					})
 					.from(episodes)
 					.where(
@@ -312,11 +313,14 @@ export async function getRecentlyAdded() {
 					.groupBy(episodes.seriesId)
 			]);
 
+			const isAired = (ep: { airDate: string | null }) =>
+				Boolean(ep.airDate && ep.airDate !== '' && ep.airDate <= today);
+
 			const recentEpisodeIdToSeries = new Map(
-				recentRegularEpisodes.map((ep) => [ep.id, ep.seriesId])
+				recentRegularEpisodes.filter(isAired).map((ep) => [ep.id, ep.seriesId])
 			);
 			const recentEpisodeTotals = new Map<string, number>();
-			for (const episode of recentRegularEpisodes) {
+			for (const episode of recentRegularEpisodes.filter(isAired)) {
 				recentEpisodeTotals.set(
 					episode.seriesId,
 					(recentEpisodeTotals.get(episode.seriesId) ?? 0) + 1

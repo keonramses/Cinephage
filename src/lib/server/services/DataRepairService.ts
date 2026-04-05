@@ -273,8 +273,13 @@ export class DataRepairService implements BackgroundService {
 			// Update series episode counts
 			const allEpisodes = await db.select().from(episodes).where(eq(episodes.seriesId, seriesId));
 
-			const regularEpisodes = allEpisodes.filter((e) => e.seasonNumber !== 0);
-			const episodesWithFiles = allEpisodes.filter((e) => e.hasFile);
+			const today = new Date().toISOString().split('T')[0];
+			const isAired = (ep: typeof episodes.$inferSelect) =>
+				Boolean(ep.airDate && ep.airDate !== '' && ep.airDate <= today);
+
+			// Filter to regular (non-specials) AND aired episodes
+			const regularEpisodes = allEpisodes.filter((e) => e.seasonNumber !== 0 && isAired(e));
+			const episodesWithFiles = regularEpisodes.filter((e) => e.hasFile);
 
 			await db
 				.update(series)
@@ -284,16 +289,20 @@ export class DataRepairService implements BackgroundService {
 				})
 				.where(eq(series.id, seriesId));
 
-			// Update season episode file counts
+			// Update season episode counts (only aired episodes)
 			const allSeasons = await db.select().from(seasons).where(eq(seasons.seriesId, seriesId));
 
 			for (const season of allSeasons) {
-				const seasonEpisodesWithFiles = allEpisodes.filter(
-					(e) => e.seasonId === season.id && e.hasFile
+				const seasonAiredEpisodes = allEpisodes.filter(
+					(e) => e.seasonId === season.id && isAired(e)
 				);
+				const seasonEpisodesWithFiles = seasonAiredEpisodes.filter((e) => e.hasFile);
 				await db
 					.update(seasons)
-					.set({ episodeFileCount: seasonEpisodesWithFiles.length })
+					.set({
+						episodeCount: seasonAiredEpisodes.length,
+						episodeFileCount: seasonEpisodesWithFiles.length
+					})
 					.where(eq(seasons.id, season.id));
 			}
 

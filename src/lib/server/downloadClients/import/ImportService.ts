@@ -2184,8 +2184,12 @@ export class ImportService extends EventEmitter {
 		// Get all episodes for this series
 		const allEpisodes = await db.select().from(episodes).where(eq(episodes.seriesId, seriesId));
 
-		// Exclude specials (season 0) from series-level counts
-		const regularEpisodes = allEpisodes.filter((ep) => ep.seasonNumber !== 0);
+		const today = new Date().toISOString().split('T')[0];
+		const isAired = (ep: typeof episodes.$inferSelect) =>
+			Boolean(ep.airDate && ep.airDate !== '' && ep.airDate <= today);
+
+		// Exclude specials (season 0) and unaired episodes from series-level counts
+		const regularEpisodes = allEpisodes.filter((ep) => ep.seasonNumber !== 0 && isAired(ep));
 		const regularEpisodesWithFiles = regularEpisodes.filter((ep) => ep.hasFile);
 
 		// Update series counts
@@ -2197,9 +2201,10 @@ export class ImportService extends EventEmitter {
 			})
 			.where(eq(series.id, seriesId));
 
-		// Group by season and update each season's counts
+		// Group by season and update each season's counts (only aired episodes)
 		const seasonMap = new Map<number, { total: number; withFiles: number }>();
 		for (const ep of allEpisodes) {
+			if (!isAired(ep)) continue;
 			const stats = seasonMap.get(ep.seasonNumber) || { total: 0, withFiles: 0 };
 			stats.total++;
 			if (ep.hasFile) {

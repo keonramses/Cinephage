@@ -1167,12 +1167,15 @@ export class MediaMatcherService {
 	}
 
 	/**
-	 * Update episode counts for a series (excluding specials/season 0)
+	 * Update episode counts for a series (excluding specials/season 0 and unaired episodes)
 	 */
 	private async updateSeriesStats(seriesId: string): Promise<void> {
 		const allEpisodes = await db.select().from(episodes).where(eq(episodes.seriesId, seriesId));
-		const regularEpisodes = allEpisodes.filter((e) => e.seasonNumber !== 0);
+		const today = new Date().toISOString().split('T')[0];
+		const isAired = (ep: typeof episodes.$inferSelect) =>
+			Boolean(ep.airDate && ep.airDate !== '' && ep.airDate <= today);
 
+		const regularEpisodes = allEpisodes.filter((e) => e.seasonNumber !== 0 && isAired(e));
 		const episodeCount = regularEpisodes.length;
 		const episodeFileCount = regularEpisodes.filter((e) => e.hasFile).length;
 

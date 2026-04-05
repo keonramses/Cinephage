@@ -116,14 +116,20 @@ export const load: PageServerLoad = async ({ url }) => {
 				? await db
 						.select({
 							id: episodes.id,
-							seriesId: episodes.seriesId
+							seriesId: episodes.seriesId,
+							airDate: episodes.airDate
 						})
 						.from(episodes)
 						.where(and(inArray(episodes.seriesId, seriesIds), ne(episodes.seasonNumber, 0)))
 				: [];
-		const regularEpisodeIdToSeries = new Map(allRegularEpisodes.map((ep) => [ep.id, ep.seriesId]));
+		const today = new Date().toISOString().split('T')[0];
+		const isAired = (ep: { airDate: string | null }) =>
+			Boolean(ep.airDate && ep.airDate !== '' && ep.airDate <= today);
+		const regularEpisodeIdToSeries = new Map(
+			allRegularEpisodes.filter(isAired).map((ep) => [ep.id, ep.seriesId])
+		);
 		const episodeTotalsBySeries = new Map<string, number>();
-		for (const episode of allRegularEpisodes) {
+		for (const episode of allRegularEpisodes.filter(isAired)) {
 			episodeTotalsBySeries.set(
 				episode.seriesId,
 				(episodeTotalsBySeries.get(episode.seriesId) ?? 0) + 1

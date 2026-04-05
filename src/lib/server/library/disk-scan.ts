@@ -849,9 +849,13 @@ export class DiskScanService extends EventEmitter {
 			.where(eq(series.id, seriesId));
 		const monitorSpecials = seriesData?.monitorSpecials ?? false;
 
-		const episodesForStats = monitorSpecials
-			? allEpisodes
-			: allEpisodes.filter((episode) => episode.seasonNumber !== 0);
+		const today = new Date().toISOString().split('T')[0];
+		const isAired = (episode: typeof episodes.$inferSelect) =>
+			episode.airDate && episode.airDate !== '' && episode.airDate <= today;
+
+		const episodesForStats = allEpisodes.filter(
+			(episode) => isAired(episode) && (monitorSpecials || episode.seasonNumber !== 0)
+		);
 		const episodesWithFiles = episodesForStats.filter((episode) => episode.hasFile);
 
 		await db
@@ -864,6 +868,7 @@ export class DiskScanService extends EventEmitter {
 
 		const seasonMap = new Map<number, { total: number; withFiles: number }>();
 		for (const episode of allEpisodes) {
+			if (!isAired(episode)) continue;
 			const stats = seasonMap.get(episode.seasonNumber) || { total: 0, withFiles: 0 };
 			stats.total++;
 			if (episode.hasFile) stats.withFiles++;

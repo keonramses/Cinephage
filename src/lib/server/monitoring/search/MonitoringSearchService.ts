@@ -266,6 +266,7 @@ export class MonitoringSearchService {
 	/**
 	 * Pre-load episode counts for all seasons of given series IDs in a single query.
 	 * Call this at the start of a search operation to avoid N+1 queries.
+	 * Only counts aired episodes for accurate completion percentage calculation.
 	 */
 	private async preloadSeasonEpisodeCounts(seriesIds: string[]): Promise<void> {
 		if (seriesIds.length === 0) return;
@@ -280,18 +281,24 @@ export class MonitoringSearchService {
 			}
 		}
 
-		// Single query to get all season episode counts grouped by series and season
-		const counts = await db
+		const today = new Date().toISOString().split('T')[0];
+		const isAired = (ep: { airDate: string | null }) =>
+			Boolean(ep.airDate && ep.airDate !== '' && ep.airDate <= today);
+
+		// Single query to get all aired episode counts grouped by series and season
+		const allCounts = await db
 			.select({
 				seriesId: episodes.seriesId,
-				seasonNumber: episodes.seasonNumber
+				seasonNumber: episodes.seasonNumber,
+				airDate: episodes.airDate
 			})
 			.from(episodes)
 			.where(inArray(episodes.seriesId, seriesIds));
 
-		// Count episodes per series/season combination
+		// Count aired episodes per series/season combination
 		const countMap = new Map<string, number>();
-		for (const row of counts) {
+		for (const row of allCounts) {
+			if (!isAired(row)) continue;
 			const key = `${row.seriesId}-${row.seasonNumber}`;
 			countMap.set(key, (countMap.get(key) || 0) + 1);
 		}
@@ -321,6 +328,7 @@ export class MonitoringSearchService {
 	/**
 	 * Get the episode count for a specific season.
 	 * Uses cache if available, otherwise falls back to database query.
+	 * Only counts aired episodes for accurate completion percentage calculation.
 	 * Used for season pack size validation (per-episode size calculation)
 	 */
 	private async getSeasonEpisodeCount(seriesId: string, seasonNumber: number): Promise<number> {
@@ -332,13 +340,17 @@ export class MonitoringSearchService {
 			return cached;
 		}
 
+		const today = new Date().toISOString().split('T')[0];
+		const isAired = (ep: { airDate: string | null }) =>
+			Boolean(ep.airDate && ep.airDate !== '' && ep.airDate <= today);
+
 		// Fallback to database query (for cases where cache wasn't preloaded)
 		const seasonEpisodes = await db.query.episodes.findMany({
 			where: and(eq(episodes.seriesId, seriesId), eq(episodes.seasonNumber, seasonNumber)),
-			columns: { id: true }
+			columns: { id: true, airDate: true }
 		});
 
-		const count = seasonEpisodes.length;
+		const count = seasonEpisodes.filter(isAired).length;
 
 		// Cache for future calls in this operation
 		this.seasonEpisodeCountCache.set(cacheKey, count);

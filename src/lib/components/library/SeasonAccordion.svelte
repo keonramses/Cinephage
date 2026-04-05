@@ -14,6 +14,7 @@
 	import EpisodeRow from './EpisodeRow.svelte';
 	import AutoSearchStatus from './AutoSearchStatus.svelte';
 	import { formatBytes } from '$lib/utils/format.js';
+	import { calculateEpisodeStats } from '$lib/utils/episode-stats.svelte';
 	import * as m from '$lib/paraglide/messages.js';
 
 	interface Subtitle {
@@ -152,13 +153,10 @@
 	});
 
 	// Keep header counts aligned with visible rows (episodes array), not cached flags/aggregates.
-	const downloadedCount = $derived(
-		season.episodes.filter((episode) => episode.file !== null).length
-	);
-	const totalCount = $derived(season.episodes.length);
-	const percentComplete = $derived(
-		totalCount > 0 ? Math.round((downloadedCount / totalCount) * 100) : 0
-	);
+	const episodeStats = $derived(calculateEpisodeStats(season.episodes));
+	const downloadedCount = $derived(episodeStats.downloaded);
+	const totalCount = $derived(episodeStats.totalAired);
+	const percentComplete = $derived(episodeStats.percentComplete);
 
 	// Calculate cumulative season file size
 	const seasonSize = $derived(season.episodes.reduce((sum, ep) => sum + (ep.file?.size ?? 0), 0));
