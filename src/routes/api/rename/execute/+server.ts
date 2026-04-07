@@ -1,52 +1,23 @@
-/**
- * Rename Execute API
- *
- * POST /api/rename/execute
- * Execute approved file renames.
- */
-
 import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
 import { RenamePreviewService } from '$lib/server/library/naming/RenamePreviewService';
 import { logger } from '$lib/logging';
 import { requireAdmin } from '$lib/server/auth/authorization.js';
+import { parseBody } from '$lib/server/api/validate.js';
+import { z } from 'zod';
 
-interface ExecuteRequest {
-	fileIds: string[];
-	mediaType?: 'movie' | 'episode' | 'mixed';
-}
+const renameExecuteSchema = z.object({
+	fileIds: z.array(z.string()).min(1, 'fileIds array is required and must not be empty'),
+	mediaType: z.enum(['movie', 'episode', 'mixed']).optional().default('mixed')
+});
 
-/**
- * POST /api/rename/execute
- * Execute approved file renames
- *
- * Body:
- * {
- *   fileIds: string[] - Array of file IDs to rename
- *   mediaType?: 'movie' | 'episode' | 'mixed' - Type of files (default: 'mixed')
- * }
- */
 export const POST: RequestHandler = async (event) => {
 	const authError = requireAdmin(event);
 	if (authError) return authError;
 
 	const { request } = event;
 	try {
-		const body = (await request.json()) as ExecuteRequest;
-		const { fileIds, mediaType = 'mixed' } = body;
-
-		if (!fileIds || !Array.isArray(fileIds)) {
-			return json({ error: 'fileIds array is required' }, { status: 400 });
-		}
-
-		if (fileIds.length === 0) {
-			return json({ error: 'fileIds array cannot be empty' }, { status: 400 });
-		}
-
-		// Validate fileIds are strings
-		if (!fileIds.every((id) => typeof id === 'string')) {
-			return json({ error: 'All fileIds must be strings' }, { status: 400 });
-		}
+		const { fileIds, mediaType = 'mixed' } = await parseBody(request, renameExecuteSchema);
 
 		logger.info(
 			{

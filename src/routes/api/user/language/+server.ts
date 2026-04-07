@@ -5,47 +5,34 @@ import { user } from '$lib/server/db/schema';
 import { eq } from 'drizzle-orm';
 import { locales } from '$lib/paraglide/runtime.js';
 import { logger } from '$lib/logging';
+import { parseBody } from '$lib/server/api/validate.js';
+import { z } from 'zod';
+
+const userLanguageSchema = z.object({
+	language: z.string().min(1, 'Language is required')
+});
 
 const VALID_LANGUAGES = new Set<string>(locales);
 
 export const POST: RequestHandler = async ({ request, locals }) => {
-	// Check if user is authenticated
 	if (!locals.user) {
 		return json({ success: false, error: 'Unauthorized' }, { status: 401 });
 	}
 
-	let data: unknown;
 	try {
-		data = await request.json();
-	} catch {
-		return json({ success: false, error: 'Invalid JSON body' }, { status: 400 });
-	}
+		const { language } = await parseBody(request, userLanguageSchema);
 
-	// Validate the request body
-	if (!data || typeof data !== 'object') {
-		return json({ success: false, error: 'Invalid request body' }, { status: 400 });
-	}
+		if (!VALID_LANGUAGES.has(language)) {
+			return json(
+				{
+					success: false,
+					error: 'Invalid language',
+					supportedLanguages: Array.from(VALID_LANGUAGES)
+				},
+				{ status: 400 }
+			);
+		}
 
-	const { language } = data as { language?: unknown };
-
-	if (!language || typeof language !== 'string') {
-		return json({ success: false, error: 'Language is required' }, { status: 400 });
-	}
-
-	// Validate language is supported
-	if (!VALID_LANGUAGES.has(language)) {
-		return json(
-			{
-				success: false,
-				error: 'Invalid language',
-				supportedLanguages: Array.from(VALID_LANGUAGES)
-			},
-			{ status: 400 }
-		);
-	}
-
-	try {
-		// Update user's language preference in database
 		await db.update(user).set({ language }).where(eq(user.id, locals.user.id));
 
 		logger.info(
@@ -56,7 +43,7 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 		return json({ success: true, language });
 	} catch (error) {
 		logger.error(
-			{ err: error, userId: locals.user.id, language },
+			{ err: error, userId: locals.user.id },
 			'[UserLanguage] Failed to update user language preference'
 		);
 

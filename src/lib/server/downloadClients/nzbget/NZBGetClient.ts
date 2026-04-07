@@ -197,11 +197,7 @@ export class NZBGetClient implements IDownloadClient {
 		);
 
 		// Map active downloads (groups)
-		for (const task of groups) {
-			// Type assertion hack because nzbget types are loose and response varies by version
-			// eslint-disable-next-line @typescript-eslint/no-explicit-any
-			const item = task as any;
-
+		for (const item of groups) {
 			logger.debug(
 				{
 					NZBID: item.NZBID,
@@ -218,19 +214,17 @@ export class NZBGetClient implements IDownloadClient {
 				id: item.NZBID.toString(),
 				name: item.NZBName,
 				hash: item.NZBID.toString(),
-				// Normalized to 0-1 range (downloaded / total)
 				progress:
 					(item.DownloadedSizeHi * 4294967296 + item.DownloadedSizeLo) /
 					(item.FileSizeHi * 4294967296 + item.FileSizeLo || 1),
 				status: this.mapStatus(item.Status),
 				size: item.FileSizeHi * 4294967296 + item.FileSizeLo,
-				downloadSpeed: 0, // Rate is global in 'status', not per-torrent easily
+				downloadSpeed: 0,
 				uploadSpeed: 0,
-				eta: 0, // Needs calculation or separate call
+				eta: 0,
 				category: item.Category,
 				savePath: item.DestDir,
 				contentPath: item.DestDir,
-				// Usenet downloads can always be moved (no seeding)
 				canMoveFiles: true,
 				// Can be removed when no longer actively downloading
 				canBeRemoved: false,

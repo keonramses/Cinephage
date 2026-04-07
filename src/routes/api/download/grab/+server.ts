@@ -37,6 +37,8 @@ import { randomUUID } from 'node:crypto';
 import { statSync } from 'node:fs';
 import { redactUrl } from '$lib/server/utils/urlSecurity';
 import { libraryMediaEvents } from '$lib/server/library/LibraryMediaEvents';
+import { parseBody } from '$lib/server/api/validate.js';
+import { grabRequestSchema } from '$lib/validation/schemas.js';
 
 const parser = new ReleaseParser();
 
@@ -128,46 +130,7 @@ async function upsertEpisodeFileByPath(record: EpisodeFileUpsertInput): Promise<
  * Sends a release to a download client and creates a queue record.
  */
 export const POST: RequestHandler = async ({ request }) => {
-	let data: GrabRequest;
-
-	try {
-		data = await request.json();
-	} catch {
-		return json({ success: false, error: 'Invalid JSON body' } satisfies GrabResponse, {
-			status: 400
-		});
-	}
-
-	// Validate required fields
-	if (!data.downloadUrl && !data.magnetUrl) {
-		return json(
-			{
-				success: false,
-				error: 'Either downloadUrl or magnetUrl is required'
-			} satisfies GrabResponse,
-			{ status: 400 }
-		);
-	}
-
-	if (!data.title) {
-		return json({ success: false, error: 'title is required' } satisfies GrabResponse, {
-			status: 400
-		});
-	}
-
-	if (!data.mediaType) {
-		return json({ success: false, error: 'mediaType is required' } satisfies GrabResponse, {
-			status: 400
-		});
-	}
-
-	// Require linked media
-	if (!data.movieId && !data.seriesId) {
-		return json(
-			{ success: false, error: 'Either movieId or seriesId is required' } satisfies GrabResponse,
-			{ status: 400 }
-		);
-	}
+	const data = await parseBody(request, grabRequestSchema);
 
 	// Validate release category matches media type (prevents grabbing audio for movies, etc.)
 	if (data.categories && data.categories.length > 0) {
