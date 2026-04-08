@@ -24,6 +24,7 @@ import { episodes } from '$lib/server/db/schema.js';
 import { eq, and, inArray } from 'drizzle-orm';
 import type { SearchCriteria } from '$lib/server/indexers/types';
 import { isSeasonPack } from '$lib/server/indexers/types/release.js';
+import { getSeriesSearchTitles } from '$lib/server/services/AlternateTitleService.js';
 
 // Re-export types from CascadingSearchStrategy for consistency
 export interface EpisodeToSearch {
@@ -574,6 +575,7 @@ export class MultiSeasonSearchStrategy {
 
 		try {
 			const indexerManager = await getIndexerManager();
+			const searchTitles = await getSeriesSearchTitles(seriesData.id);
 
 			// Search without season filter to get complete series packs
 			const criteria: SearchCriteria = {
@@ -581,7 +583,8 @@ export class MultiSeasonSearchStrategy {
 				query: seriesData.title,
 				tmdbId: seriesData.tmdbId,
 				tvdbId: seriesData.tvdbId ?? undefined,
-				imdbId: seriesData.imdbId ?? undefined
+				imdbId: seriesData.imdbId ?? undefined,
+				searchTitles
 				// Note: No season filter - this returns complete series packs
 			};
 
@@ -731,6 +734,7 @@ export class MultiSeasonSearchStrategy {
 
 		try {
 			const indexerManager = await getIndexerManager();
+			const searchTitles = await getSeriesSearchTitles(seriesData.id);
 
 			// Search with season filter to get packs
 			const criteria: SearchCriteria = {
@@ -739,7 +743,8 @@ export class MultiSeasonSearchStrategy {
 				tmdbId: seriesData.tmdbId,
 				tvdbId: seriesData.tvdbId ?? undefined,
 				imdbId: seriesData.imdbId ?? undefined,
-				season: startSeason
+				season: startSeason,
+				searchTitles
 				// Note: We search for start season and filter for multi-season packs
 			};
 
@@ -858,6 +863,7 @@ export class MultiSeasonSearchStrategy {
 
 		try {
 			const indexerManager = await getIndexerManager();
+			const searchTitles = await getSeriesSearchTitles(seriesData.id);
 
 			const criteria: SearchCriteria = {
 				searchType: 'tv',
@@ -865,7 +871,8 @@ export class MultiSeasonSearchStrategy {
 				tmdbId: seriesData.tmdbId,
 				tvdbId: seriesData.tvdbId ?? undefined,
 				imdbId: seriesData.imdbId ?? undefined,
-				season: seasonNumber
+				season: seasonNumber,
+				searchTitles
 			};
 
 			const searchResult = await indexerManager.searchEnhanced(criteria, {
