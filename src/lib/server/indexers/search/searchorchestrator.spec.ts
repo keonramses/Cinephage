@@ -181,7 +181,7 @@ describe('SearchOrchestrator.executeMultiTitleTextSearch', () => {
 		).toBe(true);
 	});
 
-	it('prioritizes Cyrillic title variants for RuTracker and expands the title budget', async () => {
+	it('uses only Cyrillic title variants for RuTracker when native titles are available', async () => {
 		const orchestrator = new SearchOrchestrator();
 		const captured: any[] = [];
 
@@ -213,7 +213,8 @@ describe('SearchOrchestrator.executeMultiTitleTextSearch', () => {
 		expect(captured.length).toBeGreaterThan(0);
 		expect(captured[0].query).toBe('Как Деревянко Чехова играл');
 		expect(captured.some((c: any) => c.query === 'Как Деревянко играл')).toBe(true);
-		expect(captured.some((c: any) => c.query === 'How Derevyanko Chekhov Played')).toBe(true);
+		expect(captured.some((c: any) => c.query === 'How Derevyanko Chekhov Played')).toBe(false);
+		expect(captured.some((c: any) => c.query === 'Kak Derevyanko Chekhova igral')).toBe(false);
 	});
 
 	it('reuses cached RuTracker season search results across automatic episode variants', async () => {
@@ -247,8 +248,8 @@ describe('SearchOrchestrator.executeMultiTitleTextSearch', () => {
 			episode: 2
 		});
 
-		// First call: two title variants (budgeted). Second call: served from cache.
-		expect(captured).toHaveLength(2);
+		// Only the native-script title should be queried, and the second call should be served from cache.
+		expect(captured).toHaveLength(1);
 		expect(captured.every((c: any) => c.preferredEpisodeFormat === 'standard')).toBe(true);
 		expect(captured.every((c: any) => c.episode === undefined)).toBe(true);
 		expect(captured.every((c: any) => c.season === 1)).toBe(true);
@@ -288,8 +289,8 @@ describe('SearchOrchestrator.executeMultiTitleTextSearch', () => {
 			})
 		]);
 
-		// Budget is 2 titles; with in-flight dedupe concurrent calls should still issue only 2 variants total.
-		expect(captured).toHaveLength(2);
+		// Only the native-script title should be queried, and concurrent calls should dedupe to one request.
+		expect(captured).toHaveLength(1);
 		expect(captured.every((c: any) => c.preferredEpisodeFormat === 'standard')).toBe(true);
 		expect(captured.every((c: any) => c.episode === undefined)).toBe(true);
 	});

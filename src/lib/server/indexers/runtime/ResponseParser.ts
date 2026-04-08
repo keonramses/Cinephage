@@ -51,6 +51,11 @@ export class ResponseParser {
 		this.selectorEngine = selectorEngine;
 	}
 
+	private shouldTraceTracker(context: ParseContext): boolean {
+		const name = context.indexerName.toLowerCase();
+		return name.includes('rutracker') || name.includes('kinozal');
+	}
+
 	/**
 	 * Parse response content into release results.
 	 */
@@ -363,11 +368,24 @@ export class ResponseParser {
 			});
 		}
 
+		if (this.shouldTraceTracker(context)) {
+			logger.info(
+				{
+					indexer: context.indexerName,
+					rowSelector,
+					rowCount: rows.length,
+					filteredRowCount: filteredRows.length,
+					sampleRowHtml: filteredRows[0]?.html()?.slice(0, 500) ?? null
+				},
+				'[ResponseParser] HTML row selection'
+			);
+		}
+
 		// Handle date headers (sticky dates)
 		let currentDate: string | null = null;
 		const dateHeadersSelector = search.rows.dateheaders;
 
-		for (const row of filteredRows) {
+		for (const [rowIndex, row] of filteredRows.entries()) {
 			try {
 				// Check for date header
 				if (dateHeadersSelector?.selector) {
@@ -378,7 +396,7 @@ export class ResponseParser {
 					}
 				}
 
-				const release = this.extractReleaseFromHtml($, row, context, currentDate);
+				const release = this.extractReleaseFromHtml($, row, context, currentDate, rowIndex);
 				if (release) releases.push(release);
 			} catch (error) {
 				logger.warn(
@@ -400,7 +418,8 @@ export class ResponseParser {
 		$: CheerioAPI,
 		row: Cheerio<Element>,
 		context: ParseContext,
-		stickyDate: string | null
+		stickyDate: string | null,
+		rowIndex?: number
 	): ReleaseResult | null {
 		const search = this.definition.search;
 		const fields = search.fields;
@@ -434,12 +453,52 @@ export class ResponseParser {
 			}
 		}
 
+		if (this.shouldTraceTracker(context) && (rowIndex ?? 99) < 3) {
+			logger.info(
+				{
+					indexer: context.indexerName,
+					rowIndex,
+					values: {
+						title: values['title'],
+						details: values['details'],
+						download: values['download'],
+						size: values['size'],
+						seeders: values['seeders'],
+						leechers: values['leechers'],
+						category: values['category'],
+						date: values['date']
+					}
+				},
+				'[ResponseParser] HTML row field extraction'
+			);
+		}
+
 		// Apply sticky date if no date was extracted
 		if (stickyDate && !values['date'] && !values['publishdate']) {
 			values['date'] = stickyDate;
 		}
 
-		return this.buildReleaseResult(values, context);
+		const release = this.buildReleaseResult(values, context);
+
+		if (this.shouldTraceTracker(context) && (rowIndex ?? 99) < 3 && !release) {
+			logger.info(
+				{
+					indexer: context.indexerName,
+					rowIndex,
+					values: {
+						title: values['title'],
+						details: values['details'],
+						download: values['download'],
+						infohash: values['infohash'] || values['hash'],
+						magnet: values['magnet'] || values['magneturl'] || values['magneturi'],
+						size: values['size']
+					}
+				},
+				'[ResponseParser] HTML row dropped before release build'
+			);
+		}
+
+		return release;
 	}
 
 	/**

@@ -1155,6 +1155,11 @@ export class SearchOrchestrator {
 		let titlesToSearch = [...new Set(rawTitles.map((title) => title.trim()).filter(Boolean))];
 
 		if (prefersNativeCyrillicTitles(indexer)) {
+			const nativeCyrillicTitles = titlesToSearch.filter((title) => containsCyrillic(title));
+			if (nativeCyrillicTitles.length > 0) {
+				titlesToSearch = nativeCyrillicTitles;
+			}
+
 			titlesToSearch = [...titlesToSearch].sort((a, b) => {
 				const aCyrillic = containsCyrillic(a) ? 1 : 0;
 				const bCyrillic = containsCyrillic(b) ? 1 : 0;

@@ -25,6 +25,7 @@ import { episodes } from '$lib/server/db/schema.js';
 import { eq, and, inArray } from 'drizzle-orm';
 import type { SearchCriteria } from '$lib/server/indexers/types';
 import type { ScoringProfile } from '$lib/server/scoring/types.js';
+import { getSeriesSearchTitles } from '$lib/server/services/AlternateTitleService.js';
 
 const logger = createChildLogger({ module: 'CascadingSearchStrategy' });
 
@@ -408,6 +409,7 @@ class CascadingSearchStrategy {
 
 		try {
 			const indexerManager = await getIndexerManager();
+			const searchTitles = await getSeriesSearchTitles(seriesData.id);
 
 			// Build search criteria - season only (no episode number) to get packs
 			const criteria: SearchCriteria = {
@@ -416,7 +418,8 @@ class CascadingSearchStrategy {
 				tmdbId: seriesData.tmdbId,
 				tvdbId: seriesData.tvdbId ?? undefined,
 				imdbId: seriesData.imdbId ?? undefined,
-				season: seasonNumber
+				season: seasonNumber,
+				searchTitles
 				// Note: No episode number - this will return season packs
 			};
 
@@ -557,6 +560,7 @@ class CascadingSearchStrategy {
 
 		try {
 			const indexerManager = await getIndexerManager();
+			const searchTitles = await getSeriesSearchTitles(seriesData.id);
 
 			// Build search criteria with season and episode
 			const criteria: SearchCriteria = {
@@ -566,7 +570,8 @@ class CascadingSearchStrategy {
 				tvdbId: seriesData.tvdbId ?? undefined,
 				imdbId: seriesData.imdbId ?? undefined,
 				season: episode.seasonNumber,
-				episode: episode.episodeNumber
+				episode: episode.episodeNumber,
+				searchTitles
 			};
 
 			// Get episode count for potential pack size validation
