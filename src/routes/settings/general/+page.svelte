@@ -650,12 +650,12 @@
 </svelte:head>
 
 <SettingsPage title={m.settings_general_heading()} subtitle={m.settings_general_subtitle()}>
-	<div class="overflow-x-auto">
-		<div role="tablist" class="tabs-boxed tabs inline-flex min-w-max flex-nowrap">
+	<div>
+		<div role="tablist" class="tabs-boxed tabs flex flex-wrap gap-2">
 			<button
 				type="button"
 				role="tab"
-				class="tab gap-2 whitespace-nowrap"
+				class="tab h-auto min-h-0 flex-1 gap-2 px-3 py-2 sm:flex-none"
 				class:tab-active={activeTab === 'libraries'}
 				onclick={() => void setTab('libraries')}
 			>
@@ -665,7 +665,7 @@
 			<button
 				type="button"
 				role="tab"
-				class="tab gap-2 whitespace-nowrap"
+				class="tab h-auto min-h-0 flex-1 gap-2 px-3 py-2 sm:flex-none"
 				class:tab-active={activeTab === 'rootFolders'}
 				onclick={() => void setTab('rootFolders')}
 			>
@@ -675,7 +675,7 @@
 			<button
 				type="button"
 				role="tab"
-				class="tab gap-2 whitespace-nowrap"
+				class="tab h-auto min-h-0 flex-1 gap-2 px-3 py-2 sm:flex-none"
 				class:tab-active={activeTab === 'maintenance'}
 				onclick={() => void setTab('maintenance')}
 			>
@@ -692,7 +692,10 @@
 			variant="flat"
 		>
 			{#snippet actions()}
-				<button class="btn ml-auto gap-2 btn-sm btn-primary" onclick={handleActiveTabAction}>
+				<button
+					class="btn ml-auto w-full gap-2 btn-sm btn-primary sm:w-auto"
+					onclick={handleActiveTabAction}
+				>
 					<Plus class="h-4 w-4" />
 					{activeTabActionLabel}
 				</button>
@@ -713,7 +716,10 @@
 			variant="flat"
 		>
 			{#snippet actions()}
-				<button class="btn ml-auto gap-2 btn-sm btn-primary" onclick={handleActiveTabAction}>
+				<button
+					class="btn ml-auto w-full gap-2 btn-sm btn-primary sm:w-auto"
+					onclick={handleActiveTabAction}
+				>
 					<Plus class="h-4 w-4" />
 					{activeTabActionLabel}
 				</button>
@@ -757,7 +763,7 @@
 		>
 			{#snippet actions()}
 				<button
-					class="btn ml-auto gap-2 btn-sm btn-primary"
+					class="btn ml-auto w-full gap-2 btn-sm btn-primary sm:w-auto"
 					onclick={handleActiveTabAction}
 					disabled={scanning || data.rootFolders.length === 0}
 				>

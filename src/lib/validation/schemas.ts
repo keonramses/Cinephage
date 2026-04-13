@@ -185,6 +185,68 @@ export const enrichmentOptionsSchema = z.object({
 });
 
 /**
+ * Schema for configuration export (Backup & Restore).
+ */
+export const backupExportSchema = z.object({
+	passphrase: z.string().min(16, 'Passphrase must be at least 16 characters'),
+	includeIndexerCookies: z.boolean().default(false)
+});
+
+export const encryptedBackupPayloadSchema = z.object({
+	algorithm: z.literal('aes-256-gcm'),
+	salt: z.string().min(1),
+	iv: z.string().min(1),
+	authTag: z.string().min(1),
+	ciphertext: z.string().min(1)
+});
+
+const backupSectionNameSchema = z.enum([
+	'system',
+	'profiles',
+	'downloads',
+	'indexers',
+	'subtitles',
+	'integrations',
+	'liveTv'
+]);
+
+export const configurationBackupManifestSchema = z.object({
+	sectionOrder: z.array(backupSectionNameSchema),
+	sections: z.array(
+		z.object({
+			id: backupSectionNameSchema,
+			label: z.string().min(1),
+			tableNames: z.array(z.string().min(1)),
+			totalRows: z.number().int().min(0)
+		})
+	),
+	totalTables: z.number().int().min(0),
+	totalRows: z.number().int().min(0),
+	supportsRestoreModes: z.array(z.literal('apply'))
+});
+
+export const configurationBackupFileSchema = z.object({
+	format: z.literal('cinephage-config-backup'),
+	version: z.literal(1),
+	createdAt: z.string().min(1),
+	manifest: configurationBackupManifestSchema.optional(),
+	options: z
+		.object({
+			includeIndexerCookies: z.boolean().optional()
+		})
+		.optional(),
+	data: z.record(z.string(), z.array(z.record(z.string(), z.unknown()))),
+	secrets: encryptedBackupPayloadSchema
+});
+
+export const backupImportSchema = z.object({
+	passphrase: z.string().trim().min(1, 'Backup passphrase is required'),
+	sections: z.array(backupSectionNameSchema).optional(),
+	mode: z.enum(['apply', 'replace']).default('apply'),
+	backup: configurationBackupFileSchema
+});
+
+/**
  * Schema for search query parameters (GET request).
  */
 export const searchQuerySchema = z.object({
