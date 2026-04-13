@@ -20,7 +20,9 @@
 		Activity,
 		Clock,
 		Trash2,
-		Play
+		Play,
+		Download,
+		Upload
 	} from 'lucide-svelte';
 	import type { PageData } from './$types';
 	import { copyToClipboard as copyTextToClipboard } from '$lib/utils/clipboard.js';
@@ -216,6 +218,452 @@
 		} catch {
 			return false;
 		}
+	}
+
+	// =====================
+	// Backup & Restore State
+	// =====================
+	type BackupSectionId =
+		| 'system'
+		| 'profiles'
+		| 'downloads'
+		| 'indexers'
+		| 'subtitles'
+		| 'integrations'
+		| 'liveTv';
+
+	interface BackupSectionPreview {
+		id: BackupSectionId;
+		label: string;
+		tableNames: string[];
+		totalRows: number;
+		summary: string;
+	}
+
+	interface BackupPreview {
+		version: number;
+		createdAt: string;
+		totalSections: number;
+		includeIndexerCookies: boolean;
+		supportsRestoreModes: string[];
+		sections: BackupSectionPreview[];
+	}
+
+	const BACKUP_SECTION_GROUPS: BackupSectionPreview[] = [
+		{
+			id: 'system',
+			label: 'System & Libraries',
+			tableNames: [
+				'settings',
+				'monitoringSettings',
+				'captchaSolverSettings',
+				'taskSettings',
+				'rootFolders',
+				'libraries',
+				'libraryRootFolders',
+				'librarySettings',
+				'namingSettings',
+				'namingPresets'
+			],
+			totalRows: 0,
+			summary: ''
+		},
+		{
+			id: 'profiles',
+			label: 'Profiles & Formats',
+			tableNames: [
+				'scoringProfiles',
+				'profileSizeLimits',
+				'builtInProfileScoreOverrides',
+				'customFormats',
+				'delayProfiles',
+				'languageProfiles'
+			],
+			totalRows: 0,
+			summary: ''
+		},
+		{
+			id: 'downloads',
+			label: 'Download Clients',
+			tableNames: ['downloadClients', 'nntpServers'],
+			totalRows: 0,
+			summary: ''
+		},
+		{
+			id: 'indexers',
+			label: 'Indexers',
+			tableNames: ['indexers'],
+			totalRows: 0,
+			summary: ''
+		},
+		{
+			id: 'subtitles',
+			label: 'Subtitles',
+			tableNames: ['subtitleProviders', 'subtitleSettings'],
+			totalRows: 0,
+			summary: ''
+		},
+		{
+			id: 'integrations',
+			label: 'External Integrations',
+			tableNames: ['mediaBrowserServers', 'smartLists'],
+			totalRows: 0,
+			summary: ''
+		},
+		{
+			id: 'liveTv',
+			label: 'Live TV',
+			tableNames: [
+				'stalkerPortals',
+				'livetvAccounts',
+				'channelCategories',
+				'channelLineupItems',
+				'channelLineupBackups'
+			],
+			totalRows: 0,
+			summary: ''
+		}
+	];
+
+	function pluralize(count: number, singular: string, plural = `${singular}s`): string {
+		return `${count} ${count === 1 ? singular : plural}`;
+	}
+
+	function summarizeBackupSection(
+		sectionId: BackupSectionId,
+		totalRows: number,
+		countsByTable: Record<string, number>
+	): string {
+		const joinNonZero = (parts: string[]) => parts.filter(Boolean).join(', ');
+
+		switch (sectionId) {
+			case 'system':
+				return pluralize(totalRows, 'system and library setting');
+			case 'profiles':
+				return joinNonZero([
+					countsByTable.scoringProfiles
+						? pluralize(countsByTable.scoringProfiles, 'scoring profile')
+						: '',
+					countsByTable.customFormats
+						? pluralize(countsByTable.customFormats, 'custom format')
+						: '',
+					countsByTable.languageProfiles
+						? pluralize(countsByTable.languageProfiles, 'language profile')
+						: '',
+					countsByTable.delayProfiles ? pluralize(countsByTable.delayProfiles, 'delay profile') : ''
+				]);
+			case 'downloads':
+				return joinNonZero([
+					countsByTable.downloadClients ? pluralize(countsByTable.downloadClients, 'client') : '',
+					countsByTable.nntpServers ? pluralize(countsByTable.nntpServers, 'NNTP server') : ''
+				]);
+			case 'indexers':
+				return `${pluralize(totalRows, 'indexer')} configured`;
+			case 'subtitles':
+				return joinNonZero([
+					countsByTable.subtitleProviders
+						? pluralize(countsByTable.subtitleProviders, 'provider')
+						: '',
+					countsByTable.subtitleSettings ? pluralize(countsByTable.subtitleSettings, 'setting') : ''
+				]);
+			case 'integrations':
+				return joinNonZero([
+					countsByTable.mediaBrowserServers
+						? pluralize(countsByTable.mediaBrowserServers, 'media server')
+						: '',
+					countsByTable.smartLists ? pluralize(countsByTable.smartLists, 'smart list') : ''
+				]);
+			case 'liveTv':
+				return joinNonZero([
+					countsByTable.stalkerPortals ? pluralize(countsByTable.stalkerPortals, 'portal') : '',
+					countsByTable.livetvAccounts ? pluralize(countsByTable.livetvAccounts, 'account') : '',
+					countsByTable.channelCategories
+						? pluralize(countsByTable.channelCategories, 'category')
+						: '',
+					countsByTable.channelLineupItems
+						? pluralize(countsByTable.channelLineupItems, 'lineup item')
+						: '',
+					countsByTable.channelLineupBackups
+						? pluralize(countsByTable.channelLineupBackups, 'lineup backup')
+						: ''
+				]);
+		}
+	}
+
+	let backupExportPassphrase = $state('');
+	let backupIncludeIndexerCookies = $state(false);
+	let backupImportPassphrase = $state('');
+	let backupExporting = $state(false);
+	let backupImporting = $state(false);
+	let confirmRestoreOpen = $state(false);
+	let selectedBackupFile = $state<File | null>(null);
+	let backupPreview = $state<BackupPreview | null>(null);
+	let backupMessage = $state<string | null>(null);
+	let backupError = $state<string | null>(null);
+	let backupWarnings = $state<string[]>([]);
+	let selectedRestoreSections = $state<BackupSectionId[]>([]);
+
+	function buildBackupPreview(backup: unknown): BackupPreview {
+		if (!backup || typeof backup !== 'object' || Array.isArray(backup)) {
+			throw new Error('Invalid backup file');
+		}
+
+		const candidate = backup as Record<string, unknown>;
+		const data = candidate.data;
+		if (!data || typeof data !== 'object' || Array.isArray(data)) {
+			throw new Error('Backup file is missing configuration data');
+		}
+
+		const manifest = candidate.manifest;
+		if (manifest && typeof manifest === 'object' && !Array.isArray(manifest)) {
+			const typedManifest = manifest as Record<string, unknown>;
+			const sections = Array.isArray(typedManifest.sections)
+				? typedManifest.sections
+						.filter(
+							(section): section is Record<string, unknown> =>
+								!!section && typeof section === 'object'
+						)
+						.map((section) => {
+							const tableNames = Array.isArray(section.tableNames)
+								? section.tableNames.map((name) => String(name))
+								: [];
+							const sectionId = String(section.id) as BackupSectionId;
+							const countsByTable = Object.fromEntries(
+								tableNames.map((tableName) => [
+									tableName,
+									Array.isArray((data as Record<string, unknown>)[tableName])
+										? ((data as Record<string, unknown>)[tableName] as unknown[]).length
+										: 0
+								])
+							);
+
+							return {
+								id: sectionId,
+								label: String(section.label),
+								tableNames,
+								totalRows: typeof section.totalRows === 'number' ? section.totalRows : 0,
+								summary: summarizeBackupSection(
+									sectionId,
+									typeof section.totalRows === 'number' ? section.totalRows : 0,
+									countsByTable
+								)
+							};
+						})
+				: [];
+
+			return {
+				version: typeof candidate.version === 'number' ? candidate.version : 1,
+				createdAt: typeof candidate.createdAt === 'string' ? candidate.createdAt : '',
+				totalSections: sections.filter((section) => section.totalRows > 0).length,
+				includeIndexerCookies:
+					!!candidate.options &&
+					typeof candidate.options === 'object' &&
+					!Array.isArray(candidate.options) &&
+					!!(candidate.options as Record<string, unknown>).includeIndexerCookies,
+				supportsRestoreModes: Array.isArray(typedManifest.supportsRestoreModes)
+					? typedManifest.supportsRestoreModes.map((mode) => String(mode))
+					: ['apply'],
+				sections
+			};
+		}
+
+		const dataRecord = data as Record<string, unknown>;
+		const sections = BACKUP_SECTION_GROUPS.map((section) => {
+			const countsByTable = Object.fromEntries(
+				section.tableNames.map((tableName) => [
+					tableName,
+					Array.isArray(dataRecord[tableName]) ? (dataRecord[tableName] as unknown[]).length : 0
+				])
+			);
+			const totalRows = Object.values(countsByTable).reduce<number>((sum, count) => sum + count, 0);
+
+			return {
+				...section,
+				totalRows,
+				summary: summarizeBackupSection(section.id, totalRows, countsByTable)
+			};
+		});
+
+		return {
+			version: typeof candidate.version === 'number' ? candidate.version : 1,
+			createdAt: typeof candidate.createdAt === 'string' ? candidate.createdAt : '',
+			totalSections: sections.filter((section) => section.totalRows > 0).length,
+			includeIndexerCookies: false,
+			supportsRestoreModes: ['apply'],
+			sections
+		};
+	}
+
+	async function handleBackupFileChange(event: Event) {
+		const input = event.currentTarget as HTMLInputElement;
+		selectedBackupFile = input.files?.[0] ?? null;
+		backupError = null;
+		backupMessage = null;
+		backupWarnings = [];
+		backupPreview = null;
+
+		if (!selectedBackupFile) {
+			selectedRestoreSections = [];
+			return;
+		}
+
+		try {
+			const backup = JSON.parse(await selectedBackupFile.text());
+			backupPreview = buildBackupPreview(backup);
+			selectedRestoreSections = backupPreview.sections
+				.filter((section) => section.totalRows > 0)
+				.map((section) => section.id);
+		} catch (error) {
+			selectedBackupFile = null;
+			selectedRestoreSections = [];
+			backupError = error instanceof Error ? error.message : 'Failed to read backup file';
+		}
+	}
+
+	function toggleRestoreSection(sectionId: BackupSectionId, checked: boolean) {
+		if (checked) {
+			if (!selectedRestoreSections.includes(sectionId)) {
+				selectedRestoreSections = [...selectedRestoreSections, sectionId];
+			}
+			return;
+		}
+
+		selectedRestoreSections = selectedRestoreSections.filter((section) => section !== sectionId);
+	}
+
+	async function exportConfigurationBackup() {
+		backupExporting = true;
+		backupError = null;
+		backupMessage = null;
+		backupWarnings = [];
+
+		try {
+			const response = await fetch('/api/settings/system/backup', {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({
+					passphrase: backupExportPassphrase,
+					includeIndexerCookies: backupIncludeIndexerCookies
+				})
+			});
+			const payload = await readResponsePayload<Record<string, unknown>>(response);
+
+			if (!response.ok) {
+				throw new Error(getResponseErrorMessage(payload, 'Failed to export configuration backup'));
+			}
+
+			if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
+				throw new Error('Invalid backup export response');
+			}
+
+			const backup = payload.backup;
+			const fileName =
+				typeof payload.fileName === 'string' ? payload.fileName : 'cinephage-config-backup.json';
+			const blob = new Blob([JSON.stringify(backup, null, 2)], { type: 'application/json' });
+			const url = URL.createObjectURL(blob);
+			const anchor = document.createElement('a');
+			anchor.href = url;
+			anchor.download = fileName;
+			anchor.click();
+			URL.revokeObjectURL(url);
+
+			backupMessage = 'Configuration backup exported successfully.';
+		} catch (error) {
+			backupError =
+				error instanceof Error ? error.message : 'Failed to export configuration backup';
+		} finally {
+			backupExporting = false;
+		}
+	}
+
+	async function importConfigurationBackup() {
+		if (!selectedBackupFile) {
+			backupError = 'Select a backup file first.';
+			return;
+		}
+
+		if (selectedRestoreSections.length === 0) {
+			backupError = 'Select at least one backup section to restore.';
+			return;
+		}
+
+		if (!backupImportPassphrase.trim()) {
+			backupError = 'Backup passphrase is required for restore.';
+			return;
+		}
+
+		confirmRestoreOpen = false;
+		backupImporting = true;
+		backupError = null;
+		backupMessage = null;
+		backupWarnings = [];
+
+		try {
+			const backup = JSON.parse(await selectedBackupFile.text());
+			const response = await fetch('/api/settings/system/backup', {
+				method: 'PUT',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({
+					passphrase: backupImportPassphrase.trim(),
+					sections: selectedRestoreSections,
+					mode: 'apply',
+					backup
+				})
+			});
+			const payload = await readResponsePayload<Record<string, unknown>>(response);
+
+			if (!response.ok) {
+				throw new Error(getResponseErrorMessage(payload, 'Failed to restore configuration backup'));
+			}
+
+			const result =
+				payload && typeof payload === 'object' && !Array.isArray(payload)
+					? payload.result
+					: undefined;
+			const resultRecord =
+				result && typeof result === 'object' && !Array.isArray(result)
+					? (result as Record<string, unknown>)
+					: null;
+			const warningCandidates = resultRecord?.warnings;
+			backupWarnings = Array.isArray(warningCandidates)
+				? warningCandidates.filter(
+						(warning: unknown): warning is string => typeof warning === 'string'
+					)
+				: [];
+			backupMessage =
+				backupWarnings.length > 0
+					? 'Configuration restored with warnings.'
+					: 'Configuration restored successfully.';
+			selectedBackupFile = null;
+			backupPreview = null;
+			selectedRestoreSections = [];
+			await invalidateAll();
+		} catch (error) {
+			backupError =
+				error instanceof Error ? error.message : 'Failed to restore configuration backup';
+		} finally {
+			backupImporting = false;
+		}
+	}
+
+	function promptRestoreConfiguration() {
+		if (!selectedBackupFile) {
+			backupError = 'Select a backup file first.';
+			return;
+		}
+
+		if (selectedRestoreSections.length === 0) {
+			backupError = 'Select at least one backup section to restore.';
+			return;
+		}
+
+		if (!backupImportPassphrase.trim()) {
+			backupError = 'Backup passphrase is required for restore.';
+			return;
+		}
+
+		backupError = null;
+		confirmRestoreOpen = true;
 	}
 
 	// =====================
@@ -514,33 +962,42 @@
 
 <SettingsPage title={m.settings_system_heading()} subtitle={m.settings_system_subtitle()}>
 	<!-- Tab navigation -->
-	<div role="tablist" class="tabs-boxed tabs">
+	<div role="tablist" class="tabs-boxed tabs flex flex-wrap gap-2">
 		<button
 			role="tab"
-			class="tab gap-2"
+			class="tab h-auto min-h-0 flex-1 items-center justify-center gap-2 px-3 py-2 sm:flex-none sm:justify-start"
 			class:tab-active={activeTab === 'general'}
 			onclick={() => setTab('general')}
 		>
-			<Server class="h-4 w-4" />
+			<Server class="h-4 w-4 shrink-0" />
 			{m.nav_general()}
 		</button>
 		<button
 			role="tab"
-			class="tab gap-2"
+			class="tab h-auto min-h-0 flex-1 items-center justify-center gap-2 px-3 py-2 sm:flex-none sm:justify-start"
 			class:tab-active={activeTab === 'tmdb'}
 			onclick={() => setTab('tmdb')}
 		>
-			<Film class="h-4 w-4" />
+			<Film class="h-4 w-4 shrink-0" />
 			TMDB
 		</button>
 		<button
 			role="tab"
-			class="tab gap-2"
+			class="tab h-auto min-h-0 flex-1 items-center justify-center gap-2 px-3 py-2 sm:flex-none sm:justify-start"
 			class:tab-active={activeTab === 'captcha'}
 			onclick={() => setTab('captcha')}
 		>
 			<Shield class="h-4 w-4" />
 			{m.nav_captchaSolver()}
+		</button>
+		<button
+			role="tab"
+			class="tab h-auto min-h-0 flex-1 gap-2 px-3 py-2 sm:flex-none"
+			class:tab-active={activeTab === 'backup'}
+			onclick={() => setTab('backup')}
+		>
+			<Download class="h-4 w-4" />
+			Backup & Restore
 		</button>
 	</div>
 
@@ -575,7 +1032,7 @@
 
 			<!-- Main API Key -->
 			<div class="rounded-lg bg-base-100 p-4">
-				<div class="flex items-center justify-between">
+				<div class="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
 					<div class="flex items-center gap-2">
 						<Key class="h-5 w-5" />
 						<h3 class="text-base font-semibold">{m.settings_system_mainApiKey()}</h3>
@@ -621,7 +1078,9 @@
 					</div>
 				</div>
 
-				<div class="mt-3 flex items-center justify-between text-sm text-base-content/70">
+				<div
+					class="mt-3 flex flex-col gap-3 text-sm text-base-content/70 sm:flex-row sm:items-center sm:justify-between"
+				>
 					<span
 						>{m.settings_system_created()}: {data.mainApiKey?.createdAt
 							? new Date(data.mainApiKey.createdAt).toLocaleDateString()
@@ -645,7 +1104,7 @@
 
 			<!-- Media Streaming API Key -->
 			<div class="rounded-lg bg-base-100 p-4">
-				<div class="flex items-center justify-between">
+				<div class="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
 					<div class="flex items-center gap-2">
 						<Server class="h-5 w-5" />
 						<h3 class="text-base font-semibold">{m.settings_system_mediaStreamingApiKey()}</h3>
@@ -710,7 +1169,9 @@
 					</ul>
 				</div>
 
-				<div class="mt-3 flex items-center justify-between text-sm text-base-content/70">
+				<div
+					class="mt-3 flex flex-col gap-3 text-sm text-base-content/70 sm:flex-row sm:items-center sm:justify-between"
+				>
 					<span
 						>{m.settings_system_created()}: {data.streamingApiKey?.createdAt
 							? new Date(data.streamingApiKey.createdAt).toLocaleDateString()
@@ -779,7 +1240,7 @@
 
 				<div class="mt-4 flex justify-end">
 					<button
-						class="btn gap-2 btn-sm btn-primary"
+						class="btn w-full gap-2 btn-sm btn-primary sm:w-auto"
 						onclick={saveExternalUrl}
 						disabled={isSavingUrl}
 					>
@@ -833,6 +1294,228 @@
 							themoviedb.org
 						</a>.
 					</p>
+				</div>
+			</div>
+		</SettingsSection>
+	{/if}
+
+	{#if activeTab === 'backup'}
+		<SettingsSection
+			title="Backup & Restore"
+			description="Export your Cinephage configuration for disaster recovery and restore it later with the same passphrase."
+		>
+			<div class="alert overflow-hidden alert-info">
+				<AlertCircle class="h-5 w-5" />
+				<div class="min-w-0">
+					<p class="font-medium">Configuration backup only</p>
+					<p class="text-sm wrap-break-word">
+						Backups include user-managed settings and encrypted user-supplied credentials. Runtime
+						caches, queues, task history, and generated system API keys are excluded. Indexer
+						session cookies can be included explicitly as an advanced option.
+					</p>
+				</div>
+			</div>
+
+			{#if backupError}
+				<div class="alert alert-error">
+					<AlertCircle class="h-4 w-4" />
+					<span>{backupError}</span>
+				</div>
+			{/if}
+
+			{#if backupWarnings.length > 0}
+				<div class="alert alert-warning">
+					<AlertCircle class="h-4 w-4" />
+					<div class="space-y-1">
+						<div class="font-medium">Restore warnings</div>
+						<ul class="list-inside list-disc text-sm">
+							{#each backupWarnings as warning (warning)}
+								<li>{warning}</li>
+							{/each}
+						</ul>
+					</div>
+				</div>
+			{/if}
+
+			{#if backupMessage}
+				<div class="alert alert-success">
+					<CheckCircle class="h-4 w-4" />
+					<span>{backupMessage}</span>
+				</div>
+			{/if}
+
+			<div class="grid gap-4 lg:grid-cols-2">
+				<div class="min-w-0 overflow-hidden rounded-lg bg-base-100 p-4">
+					<div class="mb-3 flex items-center gap-2">
+						<Download class="h-5 w-5" />
+						<h3 class="text-base font-semibold">Export configuration</h3>
+					</div>
+
+					<p class="mb-4 text-sm wrap-break-word text-base-content/70">
+						Exports configuration for settings, integrations, indexers, download clients, profiles,
+						and other user-managed setup required to rebuild the instance.
+					</p>
+
+					<label
+						class="label flex-wrap items-start gap-2 whitespace-normal"
+						for="backup-export-passphrase"
+					>
+						<span class="label-text">Encryption passphrase</span>
+					</label>
+					<input
+						id="backup-export-passphrase"
+						type="password"
+						class="input-bordered input w-full"
+						placeholder="At least 16 characters to encrypt exported secrets"
+						bind:value={backupExportPassphrase}
+					/>
+
+					<label class="label mt-4 cursor-pointer justify-start gap-3 whitespace-normal">
+						<input
+							type="checkbox"
+							class="checkbox checkbox-sm"
+							bind:checked={backupIncludeIndexerCookies}
+						/>
+						<div class="min-w-0">
+							<span class="label-text font-medium">Include indexer session cookies</span>
+							<p class="text-sm wrap-break-word text-base-content/70">
+								Back up active 2FA/session cookies for indexers that rely on them. These are
+								encrypted, short-lived, and more sensitive than saved credentials.
+							</p>
+						</div>
+					</label>
+
+					<div class="mt-4 flex justify-end">
+						<button
+							class="btn w-full gap-2 btn-primary sm:w-auto"
+							onclick={exportConfigurationBackup}
+							disabled={backupExporting || backupExportPassphrase.trim().length < 16}
+						>
+							{#if backupExporting}
+								<RefreshCw class="h-4 w-4 animate-spin" />
+								Exporting...
+							{:else}
+								<Download class="h-4 w-4" />
+								Export backup
+							{/if}
+						</button>
+					</div>
+				</div>
+
+				<div class="min-w-0 overflow-hidden rounded-lg bg-base-100 p-4">
+					<div class="mb-3 flex items-center gap-2">
+						<Upload class="h-5 w-5" />
+						<h3 class="text-base font-semibold">Restore configuration</h3>
+					</div>
+
+					<p class="mb-4 text-sm wrap-break-word text-base-content/70">
+						Restoring applies the saved configuration from the backup file to this instance. Use the
+						same passphrase that was used during export.
+					</p>
+
+					<label
+						class="label flex-wrap items-start gap-2 whitespace-normal"
+						for="backup-restore-file"
+					>
+						<span class="label-text">Backup file</span>
+					</label>
+					<input
+						id="backup-restore-file"
+						type="file"
+						class="file-input-bordered file-input w-full max-w-full min-w-0"
+						accept="application/json,.json"
+						onchange={handleBackupFileChange}
+					/>
+
+					{#if backupPreview}
+						<div class="mt-4 min-w-0 overflow-hidden rounded-lg border border-base-300 p-4">
+							<div
+								class="mb-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between sm:gap-4"
+							>
+								<div class="min-w-0">
+									<div class="font-medium">Backup preview</div>
+									<div class="text-sm wrap-break-word text-base-content/70">
+										Version {backupPreview.version}
+										{#if backupPreview.createdAt}
+											• {new Date(backupPreview.createdAt).toLocaleString()}
+										{/if}
+									</div>
+								</div>
+								<div class="text-right text-sm text-base-content/70">
+									<div>{pluralize(backupPreview.totalSections, 'section')}</div>
+								</div>
+							</div>
+
+							<div class="space-y-2">
+								<div class="text-sm font-medium">Restore sections</div>
+								{#each backupPreview.sections.filter((section) => section.totalRows > 0) as section (section.id)}
+									<label
+										class="flex cursor-pointer items-start gap-3 rounded-lg border border-base-300 p-3"
+									>
+										<input
+											type="checkbox"
+											class="checkbox mt-0.5 checkbox-sm"
+											checked={selectedRestoreSections.includes(section.id)}
+											onchange={(event) =>
+												toggleRestoreSection(
+													section.id,
+													(event.currentTarget as HTMLInputElement).checked
+												)}
+										/>
+										<div class="min-w-0">
+											<div class="font-medium">{section.label}</div>
+											<div class="text-sm text-base-content/70">
+												{section.summary}
+											</div>
+										</div>
+									</label>
+								{/each}
+							</div>
+
+							{#if backupPreview.includeIndexerCookies}
+								<div class="mt-4 alert overflow-hidden alert-warning">
+									<AlertCircle class="h-4 w-4" />
+									<span class="wrap-break-word">
+										This backup includes encrypted indexer session cookies. Restoring it will try to
+										reuse active indexer sessions where they are still valid.
+									</span>
+								</div>
+							{/if}
+						</div>
+					{/if}
+
+					<label
+						class="label mt-3 flex-wrap items-start gap-2 whitespace-normal"
+						for="backup-import-passphrase"
+					>
+						<span class="label-text">Backup passphrase</span>
+					</label>
+					<input
+						id="backup-import-passphrase"
+						type="password"
+						class="input-bordered input w-full"
+						placeholder="Required to decrypt exported secrets"
+						bind:value={backupImportPassphrase}
+					/>
+
+					<div class="mt-4 flex justify-end">
+						<button
+							class="btn w-full gap-2 btn-warning sm:w-auto"
+							onclick={promptRestoreConfiguration}
+							disabled={backupImporting ||
+								!selectedBackupFile ||
+								selectedRestoreSections.length === 0 ||
+								!backupImportPassphrase.trim()}
+						>
+							{#if backupImporting}
+								<RefreshCw class="h-4 w-4 animate-spin" />
+								Restoring...
+							{:else}
+								<Upload class="h-4 w-4" />
+								Restore backup
+							{/if}
+						</button>
+					</div>
 				</div>
 			</div>
 		</SettingsSection>
@@ -956,14 +1639,14 @@
 
 					<div class="grid gap-4 sm:grid-cols-2">
 						<!-- Timeout -->
-						<div class="form-control w-full">
-							<label class="label" for="timeout">
+						<div class="form-control w-full min-w-0">
+							<label class="label flex-wrap items-start gap-2 whitespace-normal" for="timeout">
 								<span class="label-text">{m.settings_integrations_captcha_solveTimeout()}</span>
 							</label>
 							<select
 								id="timeout"
 								bind:value={captchaSettings.timeoutSeconds}
-								class="select-bordered select select-sm"
+								class="select-bordered select w-full max-w-full min-w-0 select-sm"
 								disabled={!captchaSettings.enabled}
 							>
 								<option value={30}>{m.settings_integrations_captcha_seconds30()}</option>
@@ -972,22 +1655,22 @@
 								<option value={120}>{m.settings_integrations_captcha_minutes2()}</option>
 								<option value={180}>{m.settings_integrations_captcha_minutes3()}</option>
 							</select>
-							<div class="label">
-								<span class="label-text-alt text-base-content/50">
+							<div class="label whitespace-normal">
+								<span class="label-text-alt wrap-break-word text-base-content/50">
 									{m.settings_integrations_captcha_solveTimeoutHelp()}
 								</span>
 							</div>
 						</div>
 
 						<!-- Cache TTL -->
-						<div class="form-control w-full">
-							<label class="label" for="cacheTtl">
+						<div class="form-control w-full min-w-0">
+							<label class="label flex-wrap items-start gap-2 whitespace-normal" for="cacheTtl">
 								<span class="label-text">{m.settings_integrations_captcha_cacheDuration()}</span>
 							</label>
 							<select
 								id="cacheTtl"
 								bind:value={captchaSettings.cacheTtlSeconds}
-								class="select-bordered select select-sm"
+								class="select-bordered select w-full max-w-full min-w-0 select-sm"
 								disabled={!captchaSettings.enabled}
 							>
 								<option value={1800}>{m.settings_integrations_captcha_minutes30()}</option>
@@ -997,8 +1680,8 @@
 								<option value={28800}>{m.settings_integrations_captcha_hours8()}</option>
 								<option value={86400}>{m.settings_integrations_captcha_hours24()}</option>
 							</select>
-							<div class="label">
-								<span class="label-text-alt text-base-content/50">
+							<div class="label whitespace-normal">
+								<span class="label-text-alt wrap-break-word text-base-content/50">
 									{m.settings_integrations_captcha_cacheDurationHelp()}
 								</span>
 							</div>
@@ -1011,8 +1694,8 @@
 					</div>
 
 					<!-- Proxy URL -->
-					<div class="form-control w-full">
-						<label class="label" for="proxyUrl">
+					<div class="form-control w-full min-w-0">
+						<label class="label flex-wrap items-start gap-2 whitespace-normal" for="proxyUrl">
 							<span class="label-text">{m.settings_integrations_captcha_proxyUrl()}</span>
 						</label>
 						<input
@@ -1020,11 +1703,11 @@
 							type="text"
 							bind:value={captchaSettings.proxyUrl}
 							placeholder="http://proxy.example.com:8080"
-							class="input-bordered input input-sm"
+							class="input-bordered input input-sm w-full min-w-0"
 							disabled={!captchaSettings.enabled}
 						/>
-						<div class="label">
-							<span class="label-text-alt text-base-content/50">
+						<div class="label whitespace-normal">
+							<span class="label-text-alt wrap-break-word text-base-content/50">
 								{m.settings_integrations_captcha_proxyUrlHelp()}
 							</span>
 						</div>
@@ -1033,8 +1716,11 @@
 					<!-- Proxy Auth -->
 					{#if captchaSettings.proxyUrl}
 						<div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
-							<div class="form-control">
-								<label class="label" for="proxyUsername">
+							<div class="form-control min-w-0">
+								<label
+									class="label flex-wrap items-start gap-2 whitespace-normal"
+									for="proxyUsername"
+								>
 									<span class="label-text">{m.settings_integrations_captcha_proxyUsername()}</span>
 								</label>
 								<input
@@ -1042,12 +1728,15 @@
 									type="text"
 									bind:value={captchaSettings.proxyUsername}
 									placeholder={m.settings_integrations_captcha_optional()}
-									class="input-bordered input input-sm"
+									class="input-bordered input input-sm w-full min-w-0"
 									disabled={!captchaSettings.enabled}
 								/>
 							</div>
-							<div class="form-control">
-								<label class="label" for="proxyPassword">
+							<div class="form-control min-w-0">
+								<label
+									class="label flex-wrap items-start gap-2 whitespace-normal"
+									for="proxyPassword"
+								>
 									<span class="label-text">{m.settings_integrations_captcha_proxyPassword()}</span>
 								</label>
 								<input
@@ -1055,7 +1744,7 @@
 									type="password"
 									bind:value={captchaSettings.proxyPassword}
 									placeholder={m.settings_integrations_captcha_optional()}
-									class="input-bordered input input-sm"
+									class="input-bordered input input-sm w-full min-w-0"
 									disabled={!captchaSettings.enabled}
 								/>
 							</div>
@@ -1065,7 +1754,7 @@
 
 				<div class="flex justify-end">
 					<button
-						class="btn gap-2 btn-sm btn-primary"
+						class="btn w-full gap-2 btn-sm btn-primary sm:w-auto"
 						onclick={saveCaptchaSettings}
 						disabled={captchaSaving}
 					>
@@ -1090,11 +1779,11 @@
 						type="url"
 						bind:value={testUrl}
 						placeholder="https://example.com"
-						class="input-bordered input input-sm w-full sm:flex-1"
+						class="input-bordered input input-sm w-full min-w-0 sm:flex-1"
 						disabled={captchaTesting || !captchaSettings.enabled}
 					/>
 					<button
-						class="btn gap-2 btn-sm btn-primary"
+						class="btn w-full gap-2 btn-sm btn-primary sm:w-auto"
 						onclick={testSolver}
 						disabled={captchaTesting || !testUrl || !captchaSettings.enabled}
 					>
@@ -1221,6 +1910,17 @@
 	loading={regeneratingMain || regeneratingStreaming}
 	onConfirm={() => regenerateKey(regenerateTarget)}
 	onCancel={() => (confirmRegenerateOpen = false)}
+/>
+
+<ConfirmationModal
+	open={confirmRestoreOpen}
+	title="Restore configuration backup?"
+	message={`This will apply ${selectedRestoreSections.length} selected backup section(s) to the current instance. This action cannot be undone.`}
+	confirmLabel="Restore backup"
+	confirmVariant="warning"
+	loading={backupImporting}
+	onConfirm={importConfigurationBackup}
+	onCancel={() => (confirmRestoreOpen = false)}
 />
 
 <!-- TMDB API Key Modal -->
