@@ -5,6 +5,7 @@ import { customFormats } from '$lib/server/db/schema';
 import { eq } from 'drizzle-orm';
 import { z } from 'zod';
 import { ALL_FORMATS } from '$lib/server/scoring';
+import { invalidateFormatCache } from '$lib/server/scoring/formats/registry.js';
 import { logger } from '$lib/logging';
 import { requireAdmin } from '$lib/server/auth/authorization.js';
 
@@ -19,10 +20,13 @@ const conditionSchema = z.object({
 		'release_title',
 		'release_group',
 		'codec',
-		'audio',
+		'audio_codec',
+		'audio_channels',
+		'audio_atmos',
 		'hdr',
 		'streaming_service',
-		'flag'
+		'flag',
+		'indexer'
 	]),
 	required: z.boolean(),
 	negate: z.boolean(),
@@ -31,10 +35,12 @@ const conditionSchema = z.object({
 	source: z.string().optional(),
 	pattern: z.string().optional(),
 	codec: z.string().optional(),
-	audio: z.string().optional(),
+	audioCodec: z.string().optional(),
+	audioChannels: z.string().optional(),
 	hdr: z.string().nullable().optional(),
 	streamingService: z.string().optional(),
-	flag: z.enum(['isRemux', 'isRepack', 'isProper', 'is3d']).optional()
+	flag: z.enum(['isRemux', 'isRepack', 'isProper', 'is3d']).optional(),
+	indexer: z.string().optional()
 });
 
 /**
@@ -188,6 +194,8 @@ export const POST: RequestHandler = async (event) => {
 			})
 			.returning();
 
+		invalidateFormatCache();
+
 		return json(newFormat[0], { status: 201 });
 	} catch (error) {
 		logger.error('Error creating custom format', error instanceof Error ? error : undefined);
@@ -249,6 +257,8 @@ export const PUT: RequestHandler = async (event) => {
 			.where(eq(customFormats.id, id))
 			.returning();
 
+		invalidateFormatCache();
+
 		return json(updated[0]);
 	} catch (error) {
 		logger.error('Error updating custom format', error instanceof Error ? error : undefined);
@@ -283,6 +293,8 @@ export const DELETE: RequestHandler = async (event) => {
 		if (deleted.length === 0) {
 			return json({ error: 'Format not found' }, { status: 404 });
 		}
+
+		invalidateFormatCache();
 
 		return json({ success: true, deleted: deleted[0] });
 	} catch (error) {

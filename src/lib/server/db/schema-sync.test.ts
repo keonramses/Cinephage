@@ -356,4 +356,180 @@ describe('syncSchema Better Auth repair', () => {
 		expect(row.key).toBe('ip|/sign-in');
 		expect(row.count).toBe(2);
 	});
+
+	it('migrates saved custom format audio conditions to canonical schema', () => {
+		const sqlite = createTestDatabase();
+
+		sqlite
+			.prepare(`CREATE TABLE "settings" ("key" text PRIMARY KEY NOT NULL, "value" text NOT NULL)`)
+			.run();
+		sqlite
+			.prepare(
+				`CREATE TABLE "user" (
+					"id" text PRIMARY KEY NOT NULL,
+					"name" text,
+					"email" text NOT NULL,
+					"emailVerified" integer DEFAULT 0,
+					"image" text,
+					"username" text UNIQUE,
+					"displayUsername" text,
+					"role" text DEFAULT 'admin' NOT NULL,
+					"language" text DEFAULT 'en',
+					"banned" integer DEFAULT 0,
+					"banReason" text,
+					"banExpires" date,
+					"createdAt" date NOT NULL,
+					"updatedAt" date NOT NULL
+				)`
+			)
+			.run();
+		sqlite
+			.prepare(
+				`CREATE TABLE "session" (
+					"id" text PRIMARY KEY NOT NULL,
+					"userId" text NOT NULL REFERENCES "user"("id") ON DELETE CASCADE,
+					"token" text NOT NULL UNIQUE,
+					"expiresAt" date NOT NULL,
+					"ipAddress" text,
+					"userAgent" text,
+					"impersonatedBy" text,
+					"createdAt" date NOT NULL,
+					"updatedAt" date NOT NULL
+				)`
+			)
+			.run();
+		sqlite
+			.prepare(
+				`CREATE TABLE "account" (
+					"id" text PRIMARY KEY NOT NULL,
+					"userId" text NOT NULL REFERENCES "user"("id") ON DELETE CASCADE,
+					"accountId" text NOT NULL,
+					"providerId" text NOT NULL,
+					"accessToken" text,
+					"refreshToken" text,
+					"accessTokenExpiresAt" date,
+					"refreshTokenExpiresAt" date,
+					"scope" text,
+					"idToken" text,
+					"password" text,
+					"createdAt" date NOT NULL,
+					"updatedAt" date NOT NULL
+				)`
+			)
+			.run();
+		sqlite
+			.prepare(
+				`CREATE TABLE "verification" (
+					"id" text PRIMARY KEY NOT NULL,
+					"identifier" text NOT NULL,
+					"value" text NOT NULL,
+					"expiresAt" date NOT NULL,
+					"createdAt" date,
+					"updatedAt" date
+				)`
+			)
+			.run();
+		sqlite
+			.prepare(
+				`CREATE TABLE "apikey" (
+					"id" text PRIMARY KEY NOT NULL,
+					"name" text,
+					"start" text,
+					"prefix" text,
+					"key" text NOT NULL,
+					"referenceId" text NOT NULL,
+					"configId" text DEFAULT 'default',
+					"refillInterval" integer,
+					"refillAmount" integer,
+					"lastRefillAt" date,
+					"enabled" integer DEFAULT 1,
+					"rateLimitEnabled" integer DEFAULT 1,
+					"rateLimitTimeWindow" integer,
+					"rateLimitMax" integer,
+					"requestCount" integer DEFAULT 0,
+					"remaining" integer,
+					"lastRequest" date,
+					"expiresAt" date,
+					"createdAt" date NOT NULL,
+					"updatedAt" date NOT NULL,
+					"permissions" text,
+					"metadata" text
+				)`
+			)
+			.run();
+		sqlite
+			.prepare(
+				`CREATE TABLE "rateLimit" (
+					"id" text PRIMARY KEY NOT NULL,
+					"key" text NOT NULL UNIQUE,
+					"count" integer NOT NULL,
+					"lastRequest" integer NOT NULL
+				)`
+			)
+			.run();
+		sqlite
+			.prepare(
+				`CREATE TABLE "custom_formats" (
+					"id" text PRIMARY KEY NOT NULL,
+					"name" text NOT NULL,
+					"description" text,
+					"category" text NOT NULL DEFAULT 'other',
+					"tags" text,
+					"conditions" text,
+					"enabled" integer DEFAULT true,
+					"created_at" text,
+					"updated_at" text
+				)`
+			)
+			.run();
+		sqlite.prepare(`INSERT INTO "settings" ("key", "value") VALUES ('schema_version', '78')`).run();
+		sqlite
+			.prepare(
+				`INSERT INTO "custom_formats" ("id", "name", "category", "conditions") VALUES (?, ?, ?, ?)`
+			)
+			.run(
+				'legacy-audio-format',
+				'Legacy Audio Format',
+				'audio',
+				JSON.stringify([
+					{
+						name: 'Legacy DD+',
+						type: 'audio',
+						required: true,
+						negate: false,
+						audio: 'dd+'
+					},
+					{
+						name: 'Legacy Atmos',
+						type: 'audio',
+						required: false,
+						negate: false,
+						audio: 'atmos'
+					}
+				])
+			);
+
+		syncSchema(sqlite);
+
+		const row = sqlite
+			.prepare(`SELECT "conditions" FROM "custom_formats" WHERE "id" = 'legacy-audio-format'`)
+			.get() as { conditions: string };
+		const conditions = JSON.parse(row.conditions) as Array<Record<string, unknown>>;
+
+		expect(conditions).toEqual([
+			{
+				name: 'Legacy DD+',
+				type: 'audio_codec',
+				required: true,
+				negate: false,
+				audioCodec: 'dd+'
+			},
+			{
+				name: 'Legacy Atmos',
+				type: 'audio_atmos',
+				required: false,
+				negate: false
+			}
+		]);
+	});
 });

@@ -235,21 +235,21 @@ describe('Custom Formats API', () => {
 
 		it('validates condition types', async () => {
 			const { status, data } = await api.post<FormatResponse>(POST, {
-				name: 'Resolution Format',
-				category: 'resolution',
+				name: 'Audio Codec Format',
+				category: 'audio',
 				conditions: [
 					{
-						name: 'Resolution Check',
-						type: 'resolution',
+						name: 'Codec Check',
+						type: 'audio_codec',
 						required: true,
 						negate: false,
-						resolution: '2160p'
+						audioCodec: 'truehd'
 					}
 				]
 			});
 
 			expect(status).toBe(201);
-			expect(data.name).toBe('Resolution Format');
+			expect(data.name).toBe('Audio Codec Format');
 		});
 
 		it('rejects reserved format IDs', async () => {

@@ -443,6 +443,22 @@ export type ProfileSizeLimitsRecord = typeof profileSizeLimits.$inferSelect;
 export type NewProfileSizeLimitsRecord = typeof profileSizeLimits.$inferInsert;
 
 /**
+ * Built-in Profile Score Overrides - User-editable format score diffs for built-in profiles
+ *
+ * Built-in profiles (quality, balanced, compact, streamer) are defined in code.
+ * This table stores only the diff: entries where the user changed the score from the shipped default.
+ * Missing formatId = use the shipped default. Entry with default value = no override.
+ */
+export const builtInProfileScoreOverrides = sqliteTable('built_in_profile_score_overrides', {
+	profileId: text('profile_id').primaryKey(),
+	formatScores: text('format_scores', { mode: 'json' }).$type<Record<string, number>>(),
+	updatedAt: text('updated_at').$defaultFn(() => new Date().toISOString())
+});
+
+export type BuiltInProfileScoreOverrideRecord = typeof builtInProfileScoreOverrides.$inferSelect;
+export type NewBuiltInProfileScoreOverrideRecord = typeof builtInProfileScoreOverrides.$inferInsert;
+
+/**
  * Custom Formats - User-defined format matching rules
  *
  * These extend the built-in formats with custom conditions.
@@ -485,7 +501,8 @@ export const customFormats = sqliteTable('custom_formats', {
 			source?: string;
 			pattern?: string;
 			codec?: string;
-			audio?: string;
+			audioCodec?: string;
+			audioChannels?: string;
 			hdr?: string | null;
 			streamingService?: string;
 			flag?: string;

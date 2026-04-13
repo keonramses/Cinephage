@@ -106,8 +106,9 @@ interface MigrationDefinition {
  * Version 76: Add media_sub_type to root_folders for anime library routing
  * Version 77: Add first-class libraries table with media library linkage
  * Version 78: Backfill existing movies and series to seeded system libraries
+ * Version 79: Migrate custom format audio conditions to canonical audio schema
  */
-export const CURRENT_SCHEMA_VERSION = 78;
+export const CURRENT_SCHEMA_VERSION = 80;
 
 const SYSTEM_LIBRARY_SEEDS = [
 	{
@@ -5460,6 +5461,122 @@ const MIGRATIONS: MigrationDefinition[] = [
 			}
 
 			logger.info('[SchemaSync] Backfilled existing media into seeded system libraries');
+		}
+	},
+
+	// Version 79: Convert saved custom format audio conditions to canonical fields
+	{
+		version: 79,
+		name: 'migrate_custom_format_audio_conditions',
+		apply: (sqlite) => {
+			if (
+				!tableExists(sqlite, 'custom_formats') ||
+				!columnExists(sqlite, 'custom_formats', 'conditions')
+			) {
+				logger.info(
+					'[SchemaSync] custom_formats table not found, skipping audio condition migration'
+				);
+				return;
+			}
+
+			const rows = sqlite
+				.prepare(`SELECT "id", "conditions" FROM "custom_formats" WHERE "conditions" IS NOT NULL`)
+				.all() as Array<{ id: string; conditions: string | null }>;
+
+			const updateConditions = sqlite.prepare(
+				`UPDATE "custom_formats" SET "conditions" = ?, "updated_at" = ? WHERE "id" = ?`
+			);
+
+			let migratedCount = 0;
+			const now = new Date().toISOString();
+
+			for (const row of rows) {
+				if (!row.conditions) continue;
+
+				let parsedConditions: unknown;
+				try {
+					parsedConditions = JSON.parse(row.conditions);
+				} catch (error) {
+					logger.warn(
+						{
+							formatId: row.id,
+							error: error instanceof Error ? error.message : String(error)
+						},
+						'[SchemaSync] Skipping custom format with invalid conditions JSON'
+					);
+					continue;
+				}
+
+				if (!Array.isArray(parsedConditions)) {
+					continue;
+				}
+
+				let changed = false;
+				const migratedConditions = parsedConditions.map((condition) => {
+					if (
+						typeof condition !== 'object' ||
+						condition === null ||
+						!('type' in condition) ||
+						(condition as { type?: unknown }).type !== 'audio'
+					) {
+						return condition;
+					}
+
+					const legacy = condition as Record<string, unknown>;
+					const { audio, ...rest } = legacy;
+
+					if (audio === 'atmos') {
+						changed = true;
+						return {
+							...rest,
+							type: 'audio_atmos'
+						};
+					}
+
+					if (typeof audio === 'string' && audio.length > 0) {
+						changed = true;
+						return {
+							...rest,
+							type: 'audio_codec',
+							audioCodec: audio
+						};
+					}
+
+					return condition;
+				});
+
+				if (!changed) {
+					continue;
+				}
+
+				updateConditions.run(JSON.stringify(migratedConditions), now, row.id);
+				migratedCount += 1;
+			}
+
+			logger.info(
+				{ migratedCount },
+				'[SchemaSync] Migrated custom format audio conditions to canonical schema'
+			);
+		}
+	},
+	// V80: Built-in profile score overrides - stores user-editable format score diffs for built-in profiles
+	// Built-in profiles (quality, balanced, compact, streamer) have shipped defaults in code.
+	// User edits to those scores are stored here as diffs only (entries different from shipped defaults).
+	{
+		version: 80,
+		name: 'built_in_profile_score_overrides',
+		apply: (sqlite) => {
+			sqlite
+				.prepare(
+					`
+				CREATE TABLE IF NOT EXISTS "built_in_profile_score_overrides" (
+					"profile_id" text PRIMARY KEY,
+					"format_scores" text,
+					"updated_at" text
+				)
+			`
+				)
+				.run();
 		}
 	}
 ];

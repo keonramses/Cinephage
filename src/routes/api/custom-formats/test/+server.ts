@@ -17,10 +17,13 @@ const conditionSchema = z.object({
 		'release_title',
 		'release_group',
 		'codec',
-		'audio',
+		'audio_codec',
+		'audio_channels',
+		'audio_atmos',
 		'hdr',
 		'streaming_service',
-		'flag'
+		'flag',
+		'indexer'
 	]),
 	required: z.boolean(),
 	negate: z.boolean(),
@@ -28,10 +31,12 @@ const conditionSchema = z.object({
 	source: z.string().optional(),
 	pattern: z.string().optional(),
 	codec: z.string().optional(),
-	audio: z.string().optional(),
+	audioCodec: z.string().optional(),
+	audioChannels: z.string().optional(),
 	hdr: z.string().nullable().optional(),
 	streamingService: z.string().optional(),
-	flag: z.enum(['isRemux', 'isRepack', 'isProper', 'is3d']).optional()
+	flag: z.enum(['isRemux', 'isRepack', 'isProper', 'is3d']).optional(),
+	indexer: z.string().optional()
 });
 
 const testSchema = z.object({
@@ -102,7 +107,9 @@ export const POST: RequestHandler = async (event) => {
 				source: attributes.source,
 				codec: attributes.codec,
 				hdr: attributes.hdr,
-				audio: attributes.audio,
+				audioCodec: attributes.audioCodec,
+				audioChannels: attributes.audioChannels,
+				hasAtmos: attributes.hasAtmos,
 				releaseGroup: attributes.releaseGroup,
 				streamingService: attributes.streamingService,
 				isRemux: attributes.isRemux,
