@@ -1,4 +1,11 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
+import { ALL_FORMATS } from '../scoring/formats/index.js';
+
+vi.mock('../scoring/formats/registry.js', () => ({
+	getActiveFormats: () => ALL_FORMATS,
+	invalidateFormatCache: () => {}
+}));
+
 import { QualityFilter } from './QualityFilter';
 import { parseRelease } from '../indexers/parser';
 import { BALANCED_PROFILE, COMPACT_PROFILE, QUALITY_PROFILE } from '../scoring';

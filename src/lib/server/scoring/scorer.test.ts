@@ -1,4 +1,11 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
+import { ALL_FORMATS } from './formats/index.js';
+
+vi.mock('./formats/registry.js', () => ({
+	getActiveFormats: () => ALL_FORMATS,
+	invalidateFormatCache: () => {}
+}));
+
 import { scoreRelease, isUpgrade } from './scorer';
 import { DEFAULT_PROFILES } from './profiles';
 import type { ScoringProfile } from './types';
