@@ -9,9 +9,7 @@
 
 import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
-import { streamCache } from '$lib/server/streaming/cache';
-import { getStreamCache } from '$lib/server/streaming/cache/StreamCache';
-import { getCinephageBackendClient } from '$lib/server/indexers/streaming/CinephageBackendClient';
+import { getCinephageApiService, getPlaybackSessionStore } from '$lib/server/streaming';
 import { logger } from '$lib/logging';
 
 const streamLog = { logDomain: 'streams' as const };
@@ -29,26 +27,12 @@ export interface StreamingStatusResponse {
 		circuitBrokenProviders: number;
 	};
 	cache: {
-		streamCache: {
-			size: number;
-			maxSize: number;
-			hits: number;
-			misses: number;
-			hitRate: number;
-		};
-		validationCache: {
-			size: number;
-			maxSize: number;
-			hits: number;
-			misses: number;
-			hitRate: number;
-		};
-		negativeCache: {
-			size: number;
-			maxSize: number;
-			hits: number;
-			misses: number;
-			hitRate: number;
+		sessions: {
+			active: number;
+			resources: number;
+			expired: number;
+			created: number;
+			reused: number;
 		};
 	};
 	cinephageApi: {
@@ -67,12 +51,8 @@ export interface StreamingStatusResponse {
  */
 export const GET: RequestHandler = async () => {
 	try {
-		// Get cache statistics
-		const cacheStats = getStreamCache().getStats();
-
-		// Get Cinephage backend status
-		const cinephageBackend = getCinephageBackendClient();
-		const backendHealth = await cinephageBackend.getHealth();
+		const sessionStats = getPlaybackSessionStore().getStats();
+		const backendHealth = await getCinephageApiService().getHealth();
 
 		const response: StreamingStatusResponse = {
 			success: true,
@@ -84,26 +64,12 @@ export const GET: RequestHandler = async () => {
 				circuitBrokenProviders: 0
 			},
 			cache: {
-				streamCache: {
-					size: cacheStats.streamCache.size,
-					maxSize: cacheStats.streamCache.maxSize,
-					hits: cacheStats.streamCache.hits,
-					misses: cacheStats.streamCache.misses,
-					hitRate: Math.round(cacheStats.streamCache.hitRate * 1000) / 1000
-				},
-				validationCache: {
-					size: cacheStats.validationCache.size,
-					maxSize: cacheStats.validationCache.maxSize,
-					hits: cacheStats.validationCache.hits,
-					misses: cacheStats.validationCache.misses,
-					hitRate: Math.round(cacheStats.validationCache.hitRate * 1000) / 1000
-				},
-				negativeCache: {
-					size: cacheStats.negativeCache.size,
-					maxSize: cacheStats.negativeCache.maxSize,
-					hits: cacheStats.negativeCache.hits,
-					misses: cacheStats.negativeCache.misses,
-					hitRate: Math.round(cacheStats.negativeCache.hitRate * 1000) / 1000
+				sessions: {
+					active: sessionStats.activeSessions,
+					resources: sessionStats.resources,
+					expired: sessionStats.expiredSessions,
+					created: sessionStats.createdSessions,
+					reused: sessionStats.reusedSessions
 				}
 			},
 			cinephageApi: {
@@ -111,14 +77,20 @@ export const GET: RequestHandler = async () => {
 				healthy: backendHealth.healthy,
 				baseUrl: backendHealth.baseUrl,
 				missing: backendHealth.missing,
-				version: backendHealth.version,
+				version: backendHealth.upstreamVersion ?? backendHealth.version,
 				commit: backendHealth.commit
 			}
 		};
 
 		return json(response);
 	} catch (error) {
-		logger.error('Failed to get streaming status', error, streamLog);
+		logger.error(
+			{
+				err: error,
+				...streamLog
+			},
+			'Failed to get streaming status'
+		);
 		return json({ success: false, error: 'Failed to get streaming status' }, { status: 500 });
 	}
 };
@@ -136,12 +108,11 @@ export const POST: RequestHandler = async ({ request }) => {
 		const { action } = body;
 
 		if (action === 'reset-all') {
-			streamCache.clear();
-			getStreamCache().clear();
-			logger.info('All streaming caches reset', streamLog);
+			getPlaybackSessionStore().clear();
+			logger.info({ action, ...streamLog }, 'Cleared all playback sessions');
 			return json({
 				success: true,
-				message: 'All streaming caches reset'
+				message: 'All playback sessions reset'
 			});
 		}
 
@@ -154,7 +125,13 @@ export const POST: RequestHandler = async ({ request }) => {
 			{ status: 400 }
 		);
 	} catch (error) {
-		logger.error('Failed to process streaming status action', error, streamLog);
+		logger.error(
+			{
+				err: error,
+				...streamLog
+			},
+			'Failed to process streaming status action'
+		);
 		return json({ success: false, error: 'Failed to process action' }, { status: 500 });
 	}
 };

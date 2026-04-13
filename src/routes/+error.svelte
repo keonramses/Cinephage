@@ -10,7 +10,7 @@
 	let { error }: { error: App.Error | undefined } = $props();
 	const status = $derived(page.status);
 	const message = $derived(error?.message || fallbackMessage);
-	const supportId = $derived(error?.supportId ?? m.error_supportIdUnavailable());
+	const errorId = $derived(error?.supportId ?? m.error_supportIdUnavailable());
 </script>
 
 <svelte:head>
@@ -50,7 +50,7 @@
 					{m.error_supportIdLabel()}
 				</p>
 				<p class="mt-2 font-mono text-sm break-all text-red-100">
-					{supportId}
+					{errorId}
 				</p>
 			</div>
 		</div>

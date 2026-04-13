@@ -1,28 +1,16 @@
 <script lang="ts">
-	import * as m from '$lib/paraglide/messages.js';
 	import { SvelteMap, SvelteSet, SvelteURLSearchParams } from 'svelte/reactivity';
-	import {
-		ChevronDown,
-		ChevronRight,
-		Download,
-		Terminal,
-		Pause,
-		Play,
-		RotateCcw,
-		Search,
-		Wifi,
-		WifiOff,
-		ArrowDown,
-		Loader2
-	} from 'lucide-svelte';
+	import { Download, Loader2, Wifi, WifiOff } from 'lucide-svelte';
+
+	import * as m from '$lib/paraglide/messages.js';
+	import { SettingsPage, SettingsSection } from '$lib/components/ui/settings';
+	import { layoutState, deriveMobileSseStatus } from '$lib/layout.svelte';
 	import type {
 		CapturedLogDomain,
 		CapturedLogEntry,
 		CapturedLogLevel
 	} from '$lib/logging/log-capture';
-	import { SettingsPage } from '$lib/components/ui/settings';
 	import { createDynamicSSE } from '$lib/sse';
-	import { layoutState, deriveMobileSseStatus } from '$lib/layout.svelte';
 	import { toasts } from '$lib/stores/toast.svelte';
 
 	interface LogSeedEvent {
@@ -31,171 +19,303 @@
 
 	interface PageData {
 		initialEntries: CapturedLogEntry[];
+		initialTotal: number;
+		initialHasMore: boolean;
+		initialPage: number;
+		initialPageSize: number;
 		availableLevels: CapturedLogLevel[];
 		availableDomains: CapturedLogDomain[];
+		retentionDays: number;
+		defaultRetentionDays: number;
+		maxRetentionDays: number;
 	}
 
-	let {
-		data
-	}: {
-		data: PageData;
-	} = $props();
+	interface LogHistoryResponse {
+		success: boolean;
+		entries?: CapturedLogEntry[];
+		total?: number;
+		page?: number;
+		pageSize?: number;
+		hasMore?: boolean;
+		error?: string;
+	}
 
-	// ── Filter state ────────────────────────────────────────────
-	let activeLevels = new SvelteSet<CapturedLogLevel>(['info', 'warn', 'error']);
-	let selectedDomain = $state<CapturedLogDomain | 'all'>('all');
-	let searchDraft = $state('');
-	let search = $state('');
-	let searchTimer: ReturnType<typeof setTimeout> | undefined;
+	const LIVE_BUFFER_LIMIT = 300;
+	const DEFAULT_LEVELS: CapturedLogLevel[] = ['debug', 'info', 'warn', 'error'];
 
-	// ── View state ──────────────────────────────────────────────
-	let paused = $state(false);
-	let seededEntriesFromData = false;
-	const initialSeedEntries = $derived.by(() => structuredClone(data.initialEntries).slice(-200));
-	// Seed entries from SSR data so the UI has content immediately.
-	// The SSE `logs:seed` event will replace these once the stream connects.
+	let { data }: { data: PageData } = $props();
+	const availableLevels = $derived(data.availableLevels);
+	const availableDomains = $derived(data.availableDomains);
+	const defaultRetentionDays = $derived(data.defaultRetentionDays);
+	const maxRetentionDays = $derived(data.maxRetentionDays);
+
 	let entries = $state<CapturedLogEntry[]>([]);
-	let pendingEntries = $state<CapturedLogEntry[]>([]);
-	let expandedEntries = new SvelteSet<string>();
-	let bufferedById = new SvelteMap<string, CapturedLogEntry>();
-	let autoScroll = $state(true);
-	let terminalEl: HTMLDivElement | undefined = $state();
+	let historyLoading = $state(false);
+	let historyError = $state('');
+	let historyPage = $state(1);
+	let historyPageSize = 100;
+	let historyTotal = $state(0);
+	let historyHasMore = $state(false);
+	let historyPagesLoaded = new SvelteSet<number>();
+
+	let search = $state('');
+	let supportId = $state('');
+	let requestId = $state('');
+	let correlationId = $state('');
+	let selectedDomain = $state<CapturedLogDomain | 'all'>('all');
+	let levels = new SvelteSet<CapturedLogLevel>(DEFAULT_LEVELS);
+	let from = $state('');
+	let to = $state('');
+
+	let retentionDays = $state(7);
+	let retentionSaving = $state(false);
+
+	let livePaused = $state(false);
+	let autoFollowEnabled = $state(true);
+	let listViewport = $state<HTMLDivElement | null>(null);
+	let isNearTop = $state(true);
+	let pendingLiveEntries = $state<CapturedLogEntry[]>([]);
+
+	let selectedEntryId = $state<string | null>(null);
+
+	let historyAbortController: AbortController | null = null;
+	let historyDebounceTimer: ReturnType<typeof setTimeout> | null = null;
+	let lastLoadedFilterKey = '';
+	let initialized = false;
 
 	$effect(() => {
-		if (seededEntriesFromData) return;
-		entries = initialSeedEntries;
-		seededEntriesFromData = true;
-	});
-
-	// ── Debounced search ────────────────────────────────────────
-	$effect(() => {
-		void searchDraft;
-		clearTimeout(searchTimer);
-		searchTimer = setTimeout(() => {
-			search = searchDraft.trim();
-		}, 250);
-
-		return () => {
-			clearTimeout(searchTimer);
-		};
-	});
-
-	// ── Level toggle helpers ────────────────────────────────────
-	function toggleLevel(level: CapturedLogLevel) {
-		if (activeLevels.has(level)) {
-			// Don't allow deselecting all levels
-			if (activeLevels.size <= 1) return;
-			activeLevels.delete(level);
-		} else {
-			activeLevels.add(level);
+		if (initialized) return;
+		initialized = true;
+		entries = structuredClone(data.initialEntries);
+		historyPage = data.initialPage;
+		historyPageSize = data.initialPageSize;
+		historyTotal = data.initialTotal;
+		historyHasMore = data.initialHasMore;
+		historyPagesLoaded.clear();
+		if (data.initialEntries.length > 0) {
+			historyPagesLoaded.add(data.initialPage);
 		}
+		retentionDays = data.retentionDays;
+		selectedEntryId = data.initialEntries[0]?.id ?? null;
+		lastLoadedFilterKey = buildFilterKey();
+	});
+
+	$effect(() => {
+		if (!initialized) return;
+		if (retentionSaving) return;
+		retentionDays = data.retentionDays;
+	});
+
+	const selectedEntry = $derived.by(
+		() => entries.find((entry) => entry.id === selectedEntryId) ?? entries[0] ?? null
+	);
+
+	const pendingLiveCount = $derived(pendingLiveEntries.length);
+	const showJumpToLatest = $derived.by(
+		() => pendingLiveCount > 0 || !isNearTop || !autoFollowEnabled || livePaused
+	);
+	const liveStatusLabel = $derived.by(() => {
+		if (livePaused) return 'Live paused';
+		if (autoFollowEnabled && isNearTop) return 'Following newest entries';
+		if (pendingLiveCount > 0) return 'Browsing while new entries queue';
+		return 'Browsing current results';
+	});
+
+	const hasActiveFilters = $derived.by(
+		() =>
+			search.trim().length > 0 ||
+			supportId.trim().length > 0 ||
+			requestId.trim().length > 0 ||
+			correlationId.trim().length > 0 ||
+			selectedDomain !== 'all' ||
+			levels.size !== availableLevels.length ||
+			from.length > 0 ||
+			to.length > 0
+	);
+
+	function toDateTimeLocalValue(date: Date): string {
+		const pad = (value: number) => String(value).padStart(2, '0');
+		return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(
+			date.getHours()
+		)}:${pad(date.getMinutes())}`;
 	}
 
-	function allLevelsActive(): boolean {
-		return data.availableLevels.every((l) => activeLevels.has(l));
-	}
-
-	// ── Filter key for SSE reconnection ─────────────────────────
-	let levelsKey = $derived([...activeLevels].sort().join(','));
-
-	let filterKey = $derived.by(() => `${levelsKey}|${selectedDomain}|${search}`);
-
-	let isFirstFilterRun = true;
-	$effect(() => {
-		void filterKey;
-		if (isFirstFilterRun) {
-			isFirstFilterRun = false;
-			return;
-		}
-		entries = [];
-		pendingEntries = [];
-		bufferedById.clear();
-		expandedEntries.clear();
-	});
-
-	// ── SSE URL construction ────────────────────────────────────
-	let liveUrl = $derived.by(() => {
+	function buildQueryParams(page?: number): SvelteURLSearchParams {
 		const params = new SvelteURLSearchParams();
-		// Send levels as comma-separated list
-		if (!allLevelsActive() && activeLevels.size > 0) {
-			params.set('levels', [...activeLevels].join(','));
+		params.set('pageSize', String(historyPageSize));
+		params.set('levels', [...levels].join(','));
+
+		if (page) {
+			params.set('page', String(page));
 		}
+
 		if (selectedDomain !== 'all') {
 			params.set('logDomain', selectedDomain);
 		}
-		if (search) {
-			params.set('search', search);
-		}
-		params.set('limit', '200');
-		return `/api/settings/logs/stream?${params.toString()}`;
-	});
 
-	let downloadUrl = $derived.by(() => {
-		const params = new SvelteURLSearchParams();
-		if (!allLevelsActive() && activeLevels.size > 0) {
-			params.set('levels', [...activeLevels].join(','));
+		if (search.trim()) {
+			params.set('search', search.trim());
 		}
-		if (selectedDomain !== 'all') {
-			params.set('logDomain', selectedDomain);
+
+		if (supportId.trim()) {
+			params.set('supportId', supportId.trim());
 		}
-		if (search) {
-			params.set('search', search);
+
+		if (requestId.trim()) {
+			params.set('requestId', requestId.trim());
 		}
-		params.set('limit', '1000');
+
+		if (correlationId.trim()) {
+			params.set('correlationId', correlationId.trim());
+		}
+
+		if (from) {
+			params.set('from', new Date(from).toISOString());
+		}
+
+		if (to) {
+			params.set('to', new Date(to).toISOString());
+		}
+
+		return params;
+	}
+
+	function buildFilterKey(): string {
+		return [
+			[...levels].sort().join(','),
+			selectedDomain,
+			search.trim(),
+			supportId.trim(),
+			requestId.trim(),
+			correlationId.trim(),
+			from || 'none',
+			to || 'none'
+		].join('||');
+	}
+
+	function buildDownloadUrl(): string {
+		const params = buildQueryParams();
+		params.set('limit', '5000');
 		params.set('format', 'jsonl');
 		return `/api/settings/logs/download?${params.toString()}`;
-	});
+	}
 
-	// ── Dedup and trim ──────────────────────────────────────────
-	function dedupeAndTrim(items: CapturedLogEntry[], limit: number): CapturedLogEntry[] {
-		const seen = new SvelteSet<string>();
-		const result: CapturedLogEntry[] = [];
+	function buildLiveUrl(): string {
+		const params = buildQueryParams();
+		params.set('limit', String(LIVE_BUFFER_LIMIT));
+		return `/api/settings/logs/stream?${params.toString()}`;
+	}
 
-		for (let i = items.length - 1; i >= 0; i -= 1) {
-			const item = items[i];
-			if (seen.has(item.id)) continue;
-			seen.add(item.id);
-			result.unshift(item);
-			if (result.length >= limit) break;
+	function dedupeAndSort(items: CapturedLogEntry[], limit?: number): CapturedLogEntry[] {
+		const byId = new SvelteMap<string, CapturedLogEntry>();
+
+		for (const item of items) {
+			if (!byId.has(item.id)) {
+				byId.set(item.id, item);
+			}
 		}
 
-		return result;
+		const sorted = [...byId.values()].sort((a, b) => b.timestamp.localeCompare(a.timestamp));
+		return typeof limit === 'number' ? sorted.slice(0, limit) : sorted;
 	}
 
-	function mergeIntoEntries(nextEntries: CapturedLogEntry[]): void {
-		entries = dedupeAndTrim([...entries, ...nextEntries], 200);
+	function selectEntry(entry: CapturedLogEntry): void {
+		selectedEntryId = entry.id;
 	}
 
-	function bufferEntry(entry: CapturedLogEntry): void {
-		bufferedById.set(entry.id, entry);
-		pendingEntries = Array.from(bufferedById.values()).slice(-200);
+	function handleListScroll(): void {
+		if (!listViewport) return;
+		isNearTop = listViewport.scrollTop < 24;
 	}
 
-	function flushPendingEntries(): void {
-		if (pendingEntries.length === 0) return;
-		mergeIntoEntries(pendingEntries);
-		pendingEntries = [];
-		bufferedById.clear();
+	async function scrollToLatest(): Promise<void> {
+		await Promise.resolve();
+		listViewport?.scrollTo({ top: 0, behavior: 'smooth' });
+		isNearTop = true;
 	}
 
-	// ── SSE connection ──────────────────────────────────────────
+	function toggleLevel(level: CapturedLogLevel): void {
+		if (levels.has(level)) {
+			if (levels.size <= 1) return;
+			levels.delete(level);
+			return;
+		}
+
+		levels.add(level);
+	}
+
+	function resetFilters(): void {
+		search = '';
+		supportId = '';
+		requestId = '';
+		correlationId = '';
+		selectedDomain = 'all';
+		levels.clear();
+		for (const level of DEFAULT_LEVELS) {
+			levels.add(level);
+		}
+		from = '';
+		to = '';
+	}
+
+	function setQuickRange(hours: number): void {
+		const nextTo = new Date();
+		to = toDateTimeLocalValue(nextTo);
+		from = toDateTimeLocalValue(new Date(nextTo.getTime() - hours * 60 * 60 * 1000));
+	}
+
+	function replaceEntries(nextEntries: CapturedLogEntry[]): void {
+		entries = dedupeAndSort(nextEntries);
+		if (!selectedEntryId && entries[0]) {
+			selectedEntryId = entries[0].id;
+		}
+	}
+
+	function queueLiveEntry(entry: CapturedLogEntry): void {
+		pendingLiveEntries = dedupeAndSort([entry, ...pendingLiveEntries], LIVE_BUFFER_LIMIT);
+	}
+
+	function flushPendingLiveEntries(options: { scroll?: boolean } = {}): void {
+		if (pendingLiveEntries.length === 0) {
+			if (options.scroll) {
+				void scrollToLatest();
+			}
+			return;
+		}
+
+		replaceEntries([...pendingLiveEntries, ...entries]);
+		pendingLiveEntries = [];
+
+		if (options.scroll) {
+			void scrollToLatest();
+		}
+	}
+
+	function mergeLiveSeed(seedEntries: CapturedLogEntry[]): void {
+		replaceEntries([...seedEntries, ...entries]);
+	}
+
+	function mergeLiveEntry(entry: CapturedLogEntry): void {
+		if (livePaused || !autoFollowEnabled || !isNearTop) {
+			queueLiveEntry(entry);
+			return;
+		}
+
+		replaceEntries([entry, ...entries]);
+		void scrollToLatest();
+	}
+
 	const sse = createDynamicSSE<{
 		'logs:seed': LogSeedEvent;
 		'log:entry': CapturedLogEntry;
 	}>(
-		() => liveUrl,
+		() => buildLiveUrl(),
 		{
-			'logs:seed': (event) => {
-				entries = dedupeAndTrim(event.entries, 200);
-				pendingEntries = [];
-				bufferedById.clear();
+			'logs:seed': ({ entries: seedEntries }) => {
+				mergeLiveSeed(seedEntries);
 			},
 			'log:entry': (entry) => {
-				if (paused) {
-					bufferEntry(entry);
-					return;
-				}
-				mergeIntoEntries([entry]);
+				mergeLiveEntry(entry);
 			}
 		},
 		{
@@ -210,79 +330,175 @@
 		};
 	});
 
-	// ── Auto-scroll on new entries ──────────────────────────────
 	$effect(() => {
-		void entries.length;
-		if (autoScroll && terminalEl) {
-			requestAnimationFrame(() => {
-				if (terminalEl) {
-					terminalEl.scrollTop = terminalEl.scrollHeight;
-				}
-			});
-		}
+		if (livePaused) return;
+		if (!autoFollowEnabled) return;
+		if (!isNearTop) return;
+		if (pendingLiveEntries.length === 0) return;
+
+		flushPendingLiveEntries({ scroll: true });
 	});
 
-	function handleTerminalScroll() {
-		if (!terminalEl) return;
-		const { scrollTop, scrollHeight, clientHeight } = terminalEl;
-		// Consider "at bottom" if within 40px of the end
-		autoScroll = scrollHeight - scrollTop - clientHeight < 40;
-	}
+	async function loadHistoryPage(
+		page: number,
+		mode: 'replace' | 'append' = 'replace'
+	): Promise<void> {
+		historyAbortController?.abort();
+		const controller = new AbortController();
+		historyAbortController = controller;
 
-	function scrollToBottom() {
-		autoScroll = true;
-		if (terminalEl) {
-			terminalEl.scrollTop = terminalEl.scrollHeight;
-		}
-	}
+		historyLoading = true;
+		historyError = '';
 
-	// ── Derived labels ──────────────────────────────────────────
-	const entryCountLabel = $derived(
-		`${entries.length} ${entries.length === 1 ? 'entry' : 'entries'}`
-	);
-	const pendingCountLabel = $derived(
-		pendingEntries.length > 0 ? `${pendingEntries.length} buffered` : ''
-	);
-
-	// ── Actions ─────────────────────────────────────────────────
-	function clearView() {
-		entries = [];
-		pendingEntries = [];
-		bufferedById.clear();
-		expandedEntries.clear();
-	}
-
-	function togglePause() {
-		paused = !paused;
-		if (!paused) {
-			flushPendingEntries();
-		}
-	}
-
-	async function downloadLogs() {
 		try {
-			const response = await fetch(downloadUrl);
+			const response = await fetch(
+				`/api/settings/logs/history?${buildQueryParams(page).toString()}`,
+				{
+					signal: controller.signal
+				}
+			);
+
+			const payload = (await response.json().catch(() => null)) as LogHistoryResponse | null;
+			if (!response.ok || !payload?.success) {
+				throw new Error(payload?.error ?? 'Failed to load log history');
+			}
+
+			const nextEntries = payload.entries ?? [];
+			entries =
+				mode === 'append'
+					? dedupeAndSort([...entries, ...nextEntries])
+					: dedupeAndSort(nextEntries);
+
+			historyTotal = payload.total ?? 0;
+			historyPage = payload.page ?? page;
+			historyHasMore = payload.hasMore ?? false;
+			if (mode === 'append') {
+				historyPagesLoaded.add(historyPage);
+			} else {
+				historyPagesLoaded.clear();
+				historyPagesLoaded.add(historyPage);
+			}
+			lastLoadedFilterKey = buildFilterKey();
+			pendingLiveEntries = [];
+
+			if (entries[0]) {
+				selectedEntryId = entries.some((entry) => entry.id === selectedEntryId)
+					? selectedEntryId
+					: entries[0].id;
+			} else {
+				selectedEntryId = null;
+			}
+		} catch (error) {
+			if (error instanceof DOMException && error.name === 'AbortError') {
+				return;
+			}
+
+			historyError = error instanceof Error ? error.message : 'Failed to load log history';
+		} finally {
+			if (historyAbortController === controller) {
+				historyAbortController = null;
+			}
+			historyLoading = false;
+		}
+	}
+
+	function refreshCurrentView(): void {
+		void loadHistoryPage(1, 'replace');
+	}
+
+	function jumpToLatest(): void {
+		livePaused = false;
+		autoFollowEnabled = true;
+		flushPendingLiveEntries({ scroll: true });
+	}
+
+	function loadOlderHistory(): void {
+		if (!historyHasMore || historyLoading) return;
+		void loadHistoryPage(historyPage + 1, 'append');
+	}
+
+	$effect(() => {
+		if (!initialized) return;
+		const filterKey = buildFilterKey();
+		if (filterKey === lastLoadedFilterKey) {
+			return;
+		}
+
+		if (historyDebounceTimer) {
+			clearTimeout(historyDebounceTimer);
+		}
+
+		historyDebounceTimer = setTimeout(() => {
+			void loadHistoryPage(1, 'replace');
+		}, 250);
+
+		return () => {
+			if (historyDebounceTimer) {
+				clearTimeout(historyDebounceTimer);
+				historyDebounceTimer = null;
+			}
+		};
+	});
+
+	async function downloadHistoryLogs(): Promise<void> {
+		try {
+			const response = await fetch(buildDownloadUrl());
 			if (!response.ok) {
-				throw new Error('Failed to download logs');
+				throw new Error('Failed to download log history');
 			}
 
 			const blob = await response.blob();
 			const href = URL.createObjectURL(blob);
 			const link = document.createElement('a');
 			link.href = href;
-			link.download = 'cinephage-logs.jsonl';
+			link.download = 'cinephage-logs-history.jsonl';
 			document.body.appendChild(link);
 			link.click();
 			link.remove();
 			URL.revokeObjectURL(href);
 		} catch (error) {
-			toasts.error(error instanceof Error ? error.message : m.settings_logs_failedToDownload());
+			toasts.error(error instanceof Error ? error.message : 'Failed to download log history');
 		}
 	}
 
-	// ── Format helpers ──────────────────────────────────────────
+	async function saveRetentionDays(): Promise<void> {
+		retentionSaving = true;
+		try {
+			const response = await fetch('/api/settings/logs/settings', {
+				method: 'PUT',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({ retentionDays })
+			});
+
+			const payload = await response.json().catch(() => null);
+			if (!response.ok || !payload?.success) {
+				throw new Error(payload?.error ?? 'Failed to save log retention');
+			}
+
+			retentionDays = payload.retentionDays ?? retentionDays;
+			toasts.success(`Log retention updated to ${retentionDays} days`);
+		} catch (error) {
+			toasts.error(error instanceof Error ? error.message : 'Failed to save log retention');
+		} finally {
+			retentionSaving = false;
+		}
+	}
+
 	function formatTimestamp(value: string): string {
 		return new Intl.DateTimeFormat(undefined, {
+			hour: '2-digit',
+			minute: '2-digit',
+			second: '2-digit',
+			fractionalSecondDigits: 3,
+			hour12: false
+		}).format(new Date(value));
+	}
+
+	function formatFullTimestamp(value: string): string {
+		return new Intl.DateTimeFormat(undefined, {
+			year: 'numeric',
+			month: 'short',
+			day: '2-digit',
 			hour: '2-digit',
 			minute: '2-digit',
 			second: '2-digit',
@@ -294,7 +510,7 @@
 	function levelColor(level: CapturedLogLevel): string {
 		switch (level) {
 			case 'debug':
-				return 'text-base-content/40';
+				return 'text-base-content/50';
 			case 'info':
 				return 'text-info';
 			case 'warn':
@@ -304,39 +520,27 @@
 		}
 	}
 
-	function levelToggleClass(level: CapturedLogLevel, active: boolean): string {
-		if (!active) return 'bg-base-300/50 text-base-content/30 border-base-300';
+	function levelBadgeClass(level: CapturedLogLevel, active: boolean): string {
+		if (!active) return 'border-base-300 bg-base-200 text-base-content/45';
+
 		switch (level) {
 			case 'debug':
-				return 'bg-base-content/10 text-base-content/70 border-base-content/30';
+				return 'border-base-content/20 bg-base-content/10 text-base-content/70';
 			case 'info':
-				return 'bg-info/15 text-info border-info/40';
+				return 'border-info/30 bg-info/10 text-info';
 			case 'warn':
-				return 'bg-warning/15 text-warning border-warning/40';
+				return 'border-warning/30 bg-warning/10 text-warning';
 			case 'error':
-				return 'bg-error/15 text-error border-error/40';
+				return 'border-error/30 bg-error/10 text-error';
 		}
 	}
 
 	function getSource(entry: CapturedLogEntry): string {
 		const parts = [entry.logDomain, entry.component, entry.service, entry.module].filter(
-			(v): v is string => typeof v === 'string' && v.length > 0
+			(value): value is string => typeof value === 'string' && value.length > 0
 		);
-		// Deduplicate adjacent identical values (e.g., component derived from module by sanitizeContext)
-		const deduped = parts.filter((v, i) => i === 0 || v !== parts[i - 1]);
-		return deduped.length > 0 ? deduped.join('/') : '';
-	}
-
-	function hasDetails(entry: CapturedLogEntry): boolean {
-		return Boolean(
-			entry.method ||
-			entry.path ||
-			entry.requestId ||
-			entry.supportId ||
-			entry.correlationId ||
-			entry.data ||
-			entry.err
-		);
+		const deduped = parts.filter((value, index) => index === 0 || value !== parts[index - 1]);
+		return deduped.length > 0 ? deduped.join('/') : 'unscoped';
 	}
 
 	function formatDetails(entry: CapturedLogEntry): string {
@@ -358,26 +562,14 @@
 		return JSON.stringify(obj, null, 2);
 	}
 
-	function toggleExpanded(entryId: string): void {
-		if (expandedEntries.has(entryId)) {
-			expandedEntries.delete(entryId);
-		} else {
-			expandedEntries.add(entryId);
-		}
-	}
+	async function copyText(value: string, label: string): Promise<void> {
+		if (!value || !navigator.clipboard) return;
 
-	function isExpanded(entryId: string): boolean {
-		return expandedEntries.has(entryId);
-	}
-
-	function entryRowBorderClass(level: CapturedLogLevel): string {
-		switch (level) {
-			case 'error':
-				return 'border-l-2 border-l-error/50';
-			case 'warn':
-				return 'border-l-2 border-l-warning/40';
-			default:
-				return 'border-l-2 border-l-transparent';
+		try {
+			await navigator.clipboard.writeText(value);
+			toasts.success(`${label} copied`);
+		} catch {
+			toasts.error(`Failed to copy ${label.toLowerCase()}`);
 		}
 	}
 </script>
@@ -388,254 +580,332 @@
 
 <SettingsPage title={m.settings_logs_heading()} subtitle={m.settings_logs_subtitle()}>
 	{#snippet actions()}
-		{#if sse.isConnected}
-			<span class="badge gap-1.5 text-xs badge-success">
+		<span
+			class:badge-success={sse.isConnected}
+			class:badge-warning={!sse.isConnected}
+			class="badge gap-1.5 text-xs"
+		>
+			{#if sse.isConnected}
 				<Wifi class="h-3 w-3" />
-				{m.common_live()}
-			</span>
-		{:else}
-			<span class="badge gap-1.5 text-xs badge-warning">
+				Live connected
+			{:else}
 				<WifiOff class="h-3 w-3" />
-				{m.common_connecting()}
-			</span>
-		{/if}
-		<span class="badge badge-ghost text-xs">{entryCountLabel}</span>
-		{#if paused && pendingCountLabel}
-			<span class="badge badge-outline text-xs badge-warning">{pendingCountLabel}</span>
+				Live reconnecting
+			{/if}
+		</span>
+		<span class="badge badge-ghost text-xs">{historyTotal} matches</span>
+		{#if pendingLiveCount > 0}
+			<button
+				class="badge cursor-pointer badge-outline text-xs badge-warning"
+				onclick={() => flushPendingLiveEntries({ scroll: true })}
+			>
+				{pendingLiveCount} new entries
+			</button>
 		{/if}
 	{/snippet}
 
-	<!-- Toolbar -->
-	<div class="rounded-lg border border-base-300 bg-base-200 p-3">
-		<div class="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-			<!-- Left side: Level toggles + Domain + Search -->
-			<div class="flex flex-wrap items-center gap-2">
-				<!-- Level toggle badges -->
-				<div class="flex items-center gap-1">
-					{#each data.availableLevels as level (level)}
-						<button
-							class="cursor-pointer rounded border px-2.5 py-1 font-mono text-xs font-semibold tracking-wide uppercase transition-all select-none {levelToggleClass(
-								level,
-								activeLevels.has(level)
-							)}"
-							onclick={() => toggleLevel(level)}
-							title={m.settings_logs_toggleLevel({ level })}
-						>
-							{level}
-						</button>
-					{/each}
-				</div>
-
-				<div class="hidden h-5 w-px bg-base-300 sm:block"></div>
-
-				<!-- Domain select -->
-				<select
-					class="select-bordered select bg-base-100 select-sm text-xs"
-					bind:value={selectedDomain}
-				>
-					<option value="all">{m.settings_logs_allDomains()}</option>
-					{#each data.availableDomains as domain (domain)}
-						<option value={domain}>{domain}</option>
-					{/each}
-				</select>
-
-				<div class="hidden h-5 w-px bg-base-300 sm:block"></div>
-
-				<!-- Search -->
-				<label class="input-bordered input input-sm flex items-center gap-2 bg-base-100">
-					<Search class="h-3.5 w-3.5 text-base-content/40" />
+	<SettingsSection
+		title="Unified Live Logs"
+		description="One live log surface that stays current while still letting you search and load older persisted history into the same stream."
+	>
+		<div class="border border-base-300 bg-base-100">
+			<div
+				class="sticky top-0 z-10 border-b border-base-300 bg-base-100/95 px-4 py-4 backdrop-blur"
+			>
+				<div class="grid gap-3 xl:grid-cols-[minmax(0,2.4fr)_repeat(4,minmax(0,1fr))]">
 					<input
 						type="text"
-						class="w-40 grow sm:w-52"
-						bind:value={searchDraft}
-						placeholder={m.settings_logs_filterPlaceholder()}
+						class="input-bordered input input-sm w-full"
+						bind:value={search}
+						placeholder="Search message, source, path, payload, or error text"
 					/>
-				</label>
-			</div>
-
-			<!-- Right side: Actions -->
-			<div class="flex flex-wrap items-center gap-1.5">
-				<button
-					class="btn text-xs btn-ghost btn-sm"
-					onclick={togglePause}
-					title={paused ? m.settings_logs_resumeStream() : m.settings_logs_pauseStream()}
-				>
-					{#if paused}
-						<Play class="h-3.5 w-3.5" />
-						{m.action_resume()}
-					{:else}
-						<Pause class="h-3.5 w-3.5" />
-						{m.action_pause()}
-					{/if}
-				</button>
-				<button
-					class="btn text-xs btn-ghost btn-sm"
-					onclick={clearView}
-					title={m.settings_logs_clearView()}
-				>
-					<RotateCcw class="h-3.5 w-3.5" />
-					{m.action_clear()}
-				</button>
-				<button
-					class="btn text-xs btn-ghost btn-sm"
-					onclick={downloadLogs}
-					title={m.settings_logs_downloadJsonl()}
-				>
-					<Download class="h-3.5 w-3.5" />
-					{m.action_export()}
-				</button>
-			</div>
-		</div>
-
-		<!-- Paused banner -->
-		{#if paused && pendingEntries.length > 0}
-			<div
-				class="mt-3 flex items-center justify-between rounded-lg border border-warning/30 bg-warning/10 px-3 py-2 text-sm"
-			>
-				<span class="text-warning">
-					{m.settings_logs_bufferedEntries({ count: pendingEntries.length })}
-				</span>
-				<button class="btn btn-xs btn-warning" onclick={togglePause}>
-					<Play class="h-3 w-3" />
-					{m.action_resume()}
-				</button>
-			</div>
-		{/if}
-	</div>
-
-	<!-- Terminal log viewer -->
-	<div class="relative">
-		<div
-			bind:this={terminalEl}
-			onscroll={handleTerminalScroll}
-			class="h-[calc(100vh-280px)] min-h-80 overflow-auto rounded-lg border border-base-300 bg-neutral text-neutral-content"
-		>
-			{#if entries.length === 0 && !sse.isConnected}
-				<!-- Loading state: SSE still connecting/reconnecting -->
-				<div class="flex items-center gap-3 p-6 font-mono text-sm text-neutral-content/50">
-					<Loader2 class="h-4 w-4 animate-spin" />
-					<span>{m.settings_logs_connectingToStream()}</span>
+					<select class="select-bordered select w-full select-sm" bind:value={selectedDomain}>
+						<option value="all">All domains</option>
+						{#each availableDomains as domain (domain)}
+							<option value={domain}>{domain}</option>
+						{/each}
+					</select>
+					<input
+						type="text"
+						class="input-bordered input input-sm w-full font-mono"
+						bind:value={supportId}
+						placeholder="Issue ID"
+					/>
+					<input
+						type="text"
+						class="input-bordered input input-sm w-full font-mono"
+						bind:value={requestId}
+						placeholder="Request ID"
+					/>
+					<input
+						type="text"
+						class="input-bordered input input-sm w-full font-mono"
+						bind:value={correlationId}
+						placeholder="Correlation ID"
+					/>
 				</div>
-			{:else if entries.length === 0}
-				<!-- Empty state: connected but no matching entries -->
-				<div class="flex flex-col items-center justify-center gap-3 p-12 text-center">
-					<div class="rounded-full bg-neutral-content/10 p-3">
-						<Terminal class="h-5 w-5 text-neutral-content/40" />
-					</div>
-					<div>
-						<p class="font-mono text-sm text-neutral-content/60">
-							{m.settings_logs_noMatchingEntries()}
-						</p>
-						<p class="mt-1 font-mono text-xs text-neutral-content/40">
-							{m.settings_logs_adjustFilters()}
-						</p>
-					</div>
-				</div>
-			{:else}
-				<!-- Log entries -->
-				<div class="divide-y divide-neutral-content/5">
-					{#each entries as entry (entry.id)}
-						{@const details = hasDetails(entry)}
-						{@const expanded = isExpanded(entry.id)}
-						{@const source = getSource(entry)}
-						<div class={entryRowBorderClass(entry.level)}>
-							<!-- Log line -->
+
+				<div class="mt-3 flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
+					<div class="flex flex-wrap items-center gap-2">
+						{#each availableLevels as level (level)}
 							<button
-								class="group flex w-full items-start gap-0 px-3 py-1 text-left font-mono text-xs leading-5 transition-colors hover:bg-neutral-content/5 {details
-									? 'cursor-pointer'
-									: 'cursor-default'}"
-								onclick={() => details && toggleExpanded(entry.id)}
+								class={`rounded-md border px-2.5 py-1 font-mono text-[11px] font-semibold tracking-[0.18em] uppercase transition ${levelBadgeClass(level, levels.has(level))}`}
+								onclick={() => toggleLevel(level)}
 							>
-								<!-- Expand indicator -->
-								<span class="mt-0.5 mr-1.5 w-3 shrink-0">
-									{#if details}
-										{#if expanded}
-											<ChevronDown class="h-3 w-3 text-neutral-content/30" />
-										{:else}
-											<ChevronRight
-												class="h-3 w-3 text-neutral-content/20 group-hover:text-neutral-content/40"
-											/>
-										{/if}
-									{/if}
-								</span>
-
-								<!-- Timestamp -->
-								<span class="mr-3 shrink-0 text-neutral-content/35"
-									>{formatTimestamp(entry.timestamp)}</span
-								>
-
-								<!-- Level -->
-								<span
-									class="mr-3 w-12 shrink-0 text-right font-bold uppercase {levelColor(
-										entry.level
-									)}">{entry.level.padStart(5)}</span
-								>
-
-								<!-- Source -->
-								{#if source}
-									<span class="mr-3 w-28 shrink-0 truncate text-neutral-content/40 xl:w-40"
-										>[{source}]</span
-									>
-								{/if}
-
-								<!-- Message -->
-								<span class="min-w-0 flex-1 wrap-break-word text-neutral-content/85"
-									>{entry.msg}</span
-								>
+								{level}
 							</button>
+						{/each}
+						<label class="label cursor-pointer gap-2 px-1 py-0">
+							<input type="checkbox" class="toggle toggle-xs" bind:checked={livePaused} />
+							<span class="label-text text-xs">Pause</span>
+						</label>
+						<label class="label cursor-pointer gap-2 px-1 py-0">
+							<input type="checkbox" class="toggle toggle-xs" bind:checked={autoFollowEnabled} />
+							<span class="label-text text-xs">Auto-follow</span>
+						</label>
+					</div>
 
-							<!-- Expanded details -->
-							{#if details && expanded}
-								<div class="border-t border-neutral-content/5 bg-neutral-content/3 px-3 py-2">
-									<div class="ml-18 xl:ml-30">
-										<!-- Quick info badges -->
-										<div class="mb-2 flex flex-wrap gap-1.5">
-											{#if entry.method && entry.path}
-												<span
-													class="rounded bg-neutral-content/10 px-1.5 py-0.5 font-mono text-xs text-neutral-content/60"
-												>
-													{entry.method}
-													{entry.path}
-												</span>
-											{/if}
-											{#if entry.requestId}
-												<span
-													class="rounded bg-neutral-content/10 px-1.5 py-0.5 font-mono text-xs text-neutral-content/40"
-												>
-													req:{entry.requestId}
-												</span>
-											{/if}
-											{#if entry.supportId}
-												<span
-													class="rounded bg-neutral-content/10 px-1.5 py-0.5 font-mono text-xs text-neutral-content/40"
-												>
-													support:{entry.supportId}
-												</span>
-											{/if}
-										</div>
-										<!-- JSON details -->
-										<pre
-											class="overflow-auto rounded bg-neutral-content/6 p-2.5 font-mono text-xs leading-relaxed wrap-break-word whitespace-pre-wrap text-neutral-content/60">{formatDetails(
-												entry
-											)}</pre>
-									</div>
-								</div>
+					<div class="flex flex-wrap items-center gap-2">
+						<button class="btn btn-ghost btn-xs" onclick={() => setQuickRange(1)}>1h</button>
+						<button class="btn btn-ghost btn-xs" onclick={() => setQuickRange(6)}>6h</button>
+						<button class="btn btn-ghost btn-xs" onclick={() => setQuickRange(24)}>24h</button>
+						<button class="btn btn-ghost btn-xs" onclick={() => setQuickRange(168)}>7d</button>
+						<input
+							type="datetime-local"
+							class="input-bordered input input-sm w-full sm:w-44"
+							bind:value={from}
+						/>
+						<input
+							type="datetime-local"
+							class="input-bordered input input-sm w-full sm:w-44"
+							bind:value={to}
+						/>
+						<button class="btn text-xs btn-ghost btn-sm" onclick={refreshCurrentView}>
+							{#if historyLoading}
+								<Loader2 class="h-3.5 w-3.5 animate-spin" />
+							{/if}
+							Refresh
+						</button>
+						<button class="btn text-xs btn-ghost btn-sm" onclick={downloadHistoryLogs}>
+							<Download class="h-3.5 w-3.5" />
+							Export
+						</button>
+						{#if hasActiveFilters}
+							<button class="btn text-xs btn-ghost btn-sm" onclick={resetFilters}>Clear</button>
+						{/if}
+					</div>
+				</div>
+
+				<div
+					class="mt-3 flex flex-col gap-2 border-t border-base-300 pt-3 text-xs text-base-content/60 xl:flex-row xl:items-center xl:justify-between"
+				>
+					<div class="flex flex-wrap items-center gap-3">
+						<span>{entries.length} visible rows</span>
+						<span>{historyTotal} persisted matches</span>
+						<span
+							>{historyPagesLoaded.size} page{historyPagesLoaded.size === 1 ? '' : 's'} loaded</span
+						>
+						<span>{liveStatusLabel}</span>
+					</div>
+					<div class="flex flex-wrap items-center gap-2">
+						<input
+							id="retention-days"
+							type="number"
+							min="1"
+							max={maxRetentionDays}
+							class="input-bordered input input-xs w-24"
+							bind:value={retentionDays}
+						/>
+						<span>Retention days</span>
+						<button
+							class="btn btn-ghost btn-xs"
+							onclick={() => (retentionDays = defaultRetentionDays)}
+							disabled={retentionSaving}
+						>
+							Default
+						</button>
+						<button
+							class="btn btn-xs btn-primary"
+							onclick={saveRetentionDays}
+							disabled={retentionSaving}
+						>
+							{#if retentionSaving}
+								<Loader2 class="h-3 w-3 animate-spin" />
+							{/if}
+							Save
+						</button>
+					</div>
+				</div>
+			</div>
+
+			{#if historyError}
+				<div class="border-b border-base-300 px-4 py-4 text-sm text-error">{historyError}</div>
+			{/if}
+
+			<div class="max-h-[42rem] overflow-auto" bind:this={listViewport} onscroll={handleListScroll}>
+				{#if historyLoading && entries.length === 0}
+					<div class="flex items-center gap-2 px-4 py-4 text-sm text-base-content/60">
+						<Loader2 class="h-4 w-4 animate-spin" />
+						Loading logs
+					</div>
+				{:else if entries.length === 0}
+					<div class="px-4 py-4 text-sm text-base-content/60">
+						No logs matched the current filters. Clear filters or wait for new matching entries.
+					</div>
+				{:else}
+					<table class="table-pin-rows table table-sm">
+						<thead>
+							<tr
+								class="bg-base-200/90 text-[11px] tracking-[0.18em] text-base-content/55 uppercase"
+							>
+								<th class="w-28">Time</th>
+								<th class="w-18">Level</th>
+								<th class="w-52">Source</th>
+								<th class="w-32">Issue ID</th>
+								<th>Message</th>
+							</tr>
+						</thead>
+						<tbody>
+							{#each entries as entry (entry.id)}
+								<tr
+									class={[
+										'cursor-pointer border-b border-base-200/70 align-top transition-colors',
+										selectedEntry?.id === entry.id ? 'bg-primary/8' : 'hover:bg-base-200/60'
+									]}
+									onclick={() => selectEntry(entry)}
+								>
+									<td class="font-mono text-xs text-base-content/70"
+										>{formatTimestamp(entry.timestamp)}</td
+									>
+									<td class={`font-mono text-xs uppercase ${levelColor(entry.level)}`}
+										>{entry.level}</td
+									>
+									<td class="max-w-52 truncate font-mono text-xs text-base-content/60"
+										>{getSource(entry)}</td
+									>
+									<td class="font-mono text-xs text-base-content/55">{entry.supportId ?? '-'}</td>
+									<td class="max-w-[48rem] text-sm break-words whitespace-normal">{entry.msg}</td>
+								</tr>
+							{/each}
+						</tbody>
+					</table>
+				{/if}
+			</div>
+
+			<div class="border-t border-base-300 px-4 py-3">
+				<div class="flex flex-wrap items-center justify-between gap-3 text-xs text-base-content/60">
+					<div class="flex flex-wrap items-center gap-3">
+						{#if pendingLiveCount > 0}
+							<span>{pendingLiveCount} live entries queued</span>
+						{/if}
+						{#if historyHasMore}
+							<span>Older persisted results are available</span>
+						{/if}
+					</div>
+					<div class="flex flex-wrap items-center gap-2">
+						{#if showJumpToLatest}
+							<button class="btn btn-xs btn-primary" onclick={jumpToLatest}>
+								Jump to latest
+							</button>
+						{/if}
+						<button
+							class="btn btn-ghost btn-xs"
+							onclick={loadOlderHistory}
+							disabled={historyLoading || !historyHasMore}
+						>
+							{#if historyLoading && historyHasMore}
+								<Loader2 class="h-3 w-3 animate-spin" />
+							{/if}
+							Load older
+						</button>
+					</div>
+				</div>
+			</div>
+
+			<div class="border-t border-base-300 bg-base-200/20 px-4 py-4">
+				<div class="mb-3 flex items-center justify-between gap-3">
+					<div>
+						<p class="text-xs tracking-[0.18em] text-base-content/55 uppercase">Inspector</p>
+						<p class="mt-1 text-xs text-base-content/60">
+							Selected row details stay below the unified stream.
+						</p>
+					</div>
+				</div>
+
+				{#if selectedEntry}
+					<div class="space-y-4">
+						<div class="space-y-2">
+							<div class="flex flex-wrap items-center gap-2">
+								<span class={`font-mono text-xs uppercase ${levelColor(selectedEntry.level)}`}>
+									{selectedEntry.level}
+								</span>
+								<span class="font-mono text-xs text-base-content/55">
+									{formatFullTimestamp(selectedEntry.timestamp)}
+								</span>
+							</div>
+							<p class="text-sm leading-6 break-words">{selectedEntry.msg}</p>
+							<p class="font-mono text-xs text-base-content/60">{getSource(selectedEntry)}</p>
+						</div>
+
+						<div class="flex flex-wrap gap-2">
+							{#if selectedEntry.method && selectedEntry.path}
+								<button
+									class="rounded-md bg-base-300 px-2 py-1 font-mono text-xs text-base-content/70"
+									onclick={() =>
+										copyText(`${selectedEntry.method} ${selectedEntry.path}`, 'Request path')}
+								>
+									{selectedEntry.method}
+									{selectedEntry.path}
+								</button>
+							{/if}
+							{#if selectedEntry.requestId}
+								<button
+									class="rounded-md bg-base-300 px-2 py-1 font-mono text-xs text-base-content/70"
+									onclick={() => copyText(selectedEntry.requestId ?? '', 'Request ID')}
+								>
+									req:{selectedEntry.requestId}
+								</button>
+							{/if}
+							{#if selectedEntry.correlationId}
+								<button
+									class="rounded-md bg-base-300 px-2 py-1 font-mono text-xs text-base-content/70"
+									onclick={() => copyText(selectedEntry.correlationId ?? '', 'Correlation ID')}
+								>
+									corr:{selectedEntry.correlationId}
+								</button>
+							{/if}
+							{#if selectedEntry.supportId}
+								<button
+									class="rounded-md bg-base-300 px-2 py-1 font-mono text-xs text-base-content/70"
+									onclick={() => copyText(selectedEntry.supportId ?? '', 'Issue ID')}
+								>
+									issue:{selectedEntry.supportId}
+								</button>
 							{/if}
 						</div>
-					{/each}
-				</div>
-			{/if}
-		</div>
 
-		<!-- Scroll to bottom button -->
-		{#if !autoScroll}
-			<button
-				class="btn absolute right-4 bottom-4 btn-circle shadow-lg btn-sm btn-neutral"
-				onclick={scrollToBottom}
-				title={m.settings_logs_scrollToBottom()}
-			>
-				<ArrowDown class="h-4 w-4" />
-			</button>
-		{/if}
-	</div>
+						<div>
+							<div class="mb-2 flex items-center justify-between">
+								<p class="text-xs tracking-[0.18em] text-base-content/55 uppercase">Payload</p>
+								<button
+									class="btn btn-ghost btn-xs"
+									onclick={() => copyText(formatDetails(selectedEntry), 'Payload')}
+								>
+									Copy
+								</button>
+							</div>
+							<pre
+								class="max-h-[22rem] overflow-auto bg-base-300/50 p-3 font-mono text-xs leading-relaxed whitespace-pre-wrap text-base-content/80">{formatDetails(
+									selectedEntry
+								)}</pre>
+						</div>
+					</div>
+				{:else}
+					<div class="text-sm text-base-content/60">
+						Select a row to inspect request IDs, payload data, and structured errors.
+					</div>
+				{/if}
+			</div>
+		</div>
+	</SettingsSection>
 </SettingsPage>

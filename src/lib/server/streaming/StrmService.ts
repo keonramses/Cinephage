@@ -19,7 +19,7 @@ import {
 	movieFiles,
 	episodeFiles
 } from '$lib/server/db/schema';
-import { eq, and, asc, sql } from 'drizzle-orm';
+import { eq, and, asc, sql, inArray } from 'drizzle-orm';
 import { NamingService, type MediaNamingInfo } from '$lib/server/library/naming/NamingService.js';
 import { namingSettingsService } from '$lib/server/library/naming/NamingSettingsService.js';
 
@@ -139,6 +139,22 @@ export class StrmService {
 
 	private constructor() {}
 
+	/**
+	 * Maps file paths to their media info for bulk updates.
+	 * Used to bypass parsing old .strm content and generate fresh URLs from DB.
+	 */
+	private strayFilePaths: Map<
+		string,
+		{
+			mediaType: 'movie' | 'tv';
+			tmdbId?: number;
+			movieId?: string;
+			seriesId?: string;
+			season?: number;
+			episodeIds?: string[];
+		}
+	> = new Map();
+
 	static getInstance(): StrmService {
 		if (!StrmService.instance) {
 			StrmService.instance = new StrmService();
@@ -191,17 +207,17 @@ export class StrmService {
 			}
 
 			if (mediaType === 'movie') {
-				return `${baseUrl}/api/streaming/resolve/movie/${tmdbId}?api_key=${apiKey}`;
+				return `${baseUrl}/api/streaming/session/movie/${tmdbId}/master.m3u8?api_key=${encodeURIComponent(apiKey)}`;
 			} else {
-				return `${baseUrl}/api/streaming/resolve/tv/${tmdbId}/${season}/${episode}?api_key=${apiKey}`;
+				return `${baseUrl}/api/streaming/session/tv/${tmdbId}/${season}/${episode}/master.m3u8?api_key=${encodeURIComponent(apiKey)}`;
 			}
 		}
 
 		// For stream:// protocol (internal use), don't add API key
 		if (mediaType === 'movie') {
-			return `${baseUrl}/api/streaming/resolve/movie/${tmdbId}`;
+			return `${baseUrl}/api/streaming/session/movie/${tmdbId}/master.m3u8`;
 		} else {
-			return `${baseUrl}/api/streaming/resolve/tv/${tmdbId}/${season}/${episode}`;
+			return `${baseUrl}/api/streaming/session/tv/${tmdbId}/${season}/${episode}/master.m3u8`;
 		}
 	}
 
@@ -354,7 +370,7 @@ export class StrmService {
 			}
 
 			// Generate and write .strm content with API key
-			const content = `${baseUrl}/api/streaming/resolve/tv/${tmdbId}/${seasonNumber}/${episode.episodeNumber}?api_key=${encodeURIComponent(apiKey)}`;
+			const content = `${baseUrl}/api/streaming/session/tv/${tmdbId}/${seasonNumber}/${episode.episodeNumber}/master.m3u8?api_key=${encodeURIComponent(apiKey)}`;
 			writeFileSync(destinationPath, content, 'utf8');
 
 			return { success: true, filePath: destinationPath };
@@ -489,8 +505,8 @@ export class StrmService {
 	 * This is used when bulk-updating .strm files to understand what content they point to.
 	 *
 	 * Supports:
-	 *   - {baseUrl}/api/streaming/resolve/movie/{tmdbId}
-	 *   - {baseUrl}/api/streaming/resolve/tv/{tmdbId}/{season}/{episode}
+	 *   - {baseUrl}/api/streaming/session/movie/{tmdbId}/master.m3u8
+	 *   - {baseUrl}/api/streaming/session/tv/{tmdbId}/{season}/{episode}/master.m3u8
 	 */
 	parseStrmFileUrl(url: string): {
 		mediaType: 'movie' | 'tv';
@@ -511,23 +527,47 @@ export class StrmService {
 			pathToParse = trimmedUrl.split('?')[0]?.split('#')[0] ?? trimmedUrl;
 		}
 
-		// Match movie URL: {anyBaseUrl}/api/streaming/resolve/movie/{tmdbId}
-		const movieMatch = pathToParse.match(/\/api\/streaming\/resolve\/movie\/(\d+)\/?$/);
+		// Match movie URL: {anyBaseUrl}/api/streaming/session/movie/{tmdbId}/master.m3u8
+		const movieMatch = pathToParse.match(
+			/\/api\/streaming\/session\/movie\/(\d+)\/master\.m3u8\/?$/
+		);
+		const legacyMovieMatch = pathToParse.match(
+			/\/api\/streaming\/(?:resolve|playback)\/movie\/(\d+)\/?$/
+		);
 		if (movieMatch) {
 			return {
 				mediaType: 'movie',
 				tmdbId: movieMatch[1]
 			};
 		}
+		if (legacyMovieMatch) {
+			return {
+				mediaType: 'movie',
+				tmdbId: legacyMovieMatch[1]
+			};
+		}
 
-		// Match TV URL: {anyBaseUrl}/api/streaming/resolve/tv/{tmdbId}/{season}/{episode}
-		const tvMatch = pathToParse.match(/\/api\/streaming\/resolve\/tv\/(\d+)\/(\d+)\/(\d+)\/?$/);
+		// Match TV URL: {anyBaseUrl}/api/streaming/session/tv/{tmdbId}/{season}/{episode}/master.m3u8
+		const tvMatch = pathToParse.match(
+			/\/api\/streaming\/session\/tv\/(\d+)\/(\d+)\/(\d+)\/master\.m3u8\/?$/
+		);
+		const legacyTvMatch = pathToParse.match(
+			/\/api\/streaming\/(?:resolve|playback)\/tv\/(\d+)\/(\d+)\/(\d+)\/?$/
+		);
 		if (tvMatch) {
 			return {
 				mediaType: 'tv',
 				tmdbId: tvMatch[1],
 				season: parseInt(tvMatch[2], 10),
 				episode: parseInt(tvMatch[3], 10)
+			};
+		}
+		if (legacyTvMatch) {
+			return {
+				mediaType: 'tv',
+				tmdbId: legacyTvMatch[1],
+				season: parseInt(legacyTvMatch[2], 10),
+				episode: parseInt(legacyTvMatch[3], 10)
 			};
 		}
 
@@ -570,29 +610,34 @@ export class StrmService {
 			const movieStrmLike = sql`lower(${movieFiles.relativePath}) like '%.strm'`;
 			const episodeStrmLike = sql`lower(${episodeFiles.relativePath}) like '%.strm'`;
 
-			// Only process library entries currently on the Streamer profile.
-			// This prevents touching external/manual .strm files under non-streamer profiles.
+			// Process ALL .strm files regardless of scoring profile.
+			// This ensures legacy files with old /playback/ URLs get updated too.
 			const [movieStrmRows, episodeStrmRows] = await Promise.all([
 				db
 					.select({
 						relativePath: movieFiles.relativePath,
 						parentPath: movies.path,
-						rootPath: rootFolders.path
+						rootPath: rootFolders.path,
+						movieId: movieFiles.movieId,
+						tmdbId: movies.tmdbId
 					})
 					.from(movieFiles)
 					.leftJoin(movies, eq(movieFiles.movieId, movies.id))
 					.leftJoin(rootFolders, eq(movies.rootFolderId, rootFolders.id))
-					.where(and(movieStrmLike, eq(movies.scoringProfileId, 'streamer'))),
+					.where(movieStrmLike),
 				db
 					.select({
 						relativePath: episodeFiles.relativePath,
 						parentPath: series.path,
-						rootPath: rootFolders.path
+						rootPath: rootFolders.path,
+						seriesId: episodeFiles.seriesId,
+						seasonNumber: episodeFiles.seasonNumber,
+						episodeIds: episodeFiles.episodeIds
 					})
 					.from(episodeFiles)
 					.leftJoin(series, eq(episodeFiles.seriesId, series.id))
 					.leftJoin(rootFolders, eq(series.rootFolderId, rootFolders.id))
-					.where(and(episodeStrmLike, eq(series.scoringProfileId, 'streamer')))
+					.where(episodeStrmLike)
 			]);
 
 			const strmFiles = new Set<string>();
@@ -605,7 +650,17 @@ export class StrmService {
 				}
 				const fullPath = this.resolveMediaPath(row.rootPath, row.parentPath, row.relativePath);
 				if (existsSync(fullPath)) {
+					if (row.tmdbId === null) {
+						skippedMissingMetadata += 1;
+						continue;
+					}
 					strmFiles.add(fullPath);
+					// Map file path to movie info for direct URL generation
+					this.strayFilePaths.set(fullPath, {
+						mediaType: 'movie',
+						tmdbId: row.tmdbId,
+						movieId: row.movieId
+					});
 				}
 			}
 
@@ -617,6 +672,14 @@ export class StrmService {
 				const fullPath = this.resolveMediaPath(row.rootPath, row.parentPath, row.relativePath);
 				if (existsSync(fullPath)) {
 					strmFiles.add(fullPath);
+					// Map file path to episode info for direct URL generation
+					this.strayFilePaths.set(fullPath, {
+						mediaType: 'tv',
+						tmdbId: undefined, // Will need to look up via seriesId
+						seriesId: row.seriesId,
+						season: row.seasonNumber,
+						episodeIds: row.episodeIds ?? undefined
+					});
 				}
 			}
 
@@ -629,28 +692,84 @@ export class StrmService {
 				'[StrmService] Found streamer .strm files to process'
 			);
 
-			// Process each .strm file
+			// Pre-fetch all episode data in one query to resolve episode numbers
+			const allEpisodeIds = new Set<string>();
+			for (const [, info] of this.strayFilePaths) {
+				if (info.mediaType === 'tv' && info.episodeIds) {
+					for (const id of info.episodeIds) {
+						if (typeof id === 'string') allEpisodeIds.add(id);
+					}
+				}
+			}
+			const episodeDataMap = new Map<string, { seasonNumber: number; episodeNumber: number }>();
+			if (allEpisodeIds.size > 0) {
+				const episodeRows = await db
+					.select({
+						id: episodes.id,
+						seasonNumber: episodes.seasonNumber,
+						episodeNumber: episodes.episodeNumber
+					})
+					.from(episodes)
+					.where(inArray(episodes.id, Array.from(allEpisodeIds)));
+
+				for (const row of episodeRows) {
+					episodeDataMap.set(row.id, {
+						seasonNumber: row.seasonNumber,
+						episodeNumber: row.episodeNumber
+					});
+				}
+			}
+
+			// Process each .strm file - generate fresh URL from DB info
 			for (const filePath of strmFiles) {
 				try {
-					// Read current content
-					const currentContent = readFileSync(filePath, 'utf8').trim();
-
-					// Parse the URL to extract media info
-					const parsed = this.parseStrmFileUrl(currentContent);
-					if (!parsed) {
-						errors.push({ path: filePath, error: 'Could not parse URL format' });
+					const mediaInfo = this.strayFilePaths.get(filePath);
+					if (!mediaInfo) {
+						errors.push({ path: filePath, error: 'Missing media info' });
 						continue;
 					}
 
-					// Generate new content with the new base URL
+					let tmdbId: number;
+					let season: number | undefined;
+					let episode: number | undefined;
+
+					if (mediaInfo.mediaType === 'movie') {
+						tmdbId = mediaInfo.tmdbId!;
+					} else {
+						// Look up series tmdbId
+						const [seriesRow] = await db
+							.select({ tmdbId: series.tmdbId })
+							.from(series)
+							.where(eq(series.id, mediaInfo.seriesId!));
+						if (!seriesRow) {
+							errors.push({ path: filePath, error: 'Series not found' });
+							continue;
+						}
+						tmdbId = seriesRow.tmdbId;
+						season = mediaInfo.season;
+
+						// Resolve episode number from the first episode ID
+						if (mediaInfo.episodeIds && mediaInfo.episodeIds.length > 0) {
+							const firstEpId = mediaInfo.episodeIds[0];
+							const epData = episodeDataMap.get(firstEpId);
+							if (epData) {
+								episode = epData.episodeNumber;
+							}
+						}
+					}
+
+					// Generate fresh .strm content from database info
 					const newContent = await this.generateStrmContent({
-						mediaType: parsed.mediaType,
-						tmdbId: parsed.tmdbId,
-						season: parsed.season,
-						episode: parsed.episode,
+						mediaType: mediaInfo.mediaType,
+						tmdbId: String(tmdbId),
+						season,
+						episode,
 						baseUrl,
 						apiKey: options?.apiKey
 					});
+
+					// Read current content for comparison
+					const currentContent = readFileSync(filePath, 'utf8').trim();
 
 					// Only write if content actually changed
 					if (currentContent !== newContent) {
@@ -659,7 +778,6 @@ export class StrmService {
 						logger.debug(
 							{
 								path: filePath,
-								oldUrl: currentContent.substring(0, 50) + '...',
 								newUrl: newContent.substring(0, 50) + '...'
 							},
 							'[StrmService] Updated .strm file'
@@ -670,6 +788,9 @@ export class StrmService {
 					errors.push({ path: filePath, error: message });
 				}
 			}
+
+			// Clear the map to free memory
+			this.strayFilePaths.clear();
 
 			logger.info(
 				{

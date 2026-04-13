@@ -10,7 +10,7 @@ describe('StrmService', () => {
 		it('parses movie URLs with api_key query params', () => {
 			expect(
 				service.parseStrmFileUrl(
-					'https://media.example.com/api/streaming/resolve/movie/603?api_key=old-key'
+					'https://media.example.com/api/streaming/session/movie/603/master.m3u8?api_key=old-key'
 				)
 			).toEqual({
 				mediaType: 'movie',
@@ -21,7 +21,7 @@ describe('StrmService', () => {
 		it('parses tv URLs with query params', () => {
 			expect(
 				service.parseStrmFileUrl(
-					'https://media.example.com/api/streaming/resolve/tv/1399/1/1?api_key=old-key&prefetch=1'
+					'https://media.example.com/api/streaming/session/tv/1399/1/1/master.m3u8?api_key=old-key&prefetch=1'
 				)
 			).toEqual({
 				mediaType: 'tv',
@@ -32,7 +32,7 @@ describe('StrmService', () => {
 		});
 
 		it('parses path-only URLs without query params', () => {
-			expect(service.parseStrmFileUrl('/api/streaming/resolve/movie/550')).toEqual({
+			expect(service.parseStrmFileUrl('/api/streaming/session/movie/550/master.m3u8')).toEqual({
 				mediaType: 'movie',
 				tmdbId: '550'
 			});
@@ -42,7 +42,7 @@ describe('StrmService', () => {
 	describe('generateStrmContent', () => {
 		it('regenerates movie URLs with the currently active API key', async () => {
 			const parsed = service.parseStrmFileUrl(
-				'https://old.example.com/api/streaming/resolve/movie/603?api_key=stale-key'
+				'https://old.example.com/api/streaming/session/movie/603/master.m3u8?api_key=stale-key'
 			);
 
 			expect(parsed).toEqual({
@@ -58,14 +58,14 @@ describe('StrmService', () => {
 			});
 
 			expect(updatedContent).toBe(
-				'https://new.example.com/api/streaming/resolve/movie/603?api_key=active-key'
+				'https://new.example.com/api/streaming/session/movie/603/master.m3u8?api_key=active-key'
 			);
 			expect(updatedContent).not.toContain('stale-key');
 		});
 
 		it('regenerates tv URLs with the currently active API key', async () => {
 			const parsed = service.parseStrmFileUrl(
-				'https://old.example.com/api/streaming/resolve/tv/1399/1/2?api_key=stale-key'
+				'https://old.example.com/api/streaming/session/tv/1399/1/2/master.m3u8?api_key=stale-key'
 			);
 
 			expect(parsed).toEqual({
@@ -85,7 +85,7 @@ describe('StrmService', () => {
 			});
 
 			expect(updatedContent).toBe(
-				'https://new.example.com/api/streaming/resolve/tv/1399/1/2?api_key=active-key'
+				'https://new.example.com/api/streaming/session/tv/1399/1/2/master.m3u8?api_key=active-key'
 			);
 			expect(updatedContent).not.toContain('stale-key');
 		});

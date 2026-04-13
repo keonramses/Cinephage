@@ -56,5 +56,10 @@ export interface CapturedLogFilters {
 	levels?: CapturedLogLevel[];
 	logDomain?: CapturedLogDomain;
 	search?: string;
+	supportId?: string;
+	requestId?: string;
+	correlationId?: string;
+	from?: string;
+	to?: string;
 	limit?: number;
 }

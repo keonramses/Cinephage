@@ -104,3 +104,58 @@ export interface ValidatedExtractionResult extends ExtractionResult {
 	validatedAt?: Date;
 	validationDurationMs?: number;
 }
+
+export type PlaybackMediaType = 'movie' | 'tv';
+
+export type SessionResourceKind = 'playlist' | 'segment' | 'asset';
+
+export interface PlaybackSessionSubtitle {
+	id: string;
+	url: string;
+	label: string;
+	language: string;
+	isDefault?: boolean;
+}
+
+export interface PlaybackSessionResource {
+	id: string;
+	url: string;
+	kind: SessionResourceKind;
+	extension: string;
+	createdAt: number;
+}
+
+export interface PlaybackSessionAttempt {
+	provider?: string;
+	url: string;
+	success: boolean;
+	error?: string;
+	statusCode?: number;
+}
+
+export interface PlaybackSession {
+	token: string;
+	mediaType: PlaybackMediaType;
+	tmdbId: number;
+	season?: number;
+	episode?: number;
+	provider?: string;
+	entryUrl: string;
+	sourceType: StreamType;
+	requestHeaders: Record<string, string>;
+	subtitles: PlaybackSessionSubtitle[];
+	createdAt: number;
+	expiresAt: number;
+	lastAccessedAt: number;
+	attempts: PlaybackSessionAttempt[];
+	resourceIdsByKey: Record<string, string>;
+	resources: Record<string, PlaybackSessionResource>;
+}
+
+export interface PlaybackSessionStats {
+	activeSessions: number;
+	resources: number;
+	expiredSessions: number;
+	createdSessions: number;
+	reusedSessions: number;
+}

@@ -5,11 +5,16 @@ import { randomUUID } from 'node:crypto';
 import { building } from '$app/environment';
 
 import { AUTH_BASE_PATH } from '$lib/auth/config.js';
-import { createRequestLogger, logger, runWithLogContext } from '$lib/logging';
-import { getLibraryScheduler, librarySchedulerService } from '$lib/server/library/index.js';
+import {
+	createRequestLogger,
+	logger,
+	registerServerLogSinks,
+	runWithLogContext
+} from '$lib/logging';
+import { getLibraryScheduler } from '$lib/server/library/library-scheduler.js';
 import { isFFprobeAvailable, getFFprobeVersion } from '$lib/server/library/ffprobe.js';
 import { getDownloadMonitor } from '$lib/server/downloadClients/monitoring';
-import { importService } from '$lib/server/downloadClients/import';
+import { getImportService } from '$lib/server/downloadClients/import/ImportService.js';
 import { getMonitoringScheduler } from '$lib/server/monitoring/MonitoringScheduler.js';
 import { getExternalIdService } from '$lib/server/services/ExternalIdService.js';
 import { getDataRepairService } from '$lib/server/services/DataRepairService.js';
@@ -37,6 +42,8 @@ import {
 import { checkApiRateLimit, applyRateLimitHeaders } from '$lib/server/rate-limit.js';
 import type { SessionRecord, UserRecord } from '$lib/server/db/schema.js';
 import { paraglideMiddleware } from '$lib/paraglide/server.js';
+import { logCaptureStore } from '$lib/server/logging/log-capture-store.js';
+import { logHistoryService } from '$lib/server/logging/log-history.js';
 
 /**
  * Content Security Policy header.
@@ -222,6 +229,11 @@ async function initializeServices(): Promise<void> {
 
 	initializationPromise = (async () => {
 		try {
+			registerServerLogSinks({
+				logCaptureStore,
+				logHistoryService
+			});
+
 			await initializeDatabase();
 			const updatedStreamingKeys = await ensureStreamingApiKeyRateLimit();
 			if (updatedStreamingKeys > 0) {
@@ -258,7 +270,7 @@ async function initializeServices(): Promise<void> {
 			serviceManager.register(libraryScheduler);
 
 			// Initialize library services
-			await librarySchedulerService.initialize();
+			await getLibraryScheduler().initialize();
 			logger.info('Library scheduler initialized');
 
 			// Initialize provider factory for subtitle providers
@@ -270,7 +282,7 @@ async function initializeServices(): Promise<void> {
 			serviceManager.register(downloadMonitor);
 
 			// ImportService does not implement BackgroundService; start it directly.
-			importService.start();
+			getImportService().start();
 
 			// Register monitoring scheduler
 			const monitoringScheduler = getMonitoringScheduler();
@@ -421,14 +433,10 @@ const customHandler: Handle = async ({ event, resolve }) => {
 				}
 
 				// Streaming endpoints (Cinephage Streamer .strm files)
-				if (path.startsWith('/api/streaming/resolve/')) {
+				if (path.startsWith('/api/streaming/session/')) {
 					return true;
 				}
 				if (path.startsWith('/api/streaming/usenet/')) {
-					return true;
-				}
-				// Proxy endpoints for HLS segments
-				if (path.startsWith('/api/streaming/proxy/')) {
 					return true;
 				}
 
@@ -571,7 +579,7 @@ const customHandler: Handle = async ({ event, resolve }) => {
 						body: {
 							key: apiKey,
 							permissions: {
-								livetv: ['*']
+								streaming: ['*']
 							}
 						}
 					});
@@ -900,7 +908,7 @@ async function gracefulShutdown(signal: string): Promise<void> {
 			process.exit(1);
 		}, 30000);
 
-		importService.stop();
+		getImportService().stop();
 		await serviceManager.stopAll();
 		clearTimeout(timeout);
 

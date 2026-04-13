@@ -376,12 +376,29 @@ let asyncLocalStorage: NodeAsyncLocalStorage<LogStore> | null = null;
 let logCaptureStore: {
 	append(entry: Omit<CapturedLogEntry, 'id'>): CapturedLogEntry;
 } | null = null;
+let logHistoryService: {
+	append(entry: CapturedLogEntry): void;
+} | null = null;
 
 if (import.meta.env.SSR) {
 	const { AsyncLocalStorage } = await import('node:async_hooks');
-	const logCaptureModule = await import('$lib/server/logging/log-capture-store.js');
 	asyncLocalStorage = new AsyncLocalStorage<LogStore>();
-	logCaptureStore = logCaptureModule.logCaptureStore;
+}
+
+export function registerServerLogSinks(sinks: {
+	logCaptureStore?: {
+		append(entry: Omit<CapturedLogEntry, 'id'>): CapturedLogEntry;
+	};
+	logHistoryService?: {
+		append(entry: CapturedLogEntry): void;
+	};
+}): void {
+	if (sinks.logCaptureStore) {
+		logCaptureStore = sinks.logCaptureStore;
+	}
+	if (sinks.logHistoryService) {
+		logHistoryService = sinks.logHistoryService;
+	}
 }
 
 function getActiveStore(): LogStore | null {
@@ -537,7 +554,8 @@ function captureLogEvent(level: LogLevel, event: PreparedLogEvent): void {
 		err
 	};
 
-	logCaptureStore.append(entry);
+	const capturedEntry = logCaptureStore.append(entry);
+	logHistoryService?.append(capturedEntry);
 }
 
 function logWithArgs(
@@ -667,8 +685,7 @@ class PinoAppLogger implements AppLogger {
 export const logger: AppLogger = new PinoAppLogger();
 
 export function createChildLogger(baseContext: LogContext): AppLogger {
-	const pinoChild = rootPinoLogger.child(sanitizeContext(baseContext));
-	return new PinoAppLogger(baseContext, pinoChild);
+	return new PinoAppLogger(baseContext);
 }
 
 export function createRequestLogger(baseContext: LogContext): AppLogger {

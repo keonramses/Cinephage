@@ -15,6 +15,7 @@ function matchesSearch(entry: CapturedLogEntry, query: string): boolean {
 		entry.module,
 		entry.service,
 		entry.requestId,
+		entry.correlationId,
 		entry.supportId,
 		entry.path,
 		entry.method,
@@ -28,6 +29,12 @@ function matchesSearch(entry: CapturedLogEntry, query: string): boolean {
 	return haystack.includes(query);
 }
 
+function parseTimestamp(value: string | undefined): number | null {
+	if (!value) return null;
+	const parsed = Date.parse(value);
+	return Number.isNaN(parsed) ? null : parsed;
+}
+
 function matchesFilters(entry: CapturedLogEntry, filters: CapturedLogFilters): boolean {
 	// Multi-level filter takes precedence over single level
 	if (filters.levels && filters.levels.length > 0) {
@@ -39,6 +46,30 @@ function matchesFilters(entry: CapturedLogEntry, filters: CapturedLogFilters): b
 	}
 
 	if (filters.logDomain && entry.logDomain !== filters.logDomain) {
+		return false;
+	}
+
+	if (filters.supportId && entry.supportId !== filters.supportId) {
+		return false;
+	}
+
+	if (filters.requestId && entry.requestId !== filters.requestId) {
+		return false;
+	}
+
+	if (filters.correlationId && entry.correlationId !== filters.correlationId) {
+		return false;
+	}
+
+	const timestamp = parseTimestamp(entry.timestamp);
+	const from = parseTimestamp(filters.from);
+	const to = parseTimestamp(filters.to);
+
+	if (from !== null && (timestamp === null || timestamp < from)) {
+		return false;
+	}
+
+	if (to !== null && (timestamp === null || timestamp > to)) {
 		return false;
 	}
 

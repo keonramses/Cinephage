@@ -1179,10 +1179,9 @@ export type StalkerPortalDetect = z.infer<typeof stalkerPortalDetectSchema>;
 // ============================================================
 
 /**
- * Schema for log filter query parameters (SSE stream & download).
- * Supports both single `level` and comma-separated `levels` for multi-toggle.
+ * Shared schema for common log filter query parameters.
  */
-export const logFilterQuerySchema = z.object({
+export const baseLogFilterQuerySchema = z.object({
 	level: z.enum(CAPTURED_LOG_LEVELS).optional(),
 	levels: z
 		.string()
@@ -1198,7 +1197,34 @@ export const logFilterQuerySchema = z.object({
 		),
 	logDomain: z.enum(CAPTURED_LOG_DOMAINS).optional(),
 	search: z.string().max(200).optional(),
+	from: z.string().datetime().optional(),
+	to: z.string().datetime().optional(),
+	supportId: z.string().max(100).optional(),
+	requestId: z.string().max(100).optional(),
+	correlationId: z.string().max(100).optional()
+});
+
+/**
+ * Schema for log filter query parameters used by the SSE stream.
+ */
+export const logFilterQuerySchema = baseLogFilterQuerySchema.extend({
 	limit: z.coerce.number().int().min(1).max(1000).optional()
+});
+
+/**
+ * Schema for log history search query parameters.
+ */
+export const logHistoryQuerySchema = baseLogFilterQuerySchema.extend({
+	page: z.coerce.number().int().min(1).optional(),
+	pageSize: z.coerce.number().int().min(1).max(500).optional()
+});
+
+/**
+ * Schema for log download query parameters.
+ */
+export const logDownloadQuerySchema = baseLogFilterQuerySchema.extend({
+	limit: z.coerce.number().int().min(1).max(1000).optional(),
+	format: z.enum(['json', 'jsonl']).optional()
 });
 
 export type LogFilterQuery = z.infer<typeof logFilterQuerySchema>;
