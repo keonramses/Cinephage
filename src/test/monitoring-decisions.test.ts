@@ -10,7 +10,14 @@
  * These tests simulate real-world scenarios without database dependencies.
  */
 
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
+import { ALL_FORMATS } from '$lib/server/scoring/formats/index.js';
+
+vi.mock('$lib/server/scoring/formats/registry.js', () => ({
+	getActiveFormats: () => ALL_FORMATS,
+	invalidateFormatCache: () => {}
+}));
+
 import { scoreRelease, isUpgrade, rankReleases } from '$lib/server/scoring/scorer.js';
 import {
 	QUALITY_PROFILE,
