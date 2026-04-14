@@ -1285,7 +1285,7 @@ export const logHistoryQuerySchema = baseLogFilterQuerySchema.extend({
  * Schema for log download query parameters.
  */
 export const logDownloadQuerySchema = baseLogFilterQuerySchema.extend({
-	limit: z.coerce.number().int().min(1).max(1000).optional(),
+	limit: z.coerce.number().int().min(1).max(5000).optional(),
 	format: z.enum(['json', 'jsonl']).optional()
 });
 
