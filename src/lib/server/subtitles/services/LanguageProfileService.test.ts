@@ -1,25 +1,20 @@
 import { describe, it, expect, beforeEach, afterAll, vi } from 'vitest';
-import { initTestDb, closeTestDb, getTestDb } from '../../../../test/db-helper';
+import { createTestDb, destroyTestDb, type TestDatabase } from '../../../../test/db-helper';
 import type { LanguageProfile } from './LanguageProfileService';
 import type { SubtitleStatus } from '../types';
 
-// Initialize the test database FIRST before any mocks
-initTestDb();
+const testDb: TestDatabase = createTestDb();
 
-// Must mock before importing the services that use db
-vi.mock('$lib/server/db', () => {
-	return {
-		get db() {
-			return getTestDb().db;
-		},
-		get sqlite() {
-			return getTestDb().sqlite;
-		},
-		initializeDatabase: vi.fn().mockResolvedValue(undefined)
-	};
-});
+vi.mock('$lib/server/db', () => ({
+	get db() {
+		return testDb.db;
+	},
+	get sqlite() {
+		return testDb.sqlite;
+	},
+	initializeDatabase: vi.fn().mockResolvedValue(undefined)
+}));
 
-// Import after mocking
 const { LanguageProfileService, getLanguageProfileService } =
 	await import('./LanguageProfileService');
 
@@ -31,7 +26,7 @@ describe('LanguageProfileService', () => {
 	});
 
 	afterAll(() => {
-		closeTestDb();
+		destroyTestDb(testDb);
 	});
 
 	describe('Singleton pattern', () => {
@@ -66,13 +61,8 @@ describe('LanguageProfileService', () => {
 	});
 
 	describe('calculateStatus (via subtitle status methods)', () => {
-		// These tests verify the internal calculateStatus logic
-		// by creating profiles and checking status calculations
-
 		describe('Basic language matching', () => {
 			it('should mark satisfied when no profile is assigned', async () => {
-				// When no profile exists, status should be satisfied
-				// This is tested via getMovieSubtitleStatus with a non-existent movie
 				const status = await profileService.getMovieSubtitleStatus('non-existent-movie-id');
 				expect(status.satisfied).toBe(true);
 				expect(status.missing).toHaveLength(0);
@@ -81,14 +71,7 @@ describe('LanguageProfileService', () => {
 	});
 
 	describe('Status calculation logic', () => {
-		// Test the pure logic aspects of status calculation
-		// These document the expected behavior
-
 		it('should identify missing languages based on profile requirements', () => {
-			// Profile requires: English (primary), Spanish (secondary)
-			// Existing: English
-			// Expected: Spanish missing
-
 			const profile: LanguageProfile = {
 				id: 'test-profile',
 				name: 'Test Profile',
@@ -102,17 +85,12 @@ describe('LanguageProfileService', () => {
 				isDefault: false
 			};
 
-			// Verify profile structure is valid
 			expect(profile.languages).toHaveLength(2);
 			expect(profile.languages[0].code).toBe('en');
 			expect(profile.languages[1].code).toBe('es');
 		});
 
 		it('should respect forced subtitle flag matching', () => {
-			// Profile requires: English forced subtitles
-			// Existing: English (not forced)
-			// Expected: English forced still missing
-
 			const profile: LanguageProfile = {
 				id: 'test-profile',
 				name: 'Test Profile',
@@ -129,10 +107,6 @@ describe('LanguageProfileService', () => {
 		});
 
 		it('should respect excludeHi flag when checking existing subtitles', () => {
-			// Profile requires: English (excludeHi: true)
-			// Existing: English HI subtitle
-			// Expected: Should not satisfy because it's HI and excludeHi is true
-
 			const profile: LanguageProfile = {
 				id: 'test-profile',
 				name: 'Test Profile',
@@ -149,9 +123,6 @@ describe('LanguageProfileService', () => {
 		});
 
 		it('should use cutoffIndex to determine when satisfied', () => {
-			// Profile: English (0), Spanish (1), French (2) - cutoffIndex: 1
-			// If Spanish (index 1) is satisfied, remaining languages should not be required
-
 			const profile: LanguageProfile = {
 				id: 'test-profile',
 				name: 'Test Profile',
@@ -171,8 +142,6 @@ describe('LanguageProfileService', () => {
 		});
 
 		it('should respect isCutoff flag on individual languages', () => {
-			// Language with isCutoff: true should satisfy even if not at cutoffIndex
-
 			const profile: LanguageProfile = {
 				id: 'test-profile',
 				name: 'Test Profile',
@@ -357,20 +326,16 @@ describe('LanguageProfileService', () => {
 				isDefault: false
 			};
 
-			// English regular
 			expect(profile.languages[0].code).toBe('en');
 			expect(profile.languages[0].forced).toBe(false);
 			expect(profile.languages[0].isCutoff).toBe(true);
 
-			// English forced
 			expect(profile.languages[1].code).toBe('en');
 			expect(profile.languages[1].forced).toBe(true);
 
-			// Spanish HI
 			expect(profile.languages[2].code).toBe('es');
 			expect(profile.languages[2].hearingImpaired).toBe(true);
 
-			// French (exclude HI)
 			expect(profile.languages[3].code).toBe('fr');
 			expect(profile.languages[3].excludeHi).toBe(true);
 		});

@@ -61,7 +61,7 @@ export default defineConfig({
 		include: ['src/**/*.{test,spec}.{js,ts}'],
 		exclude: ['src/**/*.svelte.{test,spec}.{js,ts}'],
 		setupFiles: ['src/test/setup.ts'],
-		fileParallelism: false, // Server tests share singleton database
+		fileParallelism: true,
 		coverage: {
 			provider: 'v8',
 			reporter: ['text', 'text-summary', 'lcov'],

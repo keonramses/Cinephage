@@ -1,5 +1,10 @@
-import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
-import { initTestDb, closeTestDb, clearTestDb, getTestDb } from '../../../../test/db-helper';
+import { afterAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import {
+	createTestDb,
+	destroyTestDb,
+	clearTestDb,
+	type TestDatabase
+} from '../../../../test/db-helper';
 import { api } from '../../../../test/api-helper';
 
 const mockLogger = vi.hoisted(() => ({
@@ -10,19 +15,17 @@ const mockLogger = vi.hoisted(() => ({
 	child: vi.fn().mockReturnThis()
 }));
 
-initTestDb();
+const testDb: TestDatabase = createTestDb();
 
-vi.mock('$lib/server/db', () => {
-	return {
-		get db() {
-			return getTestDb().db;
-		},
-		get sqlite() {
-			return getTestDb().sqlite;
-		},
-		initializeDatabase: vi.fn().mockResolvedValue(undefined)
-	};
-});
+vi.mock('$lib/server/db', () => ({
+	get db() {
+		return testDb.db;
+	},
+	get sqlite() {
+		return testDb.sqlite;
+	},
+	initializeDatabase: vi.fn().mockResolvedValue(undefined)
+}));
 
 vi.mock('$lib/logging', () => ({
 	logger: mockLogger,
@@ -32,16 +35,12 @@ vi.mock('$lib/logging', () => ({
 const { GET, PUT } = await import('./+server');
 
 describe('Subtitle Settings API', () => {
-	beforeAll(() => {
-		initTestDb();
-	});
-
 	afterAll(() => {
-		closeTestDb();
+		destroyTestDb(testDb);
 	});
 
 	beforeEach(() => {
-		clearTestDb();
+		clearTestDb(testDb);
 	});
 
 	it('does not expose legacy auto-sync settings', async () => {

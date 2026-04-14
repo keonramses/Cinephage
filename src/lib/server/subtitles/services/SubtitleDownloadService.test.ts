@@ -1,6 +1,6 @@
 import { rm } from 'node:fs/promises';
 import { afterAll, beforeEach, describe, expect, it, vi } from 'vitest';
-import { initTestDb, closeTestDb, getTestDb } from '../../../../test/db-helper';
+import { createTestDb, destroyTestDb, type TestDatabase } from '../../../../test/db-helper';
 import {
 	movieFiles,
 	movies,
@@ -22,19 +22,17 @@ const mockLogger = vi.hoisted(() => ({
 	child: vi.fn().mockReturnThis()
 }));
 
-initTestDb();
+const testDb: TestDatabase = createTestDb();
 
-vi.mock('$lib/server/db', () => {
-	return {
-		get db() {
-			return getTestDb().db;
-		},
-		get sqlite() {
-			return getTestDb().sqlite;
-		},
-		initializeDatabase: vi.fn().mockResolvedValue(undefined)
-	};
-});
+vi.mock('$lib/server/db', () => ({
+	get db() {
+		return testDb.db;
+	},
+	get sqlite() {
+		return testDb.sqlite;
+	},
+	initializeDatabase: vi.fn().mockResolvedValue(undefined)
+}));
 
 vi.mock('$lib/logging', () => ({
 	logger: mockLogger,
@@ -74,12 +72,11 @@ function buildSearchResult(overrides: Partial<SubtitleSearchResult> = {}): Subti
 }
 
 async function seedMovie(): Promise<string> {
-	const { db } = getTestDb();
 	const rootFolderId = 'root-movie';
 	const movieId = 'movie-1';
 	const providerId = 'provider-1';
 
-	await db.insert(subtitleProviders).values({
+	await testDb.db.insert(subtitleProviders).values({
 		id: providerId,
 		name: 'Test Provider',
 		implementation: 'opensubtitles',
@@ -88,14 +85,14 @@ async function seedMovie(): Promise<string> {
 		requestsPerMinute: 60
 	});
 
-	await db.insert(rootFolders).values({
+	await testDb.db.insert(rootFolders).values({
 		id: rootFolderId,
 		name: 'Movies',
 		path: ROOT_PATH,
 		mediaType: 'movie'
 	});
 
-	await db.insert(movies).values({
+	await testDb.db.insert(movies).values({
 		id: movieId,
 		tmdbId: 101,
 		title: 'Test Movie',
@@ -103,7 +100,7 @@ async function seedMovie(): Promise<string> {
 		rootFolderId
 	});
 
-	await db.insert(movieFiles).values({
+	await testDb.db.insert(movieFiles).values({
 		id: 'movie-file-1',
 		movieId,
 		relativePath: 'Test.Movie.2024.mkv'
@@ -114,7 +111,13 @@ async function seedMovie(): Promise<string> {
 
 describe('SubtitleDownloadService', () => {
 	beforeEach(async () => {
-		initTestDb();
+		testDb.db.delete(subtitleHistory).run();
+		testDb.db.delete(subtitles).run();
+		testDb.db.delete(movieFiles).run();
+		testDb.db.delete(movies).run();
+		testDb.db.delete(rootFolders).run();
+		testDb.db.delete(subtitleProviders).run();
+
 		await rm(ROOT_PATH, { recursive: true, force: true });
 		providerDownloadMock.mockReset();
 		getProviderInstanceMock.mockReset();
@@ -138,7 +141,7 @@ describe('SubtitleDownloadService', () => {
 
 	afterAll(async () => {
 		await rm(ROOT_PATH, { recursive: true, force: true });
-		closeTestDb();
+		destroyTestDb(testDb);
 	});
 
 	it('automatically syncs downloaded subtitles', async () => {
@@ -152,12 +155,11 @@ describe('SubtitleDownloadService', () => {
 		expect(result.wasSynced).toBe(true);
 		expect(result.syncOffset).toBe(1250);
 
-		const { db } = getTestDb();
-		const savedSubtitles = await db.select().from(subtitles);
+		const savedSubtitles = await testDb.db.select().from(subtitles);
 		expect(savedSubtitles).toHaveLength(1);
 		expect(savedSubtitles[0].id).toBe(result.subtitleId);
 
-		const historyRows = await db.select().from(subtitleHistory);
+		const historyRows = await testDb.db.select().from(subtitleHistory);
 		expect(historyRows).toHaveLength(1);
 		expect(historyRows[0].action).toBe('downloaded');
 	});

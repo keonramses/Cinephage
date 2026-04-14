@@ -1,17 +1,17 @@
 import { afterAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { eq } from 'drizzle-orm';
-import { initTestDb, closeTestDb, getTestDb } from '../../../../test/db-helper';
+import { createTestDb, destroyTestDb, type TestDatabase } from '../../../../test/db-helper';
 import { indexers } from '$lib/server/db/schema';
 import { CINEPHAGE_STREAM_DEFINITION_ID } from '../types';
 
-initTestDb();
+const testDb: TestDatabase = createTestDb();
 
 vi.mock('$lib/server/db', () => ({
 	get db() {
-		return getTestDb().db;
+		return testDb.db;
 	},
 	get sqlite() {
-		return getTestDb().sqlite;
+		return testDb.sqlite;
 	},
 	initializeDatabase: vi.fn().mockResolvedValue(undefined)
 }));
@@ -46,9 +46,10 @@ describe('CinephageBackendClient', () => {
 		}
 		Object.assign(process.env, originalEnv);
 
-		const { db } = getTestDb();
-		await db.delete(indexers).where(eq(indexers.definitionId, CINEPHAGE_STREAM_DEFINITION_ID));
-		await db.insert(indexers).values({
+		await testDb.db
+			.delete(indexers)
+			.where(eq(indexers.definitionId, CINEPHAGE_STREAM_DEFINITION_ID));
+		await testDb.db.insert(indexers).values({
 			id: 'cinephage-stream-test',
 			name: 'Cinephage Library',
 			definitionId: CINEPHAGE_STREAM_DEFINITION_ID,
@@ -66,7 +67,7 @@ describe('CinephageBackendClient', () => {
 			delete process.env[key];
 		}
 		Object.assign(process.env, originalEnv);
-		closeTestDb();
+		destroyTestDb(testDb);
 	});
 
 	it('sanitizes streaming settings to the supported keys only', () => {
@@ -100,8 +101,7 @@ describe('CinephageBackendClient', () => {
 	});
 
 	it('uses DB settings only and ignores env fallbacks', async () => {
-		const { db } = getTestDb();
-		await db
+		await testDb.db
 			.update(indexers)
 			.set({
 				settings: {
@@ -151,8 +151,7 @@ describe('CinephageBackendClient', () => {
 	});
 
 	it('maps upstream 401 responses to authentication errors', async () => {
-		const { db } = getTestDb();
-		await db
+		await testDb.db
 			.update(indexers)
 			.set({
 				settings: {
@@ -182,8 +181,7 @@ describe('CinephageBackendClient', () => {
 	});
 
 	it('keeps manual streaming auth values while cleaning unsupported keys', async () => {
-		const { db } = getTestDb();
-		await db
+		await testDb.db
 			.update(indexers)
 			.set({
 				settings: {
@@ -206,7 +204,7 @@ describe('CinephageBackendClient', () => {
 			baseUrl: 'https://example.com:3000'
 		});
 
-		const [row] = await db
+		const [row] = await testDb.db
 			.select({ settings: indexers.settings })
 			.from(indexers)
 			.where(eq(indexers.definitionId, CINEPHAGE_STREAM_DEFINITION_ID));

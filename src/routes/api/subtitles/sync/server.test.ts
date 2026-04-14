@@ -1,5 +1,10 @@
-import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
-import { initTestDb, closeTestDb, clearTestDb, getTestDb } from '../../../../test/db-helper';
+import { afterAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import {
+	createTestDb,
+	destroyTestDb,
+	clearTestDb,
+	type TestDatabase
+} from '../../../../test/db-helper';
 import { api, type ErrorResponse } from '../../../../test/api-helper';
 
 const syncSubtitleMock = vi.hoisted(() => vi.fn());
@@ -12,19 +17,17 @@ const mockLogger = vi.hoisted(() => ({
 	child: vi.fn().mockReturnThis()
 }));
 
-initTestDb();
+const testDb: TestDatabase = createTestDb();
 
-vi.mock('$lib/server/db', () => {
-	return {
-		get db() {
-			return getTestDb().db;
-		},
-		get sqlite() {
-			return getTestDb().sqlite;
-		},
-		initializeDatabase: vi.fn().mockResolvedValue(undefined)
-	};
-});
+vi.mock('$lib/server/db', () => ({
+	get db() {
+		return testDb.db;
+	},
+	get sqlite() {
+		return testDb.sqlite;
+	},
+	initializeDatabase: vi.fn().mockResolvedValue(undefined)
+}));
 
 vi.mock('$lib/logging', () => ({
 	logger: mockLogger,
@@ -41,16 +44,12 @@ vi.mock('$lib/server/subtitles/services/SubtitleSyncService', () => ({
 const { GET, POST } = await import('./+server');
 
 describe('Subtitle Sync API', () => {
-	beforeAll(() => {
-		initTestDb();
-	});
-
 	afterAll(() => {
-		closeTestDb();
+		destroyTestDb(testDb);
 	});
 
 	beforeEach(() => {
-		clearTestDb();
+		clearTestDb(testDb);
 		syncSubtitleMock.mockReset();
 		isAvailableMock.mockReset();
 	});
