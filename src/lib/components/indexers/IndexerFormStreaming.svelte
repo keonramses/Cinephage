@@ -1,5 +1,6 @@
 <script lang="ts">
-	import { ChevronDown, Settings } from 'lucide-svelte';
+	import { browser } from '$app/environment';
+	import { ChevronDown, Settings, Sparkles, Loader2 } from 'lucide-svelte';
 	import type { IndexerDefinition } from '$lib/types/indexer';
 	import * as m from '$lib/paraglide/messages.js';
 	import { SectionHeader, ToggleSetting } from '$lib/components/ui/modal';
@@ -46,6 +47,39 @@
 
 	const MAX_NAME_LENGTH = 20;
 	const nameTooLong = $derived(name.length > MAX_NAME_LENGTH);
+
+	const hasVersionFields = $derived.by(() => {
+		const names = new Set(textSettings.map((s) => s.name));
+		return names.has('cinephageVersion') && names.has('cinephageCommit');
+	});
+
+	let autofillLoading = $state(false);
+	let autofillError = $state('');
+
+	async function handleAutofillRelease() {
+		if (!browser || autofillLoading) return;
+		autofillLoading = true;
+		autofillError = '';
+		try {
+			const res = await fetch('/api/system/github-release');
+			if (!res.ok) throw new Error('Failed to fetch release');
+			const data = (await res.json()) as {
+				success?: boolean;
+				version?: string;
+				commit?: string;
+				error?: string;
+			};
+			if (!data.success || !data.version || !data.commit) {
+				throw new Error(data.error ?? 'Invalid response');
+			}
+			onSettingsChange('cinephageVersion', data.version);
+			onSettingsChange('cinephageCommit', data.commit);
+		} catch (err) {
+			autofillError = err instanceof Error ? err.message : 'Unknown error';
+		} finally {
+			autofillLoading = false;
+		}
+	}
 
 	// Collapsible configuration state
 	let configOpen = $state(true);
@@ -178,6 +212,26 @@
 				<div class="space-y-4">
 					<!-- Text inputs - 2 column grid -->
 					{#if textSettings.length > 0}
+						{#if hasVersionFields}
+							<div class="mb-2 flex items-center gap-2">
+								<button
+									type="button"
+									class="btn gap-1 text-primary btn-ghost btn-xs"
+									onclick={handleAutofillRelease}
+									disabled={autofillLoading}
+								>
+									{#if autofillLoading}
+										<Loader2 class="h-3 w-3 animate-spin" />
+									{:else}
+										<Sparkles class="h-3 w-3" />
+									{/if}
+									{autofillLoading ? 'Fetching...' : 'Auto-fill from latest release'}
+								</button>
+								{#if autofillError}
+									<span class="text-xs text-error">{autofillError}</span>
+								{/if}
+							</div>
+						{/if}
 						<div class="grid grid-cols-1 gap-3 md:grid-cols-2">
 							{#each textSettings as setting (setting.name)}
 								<div class="form-control">
