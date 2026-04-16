@@ -404,7 +404,6 @@
 	<div class="mt-6">
 		<MediaServerStatsSection
 			stats={data.mediaServerStats}
-			serverStatuses={data.serverStatuses}
 			topItems={data.topItems}
 			largestItems={data.largestItems}
 			servers={data.servers.map((s) => ({
@@ -413,9 +412,6 @@
 				serverType: s.serverType,
 				enabled: s.enabled ?? false
 			}))}
-			{syncing}
-			{syncError}
-			onTriggerSync={triggerServerSync}
 		/>
 	</div>
 </SettingsPage>

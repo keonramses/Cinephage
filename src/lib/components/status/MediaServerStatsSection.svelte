@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { BarChart3, Server, Play, HardDrive, Activity, RefreshCw } from 'lucide-svelte';
+	import { BarChart3 } from 'lucide-svelte';
 	import { SettingsSection } from '$lib/components/ui/settings';
 
 	type BreakdownItem = { label: string; count: number };
@@ -17,16 +17,6 @@
 		lastPlayedDate: string | null;
 	};
 
-	type ServerStatus = {
-		serverId: string;
-		serverName: string;
-		serverType: string;
-		itemCount: number;
-		lastSyncAt: string | null;
-		lastSyncStatus: string | null;
-		enabled: boolean;
-	};
-
 	interface Props {
 		stats: {
 			totalPlays: number;
@@ -39,25 +29,12 @@
 			audioCodecBreakdown: BreakdownItem[];
 			containerBreakdown: BreakdownItem[];
 		};
-		serverStatuses: ServerStatus[];
 		topItems: SyncedItem[];
 		largestItems: SyncedItem[];
 		servers: Array<{ id: string; name: string; serverType: string; enabled: boolean }>;
-		syncing: boolean;
-		syncError: string | null;
-		onTriggerSync: () => Promise<void>;
 	}
 
-	let {
-		stats,
-		serverStatuses,
-		topItems,
-		largestItems,
-		servers,
-		syncing,
-		syncError,
-		onTriggerSync
-	}: Props = $props();
+	let { stats, topItems, largestItems, servers }: Props = $props();
 
 	function formatBytes(value: number): string {
 		if (!value) return '0 B';
@@ -69,23 +46,6 @@
 			unitIndex += 1;
 		}
 		return `${size.toFixed(size >= 10 || unitIndex === 0 ? 0 : 1)} ${units[unitIndex]}`;
-	}
-
-	function formatTimestamp(timestamp: string | null): string {
-		if (!timestamp) return 'Never';
-		return new Date(timestamp).toLocaleString();
-	}
-
-	function getServerTypeIcon(type: string) {
-		return type === 'jellyfin' ? '🟣' : type === 'emby' ? '🟢' : '🟠';
-	}
-
-	function getSyncStatusColor(status: string | null, lastSyncAt: string | null): string {
-		if (status === 'failed') return 'badge-error';
-		if (!lastSyncAt) return 'badge-ghost';
-		const hoursSinceSync = (Date.now() - new Date(lastSyncAt).getTime()) / (1000 * 60 * 60);
-		if (hoursSinceSync > 24) return 'badge-warning';
-		return 'badge-success';
 	}
 
 	function barWidth(count: number, max: number): string {
@@ -102,7 +62,7 @@
 {#if servers.length === 0}
 	<SettingsSection title="No Media Servers Configured" variant="card">
 		<div class="flex flex-col items-center gap-3 py-8 text-center">
-			<Server class="h-12 w-12 text-base-content/30" />
+			<BarChart3 class="h-12 w-12 text-base-content/30" />
 			<p class="text-base-content/70">
 				No media servers configured yet. Add a Jellyfin, Emby, or Plex server from the
 				<a href="/settings/integrations" class="link link-primary">Integrations</a>
@@ -121,110 +81,6 @@
 		</div>
 	</SettingsSection>
 {:else}
-	<div class="mb-4 flex items-center justify-between">
-		<h3 class="flex items-center gap-2 font-semibold">
-			<Server class="h-4 w-4" />
-			Media Server Analytics
-		</h3>
-		<button
-			type="button"
-			class="btn gap-2 btn-sm"
-			onclick={() => void onTriggerSync()}
-			disabled={syncing}
-		>
-			{#if syncing}
-				<RefreshCw class="h-4 w-4 animate-spin" />
-				Syncing...
-			{:else}
-				<RefreshCw class="h-4 w-4" />
-				Sync Servers
-			{/if}
-		</button>
-	</div>
-
-	{#if syncError}
-		<div class="mb-4 alert alert-error">
-			<span>{syncError}</span>
-		</div>
-	{/if}
-
-	<div class="mb-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-		<div class="card bg-base-200">
-			<div class="card-body flex-row items-center gap-4 p-4">
-				<div class="rounded-lg bg-primary/10 p-3">
-					<Play class="h-5 w-5 text-primary" />
-				</div>
-				<div>
-					<div class="text-2xl font-bold">{stats.totalPlays.toLocaleString()}</div>
-					<div class="text-xs text-base-content/70">Total Plays</div>
-				</div>
-			</div>
-		</div>
-		<div class="card bg-base-200">
-			<div class="card-body flex-row items-center gap-4 p-4">
-				<div class="rounded-lg bg-secondary/10 p-3">
-					<HardDrive class="h-5 w-5 text-secondary" />
-				</div>
-				<div>
-					<div class="text-2xl font-bold">{stats.uniqueItems.toLocaleString()}</div>
-					<div class="text-xs text-base-content/70">Items Tracked</div>
-				</div>
-			</div>
-		</div>
-		<div class="card bg-base-200">
-			<div class="card-body flex-row items-center gap-4 p-4">
-				<div class="rounded-lg bg-accent/10 p-3">
-					<Server class="h-5 w-5 text-accent" />
-				</div>
-				<div>
-					<div class="text-2xl font-bold">{stats.serversSynced}</div>
-					<div class="text-xs text-base-content/70">Servers Synced</div>
-				</div>
-			</div>
-		</div>
-		<div class="card bg-base-200">
-			<div class="card-body flex-row items-center gap-4 p-4">
-				<div class="rounded-lg bg-info/10 p-3">
-					<Activity class="h-5 w-5 text-info" />
-				</div>
-				<div>
-					<div class="text-2xl font-bold">{formatBytes(stats.totalFileSize)}</div>
-					<div class="text-xs text-base-content/70">Total Storage</div>
-				</div>
-			</div>
-		</div>
-	</div>
-
-	{#if serverStatuses.length > 0}
-		<SettingsSection title="Server Status" variant="card">
-			<div class="flex flex-wrap gap-3">
-				{#each serverStatuses as server (server.serverId)}
-					<div
-						class="flex items-center gap-2 rounded-lg border border-base-300 bg-base-100 px-3 py-2"
-					>
-						<span class="text-sm">{getServerTypeIcon(server.serverType)}</span>
-						<div class="min-w-0">
-							<div class="flex items-center gap-2">
-								<span class="truncate text-sm font-medium">{server.serverName}</span>
-								<span
-									class="badge badge-sm {getSyncStatusColor(
-										server.lastSyncStatus,
-										server.lastSyncAt
-									)}"
-								>
-									{server.lastSyncStatus ?? 'pending'}
-								</span>
-							</div>
-							<div class="text-xs text-base-content/60">
-								{server.itemCount} items · {formatTimestamp(server.lastSyncAt)}
-							</div>
-						</div>
-					</div>
-				{/each}
-			</div>
-		</SettingsSection>
-	{/if}
-
 	<div class="mt-4 grid gap-4 md:grid-cols-3">
 		<SettingsSection title="Resolution" variant="card">
 			{#if stats.resolutionBreakdown.length > 0}

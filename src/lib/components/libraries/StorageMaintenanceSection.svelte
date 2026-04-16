@@ -7,10 +7,7 @@
 		Film,
 		Library,
 		FolderOpen,
-		Database,
 		ShieldAlert,
-		Link2Off,
-		Clock3,
 		RefreshCw,
 		Eye,
 		EyeOff,
@@ -201,15 +198,6 @@
 	const topRootFolders = $derived(
 		[...storage.rootFolderBreakdown].sort((a, b) => b.usedBytes - a.usedBytes).slice(0, 5)
 	);
-
-	function formatDuration(durationMs: number | null): string {
-		if (!durationMs || durationMs < 1000) return m.settings_general_underOneSecond();
-		const totalSeconds = Math.round(durationMs / 1000);
-		if (totalSeconds < 60) return `${totalSeconds}s`;
-		const minutes = Math.floor(totalSeconds / 60);
-		const seconds = totalSeconds % 60;
-		return seconds === 0 ? `${minutes}m` : `${minutes}m ${seconds}s`;
-	}
 
 	function formatTimestamp(timestamp: string | null): string {
 		if (!timestamp) return m.settings_general_never();
@@ -421,118 +409,6 @@
 		{/if}
 	</div>
 {/if}
-
-<div class="mt-6 space-y-4">
-	<div class="rounded-lg border border-base-300 bg-base-100 p-4">
-		<div class="mb-3 flex items-center gap-2">
-			<RefreshCw class="h-4 w-4" />
-			<h3 class="font-semibold">{m.settings_general_scanStatus()}</h3>
-		</div>
-		<div class="grid grid-cols-2 gap-3 xl:grid-cols-3">
-			<div class="card bg-base-200 shadow-sm">
-				<div class="card-body p-4">
-					<div class="flex items-center gap-2 text-sm text-base-content/60">
-						<Clock3 class="h-4 w-4" />
-						{m.settings_general_lastScan()}
-					</div>
-					<div class="mt-2 text-base font-semibold">
-						{storage.health.lastScan
-							? formatTimestamp(
-									storage.health.lastScan.completedAt ?? storage.health.lastScan.startedAt
-								)
-							: 'Never'}
-					</div>
-					<div class={`text-xs ${getScanTone(storage.health.lastScan?.status)}`}>
-						{storage.health.lastScan
-							? storage.health.lastScan.status
-							: m.settings_general_noScanHistory()}
-					</div>
-				</div>
-			</div>
-			<div class="card bg-base-200 shadow-sm">
-				<div class="card-body p-4">
-					<div class="flex items-center gap-2 text-sm text-base-content/60">
-						<RefreshCw class="h-4 w-4" />
-						{m.settings_general_scanHealth()}
-					</div>
-					<div
-						class={`mt-2 text-base font-semibold ${getScanTone(storage.health.lastScan?.status)}`}
-					>
-						{storage.health.lastScan?.status === 'completed'
-							? m.settings_general_healthy()
-							: storage.health.lastScan?.status === 'running'
-								? m.settings_general_running()
-								: storage.health.lastScan?.status === 'failed'
-									? m.settings_general_attentionNeeded()
-									: m.settings_general_pendingFirstScan()}
-					</div>
-					<div class="text-xs text-base-content/50">
-						{formatDuration(storage.health.lastScan?.durationMs ?? null)}
-					</div>
-				</div>
-			</div>
-			<div class="card col-span-2 bg-base-200 shadow-sm xl:col-span-1">
-				<div class="card-body p-4">
-					<div class="flex items-center gap-2 text-sm text-base-content/60">
-						<FolderOpen class="h-4 w-4" />
-						{m.settings_general_unmatchedFiles()}
-					</div>
-					<div class="mt-2 text-xl font-semibold sm:text-2xl">{storage.health.unmatchedFiles}</div>
-					<div class="text-xs text-base-content/50">{m.settings_general_unmatchedFilesHint()}</div>
-				</div>
-			</div>
-		</div>
-	</div>
-
-	<div class="rounded-lg border border-base-300 bg-base-100 p-4">
-		<div class="mb-3 flex items-center gap-2">
-			<Database class="h-4 w-4" />
-			<h3 class="font-semibold">{m.settings_general_storageOverview()}</h3>
-		</div>
-		<div class="grid grid-cols-2 gap-3 xl:grid-cols-3">
-			<div class="card bg-base-200 shadow-sm">
-				<div class="card-body p-4">
-					<div class="flex items-center gap-2 text-sm text-base-content/60">
-						<Link2Off class="h-4 w-4" />
-						{m.settings_general_detachedItems()}
-					</div>
-					<div class="mt-2 text-xl font-semibold sm:text-2xl">
-						{storage.health.totalDetachedItems}
-					</div>
-					<div class="text-xs text-base-content/50">{m.settings_general_detachedItemsHint()}</div>
-				</div>
-			</div>
-			<div class="card bg-base-200 shadow-sm">
-				<div class="card-body p-4">
-					<div class="flex items-center gap-2 text-sm text-base-content/60">
-						<AlertCircle class="h-4 w-4" />
-						{m.settings_general_inaccessibleFolders()}
-					</div>
-					<div class="mt-2 text-xl font-semibold sm:text-2xl">
-						{storage.health.inaccessibleRootFolders}
-					</div>
-					<div class="text-xs text-base-content/50">
-						{m.settings_general_inaccessibleFoldersHint()}
-					</div>
-				</div>
-			</div>
-			<div class="card col-span-2 bg-base-200 shadow-sm xl:col-span-1">
-				<div class="card-body p-4">
-					<div class="flex items-center gap-2 text-sm text-base-content/60">
-						<Database class="h-4 w-4" />
-						Total storage
-					</div>
-					<div class="mt-2 text-xl font-semibold sm:text-2xl">
-						{formatBytes(storage.totalUsedBytes)}
-					</div>
-					<div class="text-xs text-base-content/50">
-						{storage.movieCount} movies, {storage.seriesCount} series, {storage.subtitleCount} subtitles
-					</div>
-				</div>
-			</div>
-		</div>
-	</div>
-</div>
 
 <div class="mt-4 rounded-lg border border-base-300 bg-base-100 p-4">
 	<div class="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
