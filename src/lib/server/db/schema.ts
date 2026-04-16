@@ -2724,6 +2724,78 @@ export const mediaBrowserServers = sqliteTable('media_browser_servers', {
 export type MediaBrowserServerRecord = typeof mediaBrowserServers.$inferSelect;
 export type NewMediaBrowserServerRecord = typeof mediaBrowserServers.$inferInsert;
 
+export const mediaServerSyncedItems = sqliteTable(
+	'media_server_synced_items',
+	{
+		id: text('id')
+			.primaryKey()
+			.$defaultFn(() => randomUUID()),
+		serverId: text('server_id')
+			.notNull()
+			.references(() => mediaBrowserServers.id, { onDelete: 'cascade' }),
+		serverItemId: text('server_item_id').notNull(),
+		tmdbId: integer('tmdb_id'),
+		tvdbId: integer('tvdb_id'),
+		imdbId: text('imdb_id'),
+		title: text('title').notNull(),
+		year: integer('year'),
+		itemType: text('item_type', { enum: ['movie', 'episode', 'series', 'season'] }).notNull(),
+		seriesName: text('series_name'),
+		seasonNumber: integer('season_number'),
+		episodeNumber: integer('episode_number'),
+		playCount: integer('play_count').default(0),
+		lastPlayedDate: text('last_played_date'),
+		playedPercentage: real('played_percentage'),
+		isPlayed: integer('is_played').default(0),
+		videoCodec: text('video_codec'),
+		videoProfile: text('video_profile'),
+		videoBitDepth: integer('video_bit_depth'),
+		width: integer('width'),
+		height: integer('height'),
+		isHDR: integer('is_hdr').default(0),
+		hdrFormat: text('hdr_format'),
+		videoBitrate: integer('video_bitrate'),
+		audioCodec: text('audio_codec'),
+		audioChannels: integer('audio_channels'),
+		audioChannelLayout: text('audio_channel_layout'),
+		audioBitrate: integer('audio_bitrate'),
+		audioLanguages: text('audio_languages', { mode: 'json' }).$type<string[]>().default([]),
+		subtitleLanguages: text('subtitle_languages', { mode: 'json' }).$type<string[]>().default([]),
+		containerFormat: text('container_format'),
+		fileSize: integer('file_size'),
+		bitrate: integer('bitrate'),
+		duration: integer('duration'),
+		lastSyncedAt: text('last_synced_at').notNull(),
+		createdAt: text('created_at').$defaultFn(() => new Date().toISOString()),
+		updatedAt: text('updated_at').$defaultFn(() => new Date().toISOString())
+	},
+	(table) => [uniqueIndex('idx_synced_items_unique').on(table.serverId, table.serverItemId)]
+);
+
+export const mediaServerSyncedRuns = sqliteTable('media_server_synced_runs', {
+	id: text('id')
+		.primaryKey()
+		.$defaultFn(() => randomUUID()),
+	serverId: text('server_id')
+		.notNull()
+		.references(() => mediaBrowserServers.id, { onDelete: 'cascade' }),
+	status: text('status', { enum: ['running', 'completed', 'failed'] }).notNull(),
+	itemsSynced: integer('items_synced').default(0),
+	itemsAdded: integer('items_added').default(0),
+	itemsUpdated: integer('items_updated').default(0),
+	itemsRemoved: integer('items_removed').default(0),
+	errorMessage: text('error_message'),
+	startedAt: text('started_at').notNull(),
+	completedAt: text('completed_at'),
+	duration: integer('duration'),
+	createdAt: text('created_at').$defaultFn(() => new Date().toISOString())
+});
+
+export type MediaServerSyncedItemRecord = typeof mediaServerSyncedItems.$inferSelect;
+export type NewMediaServerSyncedItemRecord = typeof mediaServerSyncedItems.$inferInsert;
+export type MediaServerSyncedRunRecord = typeof mediaServerSyncedRuns.$inferSelect;
+export type NewMediaServerSyncedRunRecord = typeof mediaServerSyncedRuns.$inferInsert;
+
 // ============================================================================
 // LIVE TV - STALKER PORTALS
 // ============================================================================

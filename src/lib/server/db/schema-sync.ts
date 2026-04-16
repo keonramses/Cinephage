@@ -110,7 +110,7 @@ interface MigrationDefinition {
  * Version 80: Built-in profile score overrides table
  * Version 81: Unify scoring profile architecture - add isBuiltIn, min/max resolution, source columns
  */
-export const CURRENT_SCHEMA_VERSION = 81;
+export const CURRENT_SCHEMA_VERSION = 82;
 
 const SYSTEM_LIBRARY_SEEDS = [
 	{
@@ -1124,6 +1124,61 @@ const TABLE_DEFINITIONS: string[] = [
 		"updated_at" text
 	)`,
 
+	`CREATE TABLE IF NOT EXISTS "media_server_synced_items" (
+		"id" text PRIMARY KEY NOT NULL,
+		"server_id" text NOT NULL REFERENCES "media_browser_servers"("id") ON DELETE CASCADE,
+		"server_item_id" text NOT NULL,
+		"tmdb_id" integer,
+		"tvdb_id" integer,
+		"imdb_id" text,
+		"title" text NOT NULL,
+		"year" integer,
+		"item_type" text NOT NULL,
+		"series_name" text,
+		"season_number" integer,
+		"episode_number" integer,
+		"play_count" integer DEFAULT 0,
+		"last_played_date" text,
+		"played_percentage" real,
+		"is_played" integer DEFAULT 0,
+		"video_codec" text,
+		"video_profile" text,
+		"video_bit_depth" integer,
+		"width" integer,
+		"height" integer,
+		"is_hdr" integer DEFAULT 0,
+		"hdr_format" text,
+		"video_bitrate" integer,
+		"audio_codec" text,
+		"audio_channels" integer,
+		"audio_channel_layout" text,
+		"audio_bitrate" integer,
+		"audio_languages" text DEFAULT '[]',
+		"subtitle_languages" text DEFAULT '[]',
+		"container_format" text,
+		"file_size" integer,
+		"bitrate" integer,
+		"duration" integer,
+		"last_synced_at" text NOT NULL,
+		"created_at" text,
+		"updated_at" text
+	)`,
+
+	`CREATE TABLE IF NOT EXISTS "media_server_synced_runs" (
+		"id" text PRIMARY KEY NOT NULL,
+		"server_id" text NOT NULL REFERENCES "media_browser_servers"("id") ON DELETE CASCADE,
+		"status" text NOT NULL,
+		"items_synced" integer DEFAULT 0,
+		"items_added" integer DEFAULT 0,
+		"items_updated" integer DEFAULT 0,
+		"items_removed" integer DEFAULT 0,
+		"error_message" text,
+		"started_at" text NOT NULL,
+		"completed_at" text,
+		"duration" integer,
+		"created_at" text
+	)`,
+
 	// Live TV - Stalker Portals (for scanning)
 	`CREATE TABLE IF NOT EXISTS "stalker_portals" (
 		"id" text PRIMARY KEY NOT NULL,
@@ -1404,7 +1459,12 @@ const INDEX_DEFINITIONS: string[] = [
 	`CREATE INDEX IF NOT EXISTS "idx_dh_protocol" ON "download_history" ("protocol")`,
 	`CREATE INDEX IF NOT EXISTS "idx_dh_indexer_name" ON "download_history" ("indexer_name")`,
 	`CREATE INDEX IF NOT EXISTS "idx_dh_download_client" ON "download_history" ("download_client_id")`,
-	`CREATE INDEX IF NOT EXISTS "idx_dh_status_created" ON "download_history" ("status", "created_at")`
+	`CREATE INDEX IF NOT EXISTS "idx_dh_status_created" ON "download_history" ("status", "created_at")`,
+	// Media server synced items indexes
+	`CREATE UNIQUE INDEX IF NOT EXISTS "idx_synced_items_unique" ON "media_server_synced_items" ("server_id", "server_item_id")`,
+	`CREATE INDEX IF NOT EXISTS "idx_synced_items_tmdb_id" ON "media_server_synced_items" ("tmdb_id")`,
+	`CREATE INDEX IF NOT EXISTS "idx_synced_items_tvdb_id" ON "media_server_synced_items" ("tvdb_id")`,
+	`CREATE INDEX IF NOT EXISTS "idx_synced_items_item_type" ON "media_server_synced_items" ("item_type")`
 ];
 
 /**
@@ -5723,6 +5783,98 @@ const MIGRATIONS: MigrationDefinition[] = [
 			}
 
 			logger.info('[SchemaSync] Unified scoring profile architecture (v81)');
+		}
+	},
+	{
+		version: 82,
+		name: 'add_media_server_stats_tables',
+		apply: (sqlite) => {
+			if (!tableExists(sqlite, 'media_server_synced_items')) {
+				sqlite
+					.prepare(
+						`CREATE TABLE IF NOT EXISTS "media_server_synced_items" (
+							"id" text PRIMARY KEY NOT NULL,
+							"server_id" text NOT NULL REFERENCES "media_browser_servers"("id") ON DELETE CASCADE,
+							"server_item_id" text NOT NULL,
+							"tmdb_id" integer,
+							"tvdb_id" integer,
+							"imdb_id" text,
+							"title" text NOT NULL,
+							"year" integer,
+							"item_type" text NOT NULL,
+							"series_name" text,
+							"season_number" integer,
+							"episode_number" integer,
+							"play_count" integer DEFAULT 0,
+							"last_played_date" text,
+							"played_percentage" real,
+							"is_played" integer DEFAULT 0,
+							"video_codec" text,
+							"video_profile" text,
+							"video_bit_depth" integer,
+							"width" integer,
+							"height" integer,
+							"is_hdr" integer DEFAULT 0,
+							"hdr_format" text,
+							"video_bitrate" integer,
+							"audio_codec" text,
+							"audio_channels" integer,
+							"audio_channel_layout" text,
+							"audio_bitrate" integer,
+							"audio_languages" text DEFAULT '[]',
+							"subtitle_languages" text DEFAULT '[]',
+							"container_format" text,
+							"file_size" integer,
+							"bitrate" integer,
+							"duration" integer,
+							"last_synced_at" text NOT NULL,
+							"created_at" text,
+							"updated_at" text
+						)`
+					)
+					.run();
+			}
+			if (!tableExists(sqlite, 'media_server_synced_runs')) {
+				sqlite
+					.prepare(
+						`CREATE TABLE IF NOT EXISTS "media_server_synced_runs" (
+							"id" text PRIMARY KEY NOT NULL,
+							"server_id" text NOT NULL REFERENCES "media_browser_servers"("id") ON DELETE CASCADE,
+							"status" text NOT NULL,
+							"items_synced" integer DEFAULT 0,
+							"items_added" integer DEFAULT 0,
+							"items_updated" integer DEFAULT 0,
+							"items_removed" integer DEFAULT 0,
+							"error_message" text,
+							"started_at" text NOT NULL,
+							"completed_at" text,
+							"duration" integer,
+							"created_at" text
+						)`
+					)
+					.run();
+			}
+			sqlite
+				.prepare(
+					`CREATE UNIQUE INDEX IF NOT EXISTS "idx_synced_items_unique" ON "media_server_synced_items" ("server_id", "server_item_id")`
+				)
+				.run();
+			sqlite
+				.prepare(
+					`CREATE INDEX IF NOT EXISTS "idx_synced_items_tmdb_id" ON "media_server_synced_items" ("tmdb_id")`
+				)
+				.run();
+			sqlite
+				.prepare(
+					`CREATE INDEX IF NOT EXISTS "idx_synced_items_tvdb_id" ON "media_server_synced_items" ("tvdb_id")`
+				)
+				.run();
+			sqlite
+				.prepare(
+					`CREATE INDEX IF NOT EXISTS "idx_synced_items_item_type" ON "media_server_synced_items" ("item_type")`
+				)
+				.run();
+			logger.info('[SchemaSync] Added media_server_stats_tables (v82)');
 		}
 	}
 ];
