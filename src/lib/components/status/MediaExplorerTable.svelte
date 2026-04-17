@@ -115,11 +115,6 @@
 		}
 	}
 
-	function getSortIcon(field: string): typeof ArrowUpDown {
-		const [currentField] = currentSort.split('-');
-		return currentField === field ? ArrowUp : ArrowUpDown;
-	}
-
 	function getSortDirection(field: string): 'asc' | 'desc' | null {
 		const [currentField, currentDir] = currentSort.split('-');
 		return currentField === field ? (currentDir as 'asc' | 'desc') : null;

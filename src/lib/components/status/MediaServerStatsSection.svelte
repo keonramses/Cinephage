@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { BarChart3 } from 'lucide-svelte';
+	import { BarChart3, Play, Database, ExternalLink } from 'lucide-svelte';
 	import { SettingsSection } from '$lib/components/ui/settings';
 
 	type BreakdownItem = { label: string; count: number };
@@ -21,8 +21,6 @@
 		stats: {
 			totalPlays: number;
 			uniqueItems: number;
-			serversSynced: number;
-			totalFileSize: number;
 			resolutionBreakdown: BreakdownItem[];
 			codecBreakdown: BreakdownItem[];
 			hdrBreakdown: BreakdownItem[];
@@ -32,9 +30,11 @@
 		topItems: SyncedItem[];
 		largestItems: SyncedItem[];
 		servers: Array<{ id: string; name: string; serverType: string; enabled: boolean }>;
+		totalPlays?: number | null;
+		uniqueItems?: number | null;
 	}
 
-	let { stats, topItems, largestItems, servers }: Props = $props();
+	let { stats, topItems, largestItems, servers, totalPlays, uniqueItems }: Props = $props();
 
 	function formatBytes(value: number): string {
 		if (!value) return '0 B';
@@ -81,6 +81,40 @@
 		</div>
 	</SettingsSection>
 {:else}
+	{#if totalPlays !== null && totalPlays !== undefined && uniqueItems !== null && uniqueItems !== undefined}
+		<div class="mt-4 grid gap-4 sm:grid-cols-2">
+			<div class="card bg-base-200">
+				<div class="card-body flex-row items-center gap-4 p-4">
+					<div class="rounded-lg bg-secondary/10 p-3">
+						<Play class="h-5 w-5 text-secondary" />
+					</div>
+					<div>
+						<div class="text-2xl font-bold">{totalPlays.toLocaleString()}</div>
+						<div class="text-xs text-base-content/70">Total Plays</div>
+					</div>
+				</div>
+			</div>
+			<div class="card bg-base-200">
+				<div class="card-body flex-row items-center gap-4 p-4">
+					<div class="rounded-lg bg-accent/10 p-3">
+						<Database class="h-5 w-5 text-accent" />
+					</div>
+					<div>
+						<div class="text-2xl font-bold">{uniqueItems.toLocaleString()}</div>
+						<div class="text-xs text-base-content/70">Items Tracked</div>
+					</div>
+				</div>
+			</div>
+		</div>
+	{/if}
+
+	<div class="mt-4 flex justify-end">
+		<a href="/settings/general/status/media" class="btn gap-2 btn-ghost btn-sm">
+			Explore all media
+			<ExternalLink class="h-3.5 w-3.5" />
+		</a>
+	</div>
+
 	<div class="mt-4 grid gap-4 md:grid-cols-3">
 		<SettingsSection title="Resolution" variant="card">
 			{#if stats.resolutionBreakdown.length > 0}

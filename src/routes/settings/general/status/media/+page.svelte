@@ -196,7 +196,7 @@
 					onchange={(e) => updateUrlParam('library', (e.target as HTMLSelectElement).value)}
 				>
 					<option value="all">All Libraries</option>
-					{#each data.libraries ?? [] as lib}
+					{#each data.libraries ?? [] as lib (lib.id)}
 						<option value={lib.id}>{lib.name}</option>
 					{/each}
 				</select>
@@ -238,7 +238,7 @@
 						onchange={(e) => updateUrlParam('resolution', (e.target as HTMLSelectElement).value)}
 					>
 						<option value="all">All Resolutions</option>
-						{#each data.filterOptions.resolutions as opt}
+						{#each data.filterOptions.resolutions as opt (opt)}
 							<option value={opt}>{opt}</option>
 						{/each}
 					</select>
@@ -251,7 +251,7 @@
 						onchange={(e) => updateUrlParam('videoCodec', (e.target as HTMLSelectElement).value)}
 					>
 						<option value="all">All Codecs</option>
-						{#each data.filterOptions.videoCodecs as opt}
+						{#each data.filterOptions.videoCodecs as opt (opt)}
 							<option value={opt}>{opt}</option>
 						{/each}
 					</select>
@@ -264,7 +264,7 @@
 						onchange={(e) => updateUrlParam('hdrFormat', (e.target as HTMLSelectElement).value)}
 					>
 						<option value="all">All HDR</option>
-						{#each data.filterOptions.hdrFormats as opt}
+						{#each data.filterOptions.hdrFormats as opt (opt)}
 							<option value={opt}>{opt}</option>
 						{/each}
 					</select>
@@ -277,7 +277,7 @@
 						onchange={(e) => updateUrlParam('audioCodec', (e.target as HTMLSelectElement).value)}
 					>
 						<option value="all">All Audio</option>
-						{#each data.filterOptions.audioCodecs as opt}
+						{#each data.filterOptions.audioCodecs as opt (opt)}
 							<option value={opt}>{opt}</option>
 						{/each}
 					</select>
@@ -290,7 +290,7 @@
 						onchange={(e) => updateUrlParam('container', (e.target as HTMLSelectElement).value)}
 					>
 						<option value="all">All Containers</option>
-						{#each data.filterOptions.containers as opt}
+						{#each data.filterOptions.containers as opt (opt)}
 							<option value={opt}>{opt}</option>
 						{/each}
 					</select>
@@ -303,7 +303,7 @@
 						onchange={(e) => updateUrlParam('rootFolder', (e.target as HTMLSelectElement).value)}
 					>
 						<option value="all">All Folders</option>
-						{#each data.rootFolders ?? [] as rf}
+						{#each data.rootFolders ?? [] as rf (rf.id)}
 							<option value={rf.id}>{rf.name || rf.path}</option>
 						{/each}
 					</select>
