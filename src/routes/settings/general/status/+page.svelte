@@ -1,6 +1,6 @@
 <script lang="ts">
 	import * as m from '$lib/paraglide/messages.js';
-	import { HardDrive, RefreshCw, AlertCircle, Database, Play, Server, Clock3 } from 'lucide-svelte';
+	import { HardDrive, RefreshCw, AlertCircle } from 'lucide-svelte';
 	import { SettingsPage } from '$lib/components/ui/settings';
 	import type { PageData } from './$types';
 	import { StorageMaintenanceSection } from '$lib/components/libraries';
@@ -67,7 +67,6 @@
 	let scanSuccess = $state<ScanSuccess | null>(null);
 
 	let syncing = $state(false);
-	let syncError = $state<string | null>(null);
 
 	let libraryModalOpen = $state(false);
 	let editingLibrary = $state<LibraryEntity | null>(null);
@@ -160,39 +159,6 @@
 		scanProgress = null;
 	}
 
-	function getScanTone(status: string | null | undefined): string {
-		if (status === 'completed') return 'text-success';
-		if (status === 'failed') return 'text-error';
-		if (status === 'running') return 'text-warning';
-		return 'text-base-content/70';
-	}
-
-	function formatTimestamp(timestamp: string | null): string {
-		if (!timestamp) return m.settings_general_never();
-		return new Date(timestamp).toLocaleString();
-	}
-
-	function formatDuration(durationMs: number | null): string {
-		if (!durationMs || durationMs < 1000) return m.settings_general_underOneSecond();
-		const totalSeconds = Math.round(durationMs / 1000);
-		if (totalSeconds < 60) return `${totalSeconds}s`;
-		const minutes = Math.floor(totalSeconds / 60);
-		const seconds = totalSeconds % 60;
-		return seconds === 0 ? `${minutes}m` : `${minutes}m ${seconds}s`;
-	}
-
-	function getServerTypeIcon(type: string) {
-		return type === 'jellyfin' ? '🟣' : type === 'emby' ? '🟢' : '🟠';
-	}
-
-	function getSyncStatusColor(status: string | null, lastSyncAt: string | null): string {
-		if (status === 'failed') return 'badge-error';
-		if (!lastSyncAt) return 'badge-ghost';
-		const hoursSinceSync = (Date.now() - new Date(lastSyncAt).getTime()) / (1000 * 60 * 60);
-		if (hoursSinceSync > 24) return 'badge-warning';
-		return 'badge-success';
-	}
-
 	async function triggerLibraryScan(rootFolderId?: string) {
 		scanning = true;
 		resetScanState();
@@ -216,16 +182,15 @@
 
 	async function triggerServerSync() {
 		syncing = true;
-		syncError = null;
 		try {
 			const response = await fetch('/api/media-server-stats/sync', { method: 'POST' });
 			if (!response.ok) {
 				const payload = await response.json().catch(() => ({}));
-				syncError = payload.error ?? 'Sync failed';
+				toasts.error(payload.error ?? 'Sync failed');
 			}
 			await invalidateAll();
 		} catch (error) {
-			syncError = error instanceof Error ? error.message : 'Sync failed';
+			toasts.error(error instanceof Error ? error.message : 'Sync failed');
 		} finally {
 			syncing = false;
 		}
@@ -419,127 +384,12 @@
 		</div>
 	{/snippet}
 
-	<div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-		<div class="card bg-base-200">
-			<div class="card-body flex-row items-center gap-4 p-4">
-				<div class="rounded-lg bg-primary/10 p-3">
-					<Database class="h-5 w-5 text-primary" />
-				</div>
-				<div>
-					<div class="text-2xl font-bold">{formatBytes(data.storage.totalUsedBytes)}</div>
-					<div class="text-xs text-base-content/70">
-						{data.storage.movieCount} movies, {data.storage.seriesCount} series
-					</div>
-				</div>
-			</div>
-		</div>
-		<div class="card bg-base-200">
-			<div class="card-body flex-row items-center gap-4 p-4">
-				<div class="rounded-lg bg-secondary/10 p-3">
-					<Play class="h-5 w-5 text-secondary" />
-				</div>
-				<div>
-					<div class="text-2xl font-bold">
-						{data.servers.length > 0 ? data.mediaServerStats.totalPlays.toLocaleString() : '—'}
-					</div>
-					<div class="text-xs text-base-content/70">Total Plays</div>
-				</div>
-			</div>
-		</div>
-		<div class="card bg-base-200">
-			<div class="card-body flex-row items-center gap-4 p-4">
-				<div class="rounded-lg bg-accent/10 p-3">
-					<Server class="h-5 w-5 text-accent" />
-				</div>
-				<div>
-					<div class="text-2xl font-bold">
-						{data.servers.length > 0 ? data.mediaServerStats.uniqueItems.toLocaleString() : '—'}
-					</div>
-					<div class="text-xs text-base-content/70">Items Tracked</div>
-				</div>
-			</div>
-		</div>
-	</div>
-
-	<div class="mt-4 rounded-lg border border-base-300 bg-base-100 p-4">
-		<div class="mb-3 flex items-center gap-2">
-			<RefreshCw class="h-4 w-4" />
-			<h3 class="font-semibold">Scan & Sync Status</h3>
-		</div>
-		<div class="grid gap-4 lg:grid-cols-2">
-			<div class="space-y-3">
-				<div class="rounded-lg bg-base-200 p-3">
-					<div class="flex items-center gap-2 text-sm text-base-content/60">
-						<Clock3 class="h-4 w-4" />
-						{m.settings_general_lastScan()}
-					</div>
-					<div class="mt-1 text-base font-semibold">
-						{data.storage.health.lastScan
-							? formatTimestamp(
-									data.storage.health.lastScan.completedAt ?? data.storage.health.lastScan.startedAt
-								)
-							: 'Never'}
-					</div>
-					<div class={`text-xs ${getScanTone(data.storage.health.lastScan?.status)}`}>
-						{data.storage.health.lastScan
-							? data.storage.health.lastScan.status
-							: m.settings_general_noScanHistory()}
-					</div>
-					{#if data.storage.health.lastScan}
-						<div class="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-xs text-base-content/50">
-							<span>{data.storage.health.lastScan.filesScanned} scanned</span>
-							<span>{data.storage.health.lastScan.filesAdded} added</span>
-							<span>{data.storage.health.lastScan.filesUpdated} updated</span>
-							<span>{data.storage.health.lastScan.filesRemoved} removed</span>
-							<span>{data.storage.health.lastScan.unmatchedFiles} unmatched</span>
-						</div>
-					{/if}
-				</div>
-			</div>
-			<div>
-				{#if data.serverStatuses.length > 0}
-					<div class="flex flex-wrap gap-2">
-						{#each data.serverStatuses as server (server.serverId)}
-							<div
-								class="flex items-center gap-2 rounded-lg border border-base-300 bg-base-200 px-3 py-2"
-							>
-								<span class="text-sm">{getServerTypeIcon(server.serverType)}</span>
-								<div class="min-w-0">
-									<div class="flex items-center gap-2">
-										<span class="truncate text-sm font-medium">{server.serverName}</span>
-										<span
-											class="badge badge-sm {getSyncStatusColor(
-												server.lastSyncStatus,
-												server.lastSyncAt
-											)}"
-										>
-											{server.lastSyncStatus ?? 'pending'}
-										</span>
-									</div>
-									<div class="text-xs text-base-content/60">
-										{server.itemCount} items · {formatTimestamp(server.lastSyncAt)}
-									</div>
-								</div>
-							</div>
-						{/each}
-					</div>
-				{:else}
-					<div
-						class="flex items-center gap-2 rounded-lg border border-dashed border-base-300 px-3 py-3 text-sm text-base-content/50"
-					>
-						<Server class="h-4 w-4" />
-						No media servers configured
-					</div>
-				{/if}
-			</div>
-		</div>
-	</div>
-
 	<StorageMaintenanceSection
 		storage={data.storage}
 		libraries={data.libraries}
 		rootFolders={data.rootFolders}
 		rootFolderCount={data.rootFolders.length}
+		serverStatuses={data.serverStatuses}
 		{scanning}
 		{scanProgress}
 		{scanError}
@@ -561,6 +411,8 @@
 				serverType: s.serverType,
 				enabled: s.enabled ?? false
 			}))}
+			totalPlays={data.servers.length > 0 ? data.mediaServerStats.totalPlays : null}
+			uniqueItems={data.servers.length > 0 ? data.mediaServerStats.uniqueItems : null}
 		/>
 	</div>
 </SettingsPage>

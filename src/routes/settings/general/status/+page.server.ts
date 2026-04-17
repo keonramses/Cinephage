@@ -81,7 +81,7 @@ export const load: PageServerLoad = async ({ parent }) => {
 		if (!row.isHDR) {
 			sdrCount += row.count;
 		} else {
-			hdrBreakdown.push({ label: row.hdrFormat ?? 'HDR', count: row.count });
+			hdrBreakdown.push({ label: (row.hdrFormat ?? 'HDR').toUpperCase(), count: row.count });
 		}
 	}
 	if (sdrCount > 0) hdrBreakdown.unshift({ label: 'SDR', count: sdrCount });
@@ -150,14 +150,17 @@ export const load: PageServerLoad = async ({ parent }) => {
 			serversSynced,
 			totalFileSize,
 			resolutionBreakdown,
-			codecBreakdown: codecRows.map((r) => ({ label: r.codec ?? 'Unknown', count: r.count })),
+			codecBreakdown: codecRows.map((r) => ({
+				label: (r.codec ?? 'Unknown').toUpperCase(),
+				count: r.count
+			})),
 			hdrBreakdown,
 			audioCodecBreakdown: audioCodecRows.map((r) => ({
-				label: r.codec ?? 'Unknown',
+				label: (r.codec ?? 'Unknown').toUpperCase(),
 				count: r.count
 			})),
 			containerBreakdown: containerRows.map((r) => ({
-				label: r.container ?? 'Unknown',
+				label: (r.container ?? 'Unknown').toUpperCase(),
 				count: r.count
 			}))
 		},
