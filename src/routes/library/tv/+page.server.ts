@@ -5,7 +5,6 @@ import {
 	rootFolders,
 	libraries,
 	scoringProfiles,
-	profileSizeLimits,
 	episodeFiles,
 	downloadQueue
 } from '$lib/server/db/schema.js';
@@ -13,7 +12,6 @@ import { eq, and, inArray, ne, isNotNull } from 'drizzle-orm';
 import type { Actions, PageServerLoad } from './$types';
 import type { LibrarySeries, EpisodeFile } from '$lib/types/library';
 import { logger } from '$lib/logging';
-import { DEFAULT_PROFILES } from '$lib/server/scoring/profiles.js';
 import { getLibraryEntityService } from '$lib/server/library/LibraryEntityService.js';
 
 const ACTIVE_DOWNLOAD_STATUSES = [
@@ -261,42 +259,25 @@ export const load: PageServerLoad = async ({ url }) => {
 				id: scoringProfiles.id,
 				name: scoringProfiles.name,
 				description: scoringProfiles.description,
-				isDefault: scoringProfiles.isDefault
+				isDefault: scoringProfiles.isDefault,
+				isBuiltIn: scoringProfiles.isBuiltIn
 			})
 			.from(scoringProfiles);
 
-		const defaultBuiltInOverride = await db
-			.select({ profileId: profileSizeLimits.profileId })
-			.from(profileSizeLimits)
-			.where(eq(profileSizeLimits.isDefault, true))
-			.limit(1);
-
-		const BUILT_IN_IDS = DEFAULT_PROFILES.map((p) => p.id);
-		const dbIds = new Set(dbProfiles.map((p) => p.id));
-		const customDefaultId = dbProfiles.find(
-			(p) => !BUILT_IN_IDS.includes(p.id) && Boolean(p.isDefault)
-		)?.id;
-		const builtInDefaultId = defaultBuiltInOverride[0]?.profileId;
-		const resolvedDefaultId = customDefaultId ?? builtInDefaultId ?? 'balanced';
+		const resolvedDefaultId =
+			dbProfiles.find((p) => !p.isBuiltIn && p.isDefault)?.id ??
+			dbProfiles.find((p) => p.isBuiltIn && p.isDefault)?.id ??
+			'balanced';
 		const effectiveQualityProfileFilter =
 			qualityProfile === 'default' ? resolvedDefaultId : qualityProfile;
 
-		const qualityProfiles: QualityProfileSummary[] = [
-			...DEFAULT_PROFILES.filter((p) => !dbIds.has(p.id)).map((p) => ({
-				id: p.id,
-				name: p.name,
-				description: p.description,
-				isBuiltIn: true,
-				isDefault: p.id === resolvedDefaultId
-			})),
-			...dbProfiles.map((p) => ({
-				id: p.id,
-				name: p.name,
-				description: p.description ?? '',
-				isBuiltIn: BUILT_IN_IDS.includes(p.id),
-				isDefault: p.id === resolvedDefaultId
-			}))
-		];
+		const qualityProfiles: QualityProfileSummary[] = dbProfiles.map((p) => ({
+			id: p.id,
+			name: p.name,
+			description: p.description ?? '',
+			isBuiltIn: !!p.isBuiltIn,
+			isDefault: p.id === resolvedDefaultId
+		}));
 
 		// Build sets of series IDs that have matching files (for filtering)
 		const seriesWithResolution = new Set<string>();

@@ -4,6 +4,7 @@
 	import { SettingsPage } from '$lib/components/ui/settings';
 	import type { PageData } from './$types';
 	import { StorageMaintenanceSection } from '$lib/components/libraries';
+	import { MediaServerStatsSection } from '$lib/components/status';
 	import { getResponseErrorMessage, readResponsePayload } from '$lib/utils/http';
 	import { createSSE } from '$lib/sse';
 	import { invalidateAll } from '$app/navigation';
@@ -64,6 +65,8 @@
 	let scanProgress = $state<ScanProgress | null>(null);
 	let scanError = $state<string | null>(null);
 	let scanSuccess = $state<ScanSuccess | null>(null);
+
+	let syncing = $state(false);
 
 	let libraryModalOpen = $state(false);
 	let editingLibrary = $state<LibraryEntity | null>(null);
@@ -174,6 +177,22 @@
 		} catch (error) {
 			scanError = error instanceof Error ? error.message : m.settings_general_failedToStartScan();
 			scanning = false;
+		}
+	}
+
+	async function triggerServerSync() {
+		syncing = true;
+		try {
+			const response = await fetch('/api/media-server-stats/sync', { method: 'POST' });
+			if (!response.ok) {
+				const payload = await response.json().catch(() => ({}));
+				toasts.error(payload.error ?? 'Sync failed');
+			}
+			await invalidateAll();
+		} catch (error) {
+			toasts.error(error instanceof Error ? error.message : 'Sync failed');
+		} finally {
+			syncing = false;
 		}
 	}
 
@@ -323,28 +342,46 @@
 </script>
 
 <svelte:head>
-	<title>{m.settings_general_tabMaintenance()}</title>
+	<title>Status</title>
 </svelte:head>
 
 <SettingsPage
-	title={m.settings_general_tabMaintenance()}
-	subtitle={m.settings_general_maintenanceDescription()}
+	title="Status"
+	subtitle="Storage health, library maintenance, and media server analytics"
 >
 	{#snippet actions()}
-		<button
-			type="button"
-			class="btn ml-auto w-full gap-2 btn-sm btn-primary sm:w-auto"
-			onclick={() => void triggerLibraryScan()}
-			disabled={scanning || data.rootFolders.length === 0}
-		>
-			{#if scanning}
-				<RefreshCw class="h-4 w-4 animate-spin" />
-				{m.settings_general_scanning()}
-			{:else}
-				<HardDrive class="h-4 w-4" />
-				{m.settings_general_scanLibraries()}
+		<div class="flex gap-2">
+			<button
+				type="button"
+				class="btn ml-auto w-full gap-2 btn-sm btn-primary sm:w-auto"
+				onclick={() => void triggerLibraryScan()}
+				disabled={scanning || data.rootFolders.length === 0}
+			>
+				{#if scanning}
+					<RefreshCw class="h-4 w-4 animate-spin" />
+					{m.settings_general_scanning()}
+				{:else}
+					<HardDrive class="h-4 w-4" />
+					{m.settings_general_scanLibraries()}
+				{/if}
+			</button>
+			{#if data.servers.length > 0}
+				<button
+					type="button"
+					class="btn ml-auto w-full gap-2 btn-outline btn-sm sm:w-auto"
+					onclick={() => void triggerServerSync()}
+					disabled={syncing}
+				>
+					{#if syncing}
+						<RefreshCw class="h-4 w-4 animate-spin" />
+						Syncing...
+					{:else}
+						<RefreshCw class="h-4 w-4" />
+						Sync Servers
+					{/if}
+				</button>
 			{/if}
-		</button>
+		</div>
 	{/snippet}
 
 	<StorageMaintenanceSection
@@ -352,6 +389,7 @@
 		libraries={data.libraries}
 		rootFolders={data.rootFolders}
 		rootFolderCount={data.rootFolders.length}
+		serverStatuses={data.serverStatuses}
 		{scanning}
 		{scanProgress}
 		{scanError}
@@ -361,6 +399,22 @@
 		onEditRootFolder={openEditFolderModal}
 		onScanRootFolder={triggerLibraryScan}
 	/>
+
+	<div class="mt-6">
+		<MediaServerStatsSection
+			stats={data.mediaServerStats}
+			topItems={data.topItems}
+			largestItems={data.largestItems}
+			servers={data.servers.map((s) => ({
+				id: s.id,
+				name: s.name,
+				serverType: s.serverType,
+				enabled: s.enabled ?? false
+			}))}
+			totalPlays={data.servers.length > 0 ? data.mediaServerStats.totalPlays : null}
+			uniqueItems={data.servers.length > 0 ? data.mediaServerStats.uniqueItems : null}
+		/>
+	</div>
 </SettingsPage>
 
 {#if libraryModalOpen}
@@ -368,7 +422,7 @@
 		open={libraryModalOpen}
 		onClose={closeLibraryModal}
 		maxWidth="2xl"
-		labelledBy="maintenance-library-edit-modal-title"
+		labelledBy="status-library-edit-modal-title"
 		lockScroll={false}
 	>
 		<ModalHeader
@@ -385,11 +439,11 @@
 
 			<div class="grid gap-4 md:grid-cols-2">
 				<div class="form-control">
-					<label class="label py-1" for="maintenance-library-name">
+					<label class="label py-1" for="status-library-name">
 						<span class="label-text">{m.settings_general_libraryName()}</span>
 					</label>
 					<input
-						id="maintenance-library-name"
+						id="status-library-name"
 						class="input-bordered input input-sm {editingLibraryIsSystem ? 'input-disabled' : ''}"
 						bind:value={libraryForm.name}
 						disabled={editingLibraryIsSystem}
@@ -397,11 +451,11 @@
 				</div>
 
 				<div class="form-control">
-					<label class="label py-1" for="maintenance-library-media-type">
+					<label class="label py-1" for="status-library-media-type">
 						<span class="label-text">{m.settings_general_mediaType()}</span>
 					</label>
 					<select
-						id="maintenance-library-media-type"
+						id="status-library-media-type"
 						class="select-bordered select select-sm"
 						bind:value={libraryForm.mediaType}
 						disabled={editingLibraryIsSystem}
@@ -412,11 +466,11 @@
 				</div>
 
 				<div class="form-control">
-					<label class="label py-1" for="maintenance-library-classification">
+					<label class="label py-1" for="status-library-classification">
 						<span class="label-text">{m.settings_general_classification()}</span>
 					</label>
 					<select
-						id="maintenance-library-classification"
+						id="status-library-classification"
 						class="select-bordered select select-sm"
 						bind:value={libraryForm.mediaSubType}
 						disabled={editingLibraryIsSystem}

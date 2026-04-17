@@ -29,6 +29,7 @@ type StorageBreakdownItem = {
 	totalSpaceBytes?: number | null;
 	freeSpaceFormatted?: string | null;
 	rootFolderCount?: number;
+	rootFolderIds?: string[];
 	detachedItemCount?: number;
 	defaultMonitored?: boolean;
 	defaultSearchOnAdd?: boolean;
@@ -222,6 +223,7 @@ export const load: LayoutServerLoad = async () => {
 			path: library.defaultRootFolderPath,
 			hasRootFolder: (library.rootFolders?.length ?? 0) > 0,
 			rootFolderCount: library.rootFolders?.length ?? 0,
+			rootFolderIds: library.rootFolders?.map((f) => f.id) ?? [],
 			detachedItemCount: detachedByLibrary.get(library.id) ?? 0,
 			defaultMonitored: library.defaultMonitored,
 			defaultSearchOnAdd: library.defaultSearchOnAdd,

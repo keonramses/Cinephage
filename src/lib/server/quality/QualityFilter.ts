@@ -5,13 +5,13 @@
  * All filtering and scoring is handled by the ScoringProfile.
  */
 
-import type { ParsedRelease, Resolution } from '../indexers/parser/types.js';
+import type { ParsedRelease, Resolution, Source } from '../indexers/parser/types.js';
 import { RESOLUTION_ORDER } from '../indexers/parser/types.js';
 import { db } from '../db/index.js';
 import { createChildLogger } from '$lib/logging';
 
 const logger = createChildLogger({ module: 'QualityFilter' });
-import { scoringProfiles, profileSizeLimits, builtInProfileScoreOverrides } from '../db/schema.js';
+import { scoringProfiles } from '../db/schema.js';
 import { eq } from 'drizzle-orm';
 
 // Import scoring engine
@@ -21,7 +21,7 @@ import {
 	isUpgrade,
 	getProfile,
 	DEFAULT_PROFILES,
-	BALANCED_PROFILE,
+	DEFAULT_RESOLUTION_ORDER,
 	type ScoringProfile,
 	type ScoringResult,
 	type ReleaseAttributes,
@@ -50,8 +50,6 @@ export interface EnhancedQualityResult {
 export class QualityFilter {
 	private profilesCache: Map<string, ScoringProfile> = new Map();
 	private defaultProfile: ScoringProfile | null = null;
-
-	private readonly BUILT_IN_IDS = new Set(['quality', 'balanced', 'compact', 'streamer']);
 
 	private coerceNullableNumber(value: unknown): number | null {
 		if (value === null || value === undefined) return null;
@@ -96,43 +94,7 @@ export class QualityFilter {
 	}
 
 	/**
-	 * Resolve a built-in profile by merging:
-	 * - Shipped code defaults
-	 * - Score overrides from built_in_profile_score_overrides
-	 * - Size/default overrides from profile_size_limits
-	 */
-	private async resolveBuiltInProfile(id: string): Promise<ScoringProfile | null> {
-		const base = getProfile(id);
-		if (!base) return null;
-
-		const [scoreOverride, sizeLimits] = await Promise.all([
-			db
-				.select()
-				.from(builtInProfileScoreOverrides)
-				.where(eq(builtInProfileScoreOverrides.profileId, id))
-				.get(),
-			db.select().from(profileSizeLimits).where(eq(profileSizeLimits.profileId, id)).get()
-		]);
-
-		const formatScores = scoreOverride
-			? { ...base.formatScores, ...scoreOverride.formatScores }
-			: base.formatScores;
-
-		return {
-			...base,
-			formatScores,
-			movieMinSizeGb: sizeLimits ? this.coerceNullableNumber(sizeLimits.movieMinSizeGb) : null,
-			movieMaxSizeGb: sizeLimits ? this.coerceNullableNumber(sizeLimits.movieMaxSizeGb) : null,
-			episodeMinSizeMb: sizeLimits ? this.coerceNullableNumber(sizeLimits.episodeMinSizeMb) : null,
-			episodeMaxSizeMb: sizeLimits ? this.coerceNullableNumber(sizeLimits.episodeMaxSizeMb) : null,
-			isDefault: sizeLimits?.isDefault ?? false
-		};
-	}
-
-	/**
-	 * Get a scoring profile by ID.
-	 * - Built-in IDs: resolved from code + override tables at runtime.
-	 * - Custom IDs: loaded from database.
+	 * Get a scoring profile by ID from cache or database.
 	 */
 	async getProfile(id: string): Promise<ScoringProfile | null> {
 		if (this.profilesCache.has(id)) {
@@ -144,18 +106,8 @@ export class QualityFilter {
 			return cached;
 		}
 
-		logger.debug({ id }, '[QualityFilter.getProfile] Loading profile');
+		logger.debug({ id }, '[QualityFilter.getProfile] Loading profile from DB');
 
-		// Built-in IDs: resolve from code + override tables
-		if (this.BUILT_IN_IDS.has(id)) {
-			const profile = await this.resolveBuiltInProfile(id);
-			if (profile) {
-				this.profilesCache.set(id, profile);
-			}
-			return profile;
-		}
-
-		// Custom profiles: load from database
 		const result = await db.select().from(scoringProfiles).where(eq(scoringProfiles.id, id)).get();
 		if (result) {
 			const profile = this.mapDbToProfile(result);
@@ -168,119 +120,129 @@ export class QualityFilter {
 
 	/**
 	 * Get the default scoring profile.
-	 * Priority: default custom profile in DB > default built-in in profile_size_limits > built-in balanced.
+	 * Priority: isDefault row > 'balanced' > any profile > error.
 	 */
 	async getDefaultScoringProfile(): Promise<ScoringProfile> {
 		if (this.defaultProfile) {
 			return this.defaultProfile;
 		}
 
-		// Check for a default custom profile in DB
-		const defaultCustom = await db
+		const defaultRow = await db
 			.select()
 			.from(scoringProfiles)
 			.where(eq(scoringProfiles.isDefault, true))
 			.get();
 
-		if (defaultCustom) {
-			if (!this.BUILT_IN_IDS.has(defaultCustom.id)) {
-				this.defaultProfile = this.mapDbToProfile(defaultCustom);
-				return this.defaultProfile;
-			}
-			// Built-in profile marked as default — resolve with overrides
-			const profile = await this.resolveBuiltInProfile(defaultCustom.id);
-			if (profile) {
-				this.defaultProfile = profile;
-				return this.defaultProfile;
-			}
+		if (defaultRow) {
+			this.defaultProfile = this.mapDbToProfile(defaultRow);
+			return this.defaultProfile;
 		}
 
-		// Check if a built-in is set as default in profile_size_limits
-		const sizeLimitDefault = await db
+		const balancedRow = await db
 			.select()
-			.from(profileSizeLimits)
-			.where(eq(profileSizeLimits.isDefault, true))
+			.from(scoringProfiles)
+			.where(eq(scoringProfiles.id, 'balanced'))
 			.get();
 
-		if (sizeLimitDefault) {
-			const profile = await this.resolveBuiltInProfile(sizeLimitDefault.profileId);
-			if (profile) {
-				this.defaultProfile = profile;
-				return this.defaultProfile;
-			}
+		if (balancedRow) {
+			this.defaultProfile = this.mapDbToProfile(balancedRow);
+			return this.defaultProfile;
 		}
 
-		// Fall back to built-in balanced
-		this.defaultProfile = (await this.resolveBuiltInProfile('balanced')) ?? BALANCED_PROFILE;
-		return this.defaultProfile;
+		const anyRow = await db.select().from(scoringProfiles).get();
+		if (anyRow) {
+			this.defaultProfile = this.mapDbToProfile(anyRow);
+			return this.defaultProfile;
+		}
+
+		throw new Error('No scoring profiles found in database');
 	}
 
 	/**
-	 * Get all scoring profiles (built-in + custom).
-	 * Built-ins are resolved from code + override tables.
-	 * Custom profiles are loaded from database.
+	 * Get all scoring profiles (built-in + custom) from database.
+	 * Built-in rows get UI metadata (icon, color, category) from code profiles.
 	 */
 	async getAllProfiles(): Promise<ScoringProfile[]> {
-		const [dbRows, builtInProfiles] = await Promise.all([
-			db.select().from(scoringProfiles).all(),
-			Promise.all(Array.from(this.BUILT_IN_IDS).map((id) => this.resolveBuiltInProfile(id)))
-		]);
+		const dbRows = await db.select().from(scoringProfiles).all();
 
-		const customProfiles = dbRows
-			.filter((r) => !this.BUILT_IN_IDS.has(r.id))
-			.map((r) => this.mapDbToProfile(r));
+		const profiles = dbRows.map((row) => {
+			const profile = this.mapDbToProfile(row);
+			if (row.isBuiltIn) {
+				const codeProfile = getProfile(row.id);
+				if (codeProfile) {
+					profile.icon = codeProfile.icon;
+					profile.color = codeProfile.color;
+					profile.category = codeProfile.category;
+				}
+			}
+			return profile;
+		});
 
-		const validBuiltIns = builtInProfiles.filter((p): p is ScoringProfile => p !== null);
+		const builtIns = profiles.filter((p) => dbRows.find((r) => r.id === p.id)?.isBuiltIn);
+		const customs = profiles.filter((p) => !dbRows.find((r) => r.id === p.id)?.isBuiltIn);
 
-		return [...validBuiltIns, ...customProfiles];
+		return [...builtIns, ...customs];
 	}
 
 	/**
 	 * Seed and sync default scoring profiles to database.
-	 * Only seeds CUSTOM profiles — built-in profiles (quality, balanced, compact, streamer)
-	 * are resolved from code + override tables at runtime, not stored here.
-	 *
-	 * - INSERT: If custom profile doesn't exist in DB, create it
-	 * - UPDATE: If custom profile exists in DB, sync ALL fields except isDefault
+	 * Built-in profiles are seeded with code defaults; user-customized fields are preserved.
+	 * Custom profiles that happen to share an ID are skipped.
 	 */
 	async seedDefaultScoringProfiles(): Promise<void> {
-		const existingIds = (
-			await db.select({ id: scoringProfiles.id }).from(scoringProfiles).all()
-		).map((r) => r.id);
-		const existingSet = new Set(existingIds);
-
-		const BUILT_IN_IDS = new Set(['quality', 'balanced', 'compact', 'streamer']);
+		const existingRows = await db.select().from(scoringProfiles).all();
+		const existingMap = new Map(existingRows.map((r) => [r.id, r]));
 
 		let seeded = 0;
 		let updated = 0;
 
 		for (const profile of DEFAULT_PROFILES) {
-			// Skip built-in profiles — they are resolved from code + override tables at runtime
-			if (BUILT_IN_IDS.has(profile.id)) {
-				continue;
-			}
+			const existing = existingMap.get(profile.id);
 
-			const values = {
-				name: profile.name,
-				description: profile.description ?? null,
-				tags: profile.tags ?? [],
-				upgradesAllowed: profile.upgradesAllowed ?? true,
-				minScore: profile.minScore ?? 0,
-				upgradeUntilScore: profile.upgradeUntilScore ?? -1,
-				minScoreIncrement: profile.minScoreIncrement ?? 0,
-				resolutionOrder: profile.resolutionOrder ?? null,
-				formatScores: profile.formatScores ?? null,
-				allowedProtocols: profile.allowedProtocols ?? null,
-				updatedAt: new Date().toISOString()
-			};
+			if (existing && existing.isBuiltIn) {
+				const codeFormatScores = profile.formatScores ?? {};
+				const dbFormatScores = existing.formatScores ?? {};
+				const mergedFormatScores = { ...codeFormatScores, ...dbFormatScores };
 
-			if (existingSet.has(profile.id)) {
-				await db.update(scoringProfiles).set(values).where(eq(scoringProfiles.id, profile.id));
+				await db
+					.update(scoringProfiles)
+					.set({
+						name: profile.name,
+						description: profile.description ?? null,
+						tags: profile.tags ?? [],
+						upgradesAllowed: profile.upgradesAllowed ?? true,
+						minScore: profile.minScore ?? 0,
+						upgradeUntilScore: profile.upgradeUntilScore ?? -1,
+						minScoreIncrement: profile.minScoreIncrement ?? 0,
+						resolutionOrder: profile.resolutionOrder ?? null,
+						formatScores: mergedFormatScores,
+						allowedProtocols: profile.allowedProtocols ?? null,
+						minResolution: (profile.minResolution as string | null) ?? null,
+						maxResolution: (profile.maxResolution as string | null) ?? null,
+						allowedSources: profile.allowedSources ?? null,
+						excludedSources: profile.excludedSources ?? null,
+						updatedAt: new Date().toISOString()
+					})
+					.where(eq(scoringProfiles.id, profile.id));
 				updated++;
-			} else {
+			} else if (!existing) {
 				await db.insert(scoringProfiles).values({
 					id: profile.id,
-					...values,
+					name: profile.name,
+					description: profile.description ?? null,
+					tags: profile.tags ?? [],
+					upgradesAllowed: profile.upgradesAllowed ?? true,
+					minScore: profile.minScore ?? 0,
+					upgradeUntilScore: profile.upgradeUntilScore ?? -1,
+					minScoreIncrement: profile.minScoreIncrement ?? 0,
+					resolutionOrder: profile.resolutionOrder ?? null,
+					formatScores: profile.formatScores ?? null,
+					allowedProtocols: profile.allowedProtocols ?? null,
+					minResolution: (profile.minResolution as string | null) ?? null,
+					maxResolution: (profile.maxResolution as string | null) ?? null,
+					allowedSources: profile.allowedSources ?? null,
+					excludedSources: profile.excludedSources ?? null,
+					isBuiltIn: true,
 					isDefault: profile.id === 'balanced'
 				});
 				seeded++;
@@ -515,15 +477,10 @@ export class QualityFilter {
 	}
 
 	/**
-	 * Map database row to ScoringProfile
-	 *
-	 * Profiles are standalone - no runtime inheritance. If a DB profile doesn't
-	 * have formatScores, check if it's a built-in profile ID and use those scores.
+	 * Map database row to ScoringProfile.
+	 * All fields come from the DB row; no runtime inheritance.
 	 */
 	private mapDbToProfile(row: typeof scoringProfiles.$inferSelect): ScoringProfile {
-		// If this ID matches a built-in profile and DB has no formatScores, use built-in scores
-		const builtInProfile = getProfile(row.id);
-
 		return {
 			id: row.id,
 			name: row.name,
@@ -537,23 +494,13 @@ export class QualityFilter {
 			movieMaxSizeGb: this.coerceNullableNumber(row.movieMaxSizeGb),
 			episodeMinSizeMb: this.coerceNullableNumber(row.episodeMinSizeMb),
 			episodeMaxSizeMb: this.coerceNullableNumber(row.episodeMaxSizeMb),
-			resolutionOrder: (row.resolutionOrder as Resolution[]) ?? [
-				'2160p',
-				'1080p',
-				'720p',
-				'480p',
-				'unknown'
-			],
-			// Filtering constraints - fall back to built-in profile
-			minResolution: builtInProfile?.minResolution ?? null,
-			maxResolution: builtInProfile?.maxResolution ?? null,
-			allowedSources: builtInProfile?.allowedSources ?? null,
-			excludedSources: builtInProfile?.excludedSources ?? null,
-			// allowedProtocols: use DB value, fall back to built-in profile, then default
-			allowedProtocols: row.allowedProtocols ??
-				builtInProfile?.allowedProtocols ?? ['torrent', 'usenet'],
-			// formatScores: use DB value if present, otherwise use built-in scores, otherwise empty
-			formatScores: row.formatScores ?? builtInProfile?.formatScores ?? {}
+			resolutionOrder: (row.resolutionOrder as Resolution[]) ?? DEFAULT_RESOLUTION_ORDER,
+			minResolution: (row.minResolution as Resolution | null) ?? null,
+			maxResolution: (row.maxResolution as Resolution | null) ?? null,
+			allowedSources: (row.allowedSources as Source[] | null) ?? null,
+			excludedSources: (row.excludedSources as Source[] | null) ?? null,
+			allowedProtocols: row.allowedProtocols ?? ['torrent', 'usenet'],
+			formatScores: row.formatScores ?? {}
 		};
 	}
 }

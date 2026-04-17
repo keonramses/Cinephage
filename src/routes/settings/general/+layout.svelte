@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { resolvePath } from '$lib/utils/routing';
 	import { page } from '$app/stores';
-	import { Library, FolderOpen, Settings, ChevronLeft, ChevronRight } from 'lucide-svelte';
+	import { Library, FolderOpen, Activity, ChevronLeft, ChevronRight } from 'lucide-svelte';
 	import * as m from '$lib/paraglide/messages.js';
 
 	let { children } = $props();
@@ -18,9 +18,9 @@
 			icon: FolderOpen
 		},
 		{
-			href: '/settings/general/maintenance',
+			href: '/settings/general/status',
 			label: m.settings_general_tabMaintenance(),
-			icon: Settings
+			icon: Activity
 		}
 	];
 
