@@ -257,10 +257,10 @@
 												90
 													? 'bg-success'
 													: 'bg-primary'}"
-												style="width: {Math.round(item.playedPercentage)}%"
+												style="width: {Math.min(100, Math.round(item.playedPercentage))}%"
 											></div>
 										</div>
-										<span>{Math.round(item.playedPercentage)}%</span>
+										<span>{Math.min(100, Math.round(item.playedPercentage))}%</span>
 									</div>
 								</div>
 							{/if}
@@ -468,11 +468,11 @@
 												90
 													? 'bg-success'
 													: 'bg-primary'}"
-												style="width: {Math.round(item.playedPercentage)}%"
+												style="width: {Math.min(100, Math.round(item.playedPercentage))}%"
 											></div>
 										</div>
 										<span class="text-xs text-base-content/50"
-											>{Math.round(item.playedPercentage)}%</span
+											>{Math.min(100, Math.round(item.playedPercentage))}%</span
 										>
 									</div>
 								{/if}
