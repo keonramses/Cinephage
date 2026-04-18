@@ -16,14 +16,7 @@
  */
 
 import { db } from '$lib/server/db/index.js';
-import {
-	movies,
-	movieFiles,
-	series,
-	episodes,
-	episodeFiles,
-	scoringProfiles
-} from '$lib/server/db/schema.js';
+import { movies, movieFiles, series, episodes, episodeFiles } from '$lib/server/db/schema.js';
 import { eq, and, inArray } from 'drizzle-orm';
 import { isUpgrade, scoreRelease } from '$lib/server/scoring/scorer.js';
 import { qualityFilter } from '$lib/server/quality/index.js';
@@ -32,6 +25,7 @@ import {
 	type ReleaseCandidate
 } from '$lib/server/monitoring/specifications/index.js';
 import { logger } from '$lib/logging/index.js';
+import type { ScoringProfile } from '$lib/server/scoring/types.js';
 
 // ============================================================================
 // Types
@@ -1060,7 +1054,7 @@ class ReleaseDecisionService {
 	private async evaluateUpgrade(
 		existingFileName: string,
 		release: ReleaseInfo,
-		profile: typeof scoringProfiles.$inferSelect,
+		profile: ScoringProfile,
 		mediaType: 'movie' | 'tv',
 		options: DecisionOptions
 	): Promise<ReleaseDecisionResult> {
@@ -1160,31 +1154,15 @@ class ReleaseDecisionService {
 	 */
 	private async getEffectiveProfile(
 		profileId: string | null | undefined
-	): Promise<typeof scoringProfiles.$inferSelect | null> {
+	): Promise<ScoringProfile | null> {
 		if (profileId) {
-			const profile = await db.query.scoringProfiles.findFirst({
-				where: eq(scoringProfiles.id, profileId)
-			});
+			const profile = await qualityFilter.getProfile(profileId);
 			if (profile) return profile;
 
-			// Profile ID specified but not found - log warning and fall through
 			logger.warn({ profileId }, 'Specified profile not found, falling back');
 		}
 
-		// Get default profile
-		const defaultProfile = await db.query.scoringProfiles.findFirst({
-			where: eq(scoringProfiles.isDefault, true)
-		});
-
-		if (defaultProfile) return defaultProfile;
-
-		// No default set - fall back to first available profile
-		const anyProfile = await db.query.scoringProfiles.findFirst();
-		if (anyProfile) {
-			logger.warn({ profileId: anyProfile.id }, 'No default profile set, using first available');
-		}
-
-		return anyProfile || null;
+		return qualityFilter.getDefaultScoringProfile();
 	}
 
 	/**

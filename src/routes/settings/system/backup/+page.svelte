@@ -57,14 +57,7 @@
 		},
 		{
 			id: 'profiles',
-			tableNames: [
-				'scoringProfiles',
-				'profileSizeLimits',
-				'builtInProfileScoreOverrides',
-				'customFormats',
-				'delayProfiles',
-				'languageProfiles'
-			],
+			tableNames: ['scoringProfiles', 'customFormats', 'delayProfiles', 'languageProfiles'],
 			totalRows: 0,
 			summary: ''
 		},

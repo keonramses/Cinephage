@@ -6,14 +6,12 @@ import {
 	episodeFiles,
 	rootFolders,
 	scoringProfiles,
-	profileSizeLimits,
 	downloadQueue,
 	subtitles
 } from '$lib/server/db/schema.js';
 import { eq, asc, inArray, and } from 'drizzle-orm';
 import { error } from '@sveltejs/kit';
 import type { PageServerLoad } from './$types';
-import { DEFAULT_PROFILES } from '$lib/server/scoring/profiles.js';
 import { isSeriesSearching } from '$lib/server/library/ActiveSearchTracker.js';
 
 const ACTIVE_DOWNLOAD_STATUSES = [
@@ -326,50 +324,28 @@ export const load: PageServerLoad = async ({ params }): Promise<LibrarySeriesPag
 		};
 	});
 
-	// Fetch quality profiles from database
 	const dbProfiles = await db
 		.select({
 			id: scoringProfiles.id,
 			name: scoringProfiles.name,
 			description: scoringProfiles.description,
-			isDefault: scoringProfiles.isDefault
+			isDefault: scoringProfiles.isDefault,
+			isBuiltIn: scoringProfiles.isBuiltIn
 		})
 		.from(scoringProfiles);
 
-	const defaultBuiltInOverride = await db
-		.select({ profileId: profileSizeLimits.profileId })
-		.from(profileSizeLimits)
-		.where(eq(profileSizeLimits.isDefault, true))
-		.limit(1);
+	const resolvedDefaultId =
+		dbProfiles.find((p) => !p.isBuiltIn && p.isDefault)?.id ??
+		dbProfiles.find((p) => p.isBuiltIn && p.isDefault)?.id ??
+		'balanced';
 
-	// Built-in profile IDs - derived from DEFAULT_PROFILES
-	const BUILT_IN_IDS = DEFAULT_PROFILES.map((p) => p.id);
-	const dbIds = new Set(dbProfiles.map((p) => p.id));
-	const customDefaultId = dbProfiles.find(
-		(p) => !BUILT_IN_IDS.includes(p.id) && Boolean(p.isDefault)
-	)?.id;
-	const builtInDefaultId = defaultBuiltInOverride[0]?.profileId;
-	const resolvedDefaultId = customDefaultId ?? builtInDefaultId ?? 'balanced';
-
-	// Merge built-in profiles with database profiles (avoiding duplicates)
-	const allQualityProfiles: QualityProfileSummary[] = [
-		// Built-in profiles (only if not overridden in DB)
-		...DEFAULT_PROFILES.filter((p) => !dbIds.has(p.id)).map((p) => ({
-			id: p.id,
-			name: p.name,
-			description: p.description,
-			isBuiltIn: true,
-			isDefault: p.id === resolvedDefaultId
-		})),
-		// Database profiles (correctly mark built-ins stored in DB)
-		...dbProfiles.map((p) => ({
-			id: p.id,
-			name: p.name,
-			description: p.description ?? '',
-			isBuiltIn: BUILT_IN_IDS.includes(p.id),
-			isDefault: p.id === resolvedDefaultId
-		}))
-	];
+	const allQualityProfiles: QualityProfileSummary[] = dbProfiles.map((p) => ({
+		id: p.id,
+		name: p.name,
+		description: p.description ?? '',
+		isBuiltIn: !!p.isBuiltIn,
+		isDefault: p.id === resolvedDefaultId
+	}));
 
 	// Fetch TV root folders
 	const folders = await db

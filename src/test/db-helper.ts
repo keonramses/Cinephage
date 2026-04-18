@@ -21,7 +21,6 @@ export function destroyTestDb(testDb: TestDatabase) {
 }
 
 export function clearTestDb(testDb: TestDatabase) {
-	testDb.db.delete(schema.profileSizeLimits).run();
 	testDb.db.delete(schema.scoringProfiles).run();
 	testDb.db.delete(schema.customFormats).run();
 }

@@ -1,672 +1,143 @@
-# Create versioned releases by promoting existing CI Docker images
+# Release Pipeline
 #
-# Triggers:
-# - Manual workflow_dispatch from main, dev, or experimental branches
+# Triggered by pushing a semver tag (v1.0.0, v0.2.0, etc.)
+#  1. CI gates — lint, typecheck, test, build (parallel)
+#  2. Docker images — multi-arch build via reusable docker-build workflow
+#  3. GitHub Release — auto-generated release notes
 #
-# This workflow:
-# 1. Promotes existing CI architecture tags into release tags
-# 2. Creates GitHub release with generated notes and custom notes
-# 3. Cleans up old untagged images from GHCR
+# Docker images are tagged: vX.Y.Z, X.Y.Z, X.Y, X, latest
+# Discord announcement fires automatically via release-discord.yml
 
 name: Release
 
 on:
-  workflow_dispatch:
-    inputs:
-      release_type:
-        description: 'Version bump type (dev branch remaps major to minor)'
-        required: true
-        type: choice
-        default: patch
-        options:
-          - patch
-          - minor
-          - major
-          - custom
-      version:
-        description: 'Custom version tag (required for release_type=custom, e.g., v1.0.0)'
-        required: false
-        type: string
-        default: ''
-      source_tag:
-        description: 'CI candidate tag to promote (without -amd64/-arm64), e.g. main-20260306-123'
-        required: true
-        type: string
-      release_notes:
-        description: 'Additional release notes (optional)'
-        required: false
-        type: string
-        default: ''
-
-env:
-  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: 'true'
-  REGISTRY: ghcr.io
-  IMAGE_NAME: ${{ github.repository }}
+  push:
+    tags:
+      - 'v[0-9]+.[0-9]+.[0-9]+'
+      - 'v[0-9]+.[0-9]+.[0-9]+-*'
 
 concurrency:
   group: release-${{ github.ref }}
-  cancel-in-progress: false
+  cancel-in-progress: true
+
+permissions:
+  contents: write
 
 jobs:
-  validate:
-    name: Validate Release
+  lint:
+    name: Lint
     runs-on: ubuntu-latest
-    outputs:
-      version: ${{ steps.resolve-version.outputs.version }}
-      is_prerelease: ${{ steps.release-mode.outputs.is_prerelease }}
-      source_tag: ${{ steps.validate-source-tag.outputs.source_tag }}
-
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+
+      - name: Setup Node.js
+        uses: actions/setup-node@53b83947a5a98c8d113130e565377fae1a50d02f # v6
         with:
-          fetch-depth: 0
+          node-version: 22
+          cache: npm
 
-      - name: Resolve release version
-        id: resolve-version
-        env:
-          RELEASE_TYPE: ${{ github.event.inputs.release_type }}
-          INPUT_VERSION: ${{ github.event.inputs.version }}
-          REF_NAME: ${{ github.ref_name }}
-        run: |
-          set -euo pipefail
+      - name: Install dependencies
+        run: npm ci
 
-          normalize_version() {
-            local v="$1"
-            if [[ "$v" != v* ]]; then
-              v="v${v}"
-            fi
-            echo "$v"
-          }
+      - name: Run linter
+        run: npm run lint
 
-          parse_core_semver() {
-            local tag="$1"
-            if [[ "$tag" =~ ^v([0-9]+)\.([0-9]+)\.([0-9]+)$ ]]; then
-              echo "${BASH_REMATCH[1]} ${BASH_REMATCH[2]} ${BASH_REMATCH[3]}"
-              return 0
-            fi
-            if [[ "$tag" =~ ^v([0-9]+)\.([0-9]+)\.([0-9]+)-dev([.-][0-9A-Za-z]+)?$ ]]; then
-              echo "${BASH_REMATCH[1]} ${BASH_REMATCH[2]} ${BASH_REMATCH[3]}"
-              return 0
-            fi
-            return 1
-          }
-
-          LAST_STABLE_TAG=$(git tag -l --sort=-v:refname | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | head -n 1 || true)
-          if [ -z "$LAST_STABLE_TAG" ]; then
-            LAST_STABLE_TAG='v0.0.0'
-          fi
-
-          BASE_TAG="$LAST_STABLE_TAG"
-
-          BUMP_TYPE="$RELEASE_TYPE"
-          if [ "$REF_NAME" = 'dev' ] && [ "$RELEASE_TYPE" = 'major' ]; then
-            echo "ℹ️ Dev branch releases do not support major bumps; treating release_type=major as minor."
-            BUMP_TYPE='minor'
-          fi
-
-          case "$RELEASE_TYPE" in
-            custom)
-              if [ -z "$INPUT_VERSION" ]; then
-                echo "❌ release_type=custom requires version input"
-                exit 1
-              fi
-              VERSION="$(normalize_version "$INPUT_VERSION")"
-              ;;
-            patch|minor|major)
-              if [ -n "$INPUT_VERSION" ]; then
-                echo "ℹ️ Ignoring version input because release_type=${RELEASE_TYPE}"
-              fi
-
-              if ! read -r MAJOR MINOR PATCH < <(parse_core_semver "$BASE_TAG"); then
-                echo "❌ Could not parse auto-bump base tag: ${BASE_TAG}"
-                echo "Use release_type=custom with an explicit version if needed."
-                exit 1
-              fi
-
-              case "$BUMP_TYPE" in
-                patch)
-                  PATCH=$((PATCH + 1))
-                  ;;
-                minor)
-                  MINOR=$((MINOR + 1))
-                  PATCH=0
-                  ;;
-                major)
-                  MAJOR=$((MAJOR + 1))
-                  MINOR=0
-                  PATCH=0
-                  ;;
-              esac
-
-              VERSION="v${MAJOR}.${MINOR}.${PATCH}"
-              ;;
-            *)
-              echo "❌ Unsupported release_type: ${RELEASE_TYPE}"
-              exit 1
-              ;;
-          esac
-
-          branch_channel() {
-            local ref="$1"
-            if [ "$ref" = 'main' ]; then
-              echo 'main'
-            elif [ "$ref" = 'dev' ]; then
-              echo 'dev'
-            elif [[ "$ref" =~ ^experimental([/-].*)?$ ]]; then
-              printf '%s' "$ref" \
-                | tr '[:upper:]' '[:lower:]' \
-                | sed -E 's|[^a-z0-9]+|-|g; s|^-+||; s|-+$||; s|-+|-|g'
-            else
-              return 1
-            fi
-          }
-
-          CHANNEL="$(branch_channel "$REF_NAME")" || {
-            echo "❌ Releases are only allowed from main, dev, or experimental branches. Got: ${REF_NAME}"
-            exit 1
-          }
-
-          # Non-main releases are always prerelease variants tied to the branch channel.
-          # For auto-bumps, skip existing tags while preserving the selected bump semantics.
-          if [ "$CHANNEL" != 'main' ]; then
-            if [ "$RELEASE_TYPE" = 'custom' ]; then
-              if [[ ! "$VERSION" =~ -${CHANNEL}([.-][0-9A-Za-z]+)?$ ]]; then
-                VERSION="${VERSION}-${CHANNEL}"
-              fi
-            else
-              if ! read -r DEV_MAJOR DEV_MINOR DEV_PATCH < <(parse_core_semver "$VERSION"); then
-                echo "❌ Could not parse prerelease version base: ${VERSION}"
-                exit 1
-              fi
-
-              while git rev-parse "v${DEV_MAJOR}.${DEV_MINOR}.${DEV_PATCH}-${CHANNEL}" >/dev/null 2>&1; do
-                case "$BUMP_TYPE" in
-                  patch)
-                    DEV_PATCH=$((DEV_PATCH + 1))
-                    ;;
-                  *)
-                    DEV_MINOR=$((DEV_MINOR + 1))
-                    DEV_PATCH=0
-                  ;;
-                esac
-              done
-
-              VERSION="v${DEV_MAJOR}.${DEV_MINOR}.${DEV_PATCH}-${CHANNEL}"
-            fi
-          fi
-
-          echo "Resolved release version: ${VERSION}"
-          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
-
-      - name: Validate version format
-        env:
-          VERSION: ${{ steps.resolve-version.outputs.version }}
-        run: |
-          if [[ ! "$VERSION" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$ ]]; then
-            echo "❌ Version must be semantic and v-prefixed (e.g., v1.0.0 or v1.0.0-rc.1)"
-            exit 1
-          fi
-
-      - name: Determine prerelease mode
-        id: release-mode
-        env:
-          VERSION: ${{ steps.resolve-version.outputs.version }}
-          REF_NAME: ${{ github.ref_name }}
-        run: |
-          set -euo pipefail
-
-          branch_channel() {
-            local ref="$1"
-            if [ "$ref" = 'main' ]; then
-              echo 'main'
-            elif [ "$ref" = 'dev' ]; then
-              echo 'dev'
-            elif [[ "$ref" =~ ^experimental([/-].*)?$ ]]; then
-              printf '%s' "$ref" \
-                | tr '[:upper:]' '[:lower:]' \
-                | sed -E 's|[^a-z0-9]+|-|g; s|^-+||; s|-+$||; s|-+|-|g'
-            else
-              return 1
-            fi
-          }
-
-          CHANNEL="$(branch_channel "$REF_NAME")" || {
-            echo "❌ Releases are only allowed from main, dev, or experimental branches. Got: ${REF_NAME}"
-            exit 1
-          }
-
-          IS_PRERELEASE='false'
-          REASON='stable-main'
-
-          # All non-main branch releases are prereleases.
-          if [ "$CHANNEL" != 'main' ]; then
-            IS_PRERELEASE='true'
-            REASON="branch-${CHANNEL}"
-          # Main-branch prerelease tags (rc/beta/alpha/pre/preview) are also prereleases.
-          elif [[ "$VERSION" =~ -([Rr][Cc]|[Bb]eta|[Aa]lpha|[Pp]re|[Pp]review)([.-]?[0-9A-Za-z]*)?$ ]]; then
-            IS_PRERELEASE='true'
-            REASON='version-suffix'
-          fi
-
-          echo "is_prerelease=${IS_PRERELEASE}" >> "$GITHUB_OUTPUT"
-          echo "Detected prerelease mode: ${IS_PRERELEASE} (${REASON})"
-
-      - name: Check if tag already exists
-        env:
-          VERSION: ${{ steps.resolve-version.outputs.version }}
-        run: |
-          if git rev-parse "$VERSION" >/dev/null 2>&1; then
-            echo "❌ Tag $VERSION already exists!"
-            exit 1
-          fi
-          echo "✅ Tag $VERSION is available"
-
-      - name: Validate source candidate tag
-        id: validate-source-tag
-        env:
-          SOURCE_TAG_INPUT: ${{ github.event.inputs.source_tag }}
-          REF_NAME: ${{ github.ref_name }}
-        run: |
-          set -euo pipefail
-
-          SOURCE_TAG="$(echo "$SOURCE_TAG_INPUT" | xargs)"
-
-          if [ -z "$SOURCE_TAG" ]; then
-            echo "❌ source_tag is required"
-            exit 1
-          fi
-
-          if [[ "$SOURCE_TAG" == *-amd64 || "$SOURCE_TAG" == *-arm64 ]]; then
-            echo "❌ source_tag must not include architecture suffix (-amd64/-arm64)"
-            exit 1
-          fi
-
-          branch_channel() {
-            local ref="$1"
-            if [ "$ref" = 'main' ]; then
-              echo 'main'
-            elif [ "$ref" = 'dev' ]; then
-              echo 'dev'
-            elif [[ "$ref" =~ ^experimental([/-].*)?$ ]]; then
-              printf '%s' "$ref" \
-                | tr '[:upper:]' '[:lower:]' \
-                | sed -E 's|[^a-z0-9]+|-|g; s|^-+||; s|-+$||; s|-+|-|g'
-            else
-              return 1
-            fi
-          }
-
-          CHANNEL="$(branch_channel "$REF_NAME")" || {
-            echo "❌ Releases are only allowed from main, dev, or experimental branches. Got: ${REF_NAME}"
-            exit 1
-          }
-
-          if [ "$CHANNEL" = 'main' ] && [[ ! "$SOURCE_TAG" =~ ^main-[0-9]{8}-[0-9]+$ ]]; then
-            echo "❌ main releases must promote an immutable main tag (main-YYYYMMDD-RUN)."
-            echo "Got: ${SOURCE_TAG}"
-            exit 1
-          fi
-
-          if [ "$CHANNEL" != 'main' ] && [[ ! "$SOURCE_TAG" =~ ^${CHANNEL}-[0-9]{8}-[0-9]+$ ]]; then
-            echo "❌ ${CHANNEL} releases must promote an immutable ${CHANNEL} tag (${CHANNEL}-YYYYMMDD-RUN)."
-            echo "Got: ${SOURCE_TAG}"
-            exit 1
-          fi
-
-          echo "source_tag=${SOURCE_TAG}" >> "$GITHUB_OUTPUT"
-          echo "✅ Source candidate tag: ${SOURCE_TAG}"
-
-  manifest:
-    name: Create Multi-Arch Manifest
+  typecheck:
+    name: Type Check
     runs-on: ubuntu-latest
-    needs: [validate]
-    outputs:
-      digest: ${{ steps.promote.outputs.digest }}
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+
+      - name: Setup Node.js
+        uses: actions/setup-node@53b83947a5a98c8d113130e565377fae1a50d02f # v6
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Generate paraglide files
+        run: rm -rf src/lib/paraglide && npm run build
+
+      - name: Run type check
+        run: npm run check
+
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+
+      - name: Setup Node.js
+        uses: actions/setup-node@53b83947a5a98c8d113130e565377fae1a50d02f # v6
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run tests with coverage
+        run: npm run test:coverage
+
+  build:
+    name: Build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+
+      - name: Setup Node.js
+        uses: actions/setup-node@53b83947a5a98c8d113130e565377fae1a50d02f # v6
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build application
+        run: npm run build
+
+  docker-release:
+    name: Docker Release
+    needs: [lint, typecheck, test, build]
+    uses: ./.github/workflows/docker-build.yml
+    with:
+      release_tag: ${{ github.ref_name }}
+    secrets: inherit
     permissions:
-      contents: write
+      contents: read
       packages: write
 
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
-
-      - name: Set lowercase image name
-        run: echo "IMAGE_NAME_LC=${GITHUB_REPOSITORY,,}" >> "$GITHUB_ENV"
-
-      - name: Log in to Container Registry
-        uses: docker/login-action@b45d80f862d83dbcd57f89517bcf500b2ab88fb2 # v4
-        with:
-          registry: ${{ env.REGISTRY }}
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@4d04d5d9486b7bd6fa91e7baf45bbb4f8b9deedd # v4.0.0
-
-      - name: Install crane
-        env:
-          CRANE_VERSION: v0.20.6
-        run: |
-          set -euo pipefail
-
-          curl -fsSL \
-            "https://github.com/google/go-containerregistry/releases/download/${CRANE_VERSION}/go-containerregistry_Linux_x86_64.tar.gz" \
-            -o /tmp/go-containerregistry.tgz
-
-          tar -xzf /tmp/go-containerregistry.tgz -C /tmp crane
-          sudo mv /tmp/crane /usr/local/bin/crane
-          crane version
-
-      - name: Verify promoted source images exist
-        env:
-          SOURCE_TAG: ${{ needs.validate.outputs.source_tag }}
-          SOURCE_AMD64_IMAGE: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME_LC }}:${{ needs.validate.outputs.source_tag }}-amd64
-          SOURCE_ARM64_IMAGE: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME_LC }}:${{ needs.validate.outputs.source_tag }}-arm64
-        run: |
-          set -euo pipefail
-
-          echo "Checking source candidate tags for ${SOURCE_TAG}..."
-          docker buildx imagetools inspect "$SOURCE_AMD64_IMAGE" >/dev/null
-          docker buildx imagetools inspect "$SOURCE_ARM64_IMAGE" >/dev/null
-          echo "✅ Found ${SOURCE_AMD64_IMAGE} and ${SOURCE_ARM64_IMAGE}"
-
-      - name: Promote source images to release tags with release metadata
-        id: promote
-        env:
-          REF_NAME: ${{ github.ref_name }}
-          SOURCE_TAG: ${{ needs.validate.outputs.source_tag }}
-          VERSION: ${{ needs.validate.outputs.version }}
-          IS_PRERELEASE: ${{ needs.validate.outputs.is_prerelease }}
-          SOURCE_AMD64_IMAGE: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME_LC }}:${{ needs.validate.outputs.source_tag }}-amd64
-          SOURCE_ARM64_IMAGE: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME_LC }}:${{ needs.validate.outputs.source_tag }}-arm64
-          RELEASE_AMD64_IMAGE: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME_LC }}:${{ needs.validate.outputs.version }}-amd64
-          RELEASE_ARM64_IMAGE: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME_LC }}:${{ needs.validate.outputs.version }}-arm64
-          RELEASE_MULTIARCH_IMAGE: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME_LC }}:${{ needs.validate.outputs.version }}
-        run: |
-          set -euo pipefail
-
-          resolve_digest() {
-            local image="$1"
-            local attempts="${2:-10}"
-            local sleep_seconds="${3:-3}"
-            local digest=''
-
-            for attempt in $(seq 1 "$attempts"); do
-              digest="$(crane digest "$image" 2>/dev/null || true)"
-              if [ -n "$digest" ]; then
-                echo "$digest"
-                return 0
-              fi
-              echo "Digest not yet available for ${image} (attempt ${attempt}/${attempts}), retrying..."
-              sleep "$sleep_seconds"
-            done
-
-            echo "❌ Failed to resolve digest for ${image} after ${attempts} attempts" >&2
-            return 1
-          }
-
-          # Mutate immutable source architecture images into release tags without rebuild.
-          # This writes release version metadata directly into the image config.
-          crane mutate "$SOURCE_AMD64_IMAGE" \
-            --platform linux/amd64 \
-            --tag "$RELEASE_AMD64_IMAGE" \
-            --env "PUBLIC_APP_VERSION=$VERSION" \
-            --label "org.opencontainers.image.version=$VERSION"
-
-          crane mutate "$SOURCE_ARM64_IMAGE" \
-            --platform linux/arm64 \
-            --tag "$RELEASE_ARM64_IMAGE" \
-            --env "PUBLIC_APP_VERSION=$VERSION" \
-            --label "org.opencontainers.image.version=$VERSION"
-
-          # Confirm the runtime app version env was written to promoted tags.
-          AMD64_VERSION_ENV=$(crane config --platform linux/amd64 "$RELEASE_AMD64_IMAGE" | jq -r '.config.Env[]? | select(startswith("PUBLIC_APP_VERSION="))' | tail -n 1)
-          ARM64_VERSION_ENV=$(crane config --platform linux/arm64 "$RELEASE_ARM64_IMAGE" | jq -r '.config.Env[]? | select(startswith("PUBLIC_APP_VERSION="))' | tail -n 1)
-          echo "amd64 ${AMD64_VERSION_ENV}"
-          echo "arm64 ${ARM64_VERSION_ENV}"
-
-          if [ "$AMD64_VERSION_ENV" != "PUBLIC_APP_VERSION=$VERSION" ] || [ "$ARM64_VERSION_ENV" != "PUBLIC_APP_VERSION=$VERSION" ]; then
-            echo "❌ Failed to set PUBLIC_APP_VERSION metadata on promoted images"
-            exit 1
-          fi
-
-          # Build release manifest from the release architecture tags.
-          docker buildx imagetools create -t "$RELEASE_MULTIARCH_IMAGE" "$RELEASE_AMD64_IMAGE" "$RELEASE_ARM64_IMAGE"
-          RELEASE_DIGEST="$(resolve_digest "$RELEASE_MULTIARCH_IMAGE")"
-          echo "digest=${RELEASE_DIGEST}" >> "$GITHUB_OUTPUT"
-
-          # Tag as latest only for stable main releases.
-          if [ "$REF_NAME" = 'main' ] && [ "$IS_PRERELEASE" != 'true' ]; then
-            crane tag "${{ env.REGISTRY }}/${{ env.IMAGE_NAME_LC }}@${RELEASE_DIGEST}" latest
-            LATEST_DIGEST="$(resolve_digest "${{ env.REGISTRY }}/${{ env.IMAGE_NAME_LC }}:latest")"
-
-            if [ "$LATEST_DIGEST" != "$RELEASE_DIGEST" ]; then
-              echo "❌ latest digest does not match release digest"
-              echo "release=${RELEASE_DIGEST}"
-              echo "latest=${LATEST_DIGEST}"
-              exit 1
-            fi
-
-            echo "✅ Promoted ${SOURCE_TAG} to ${VERSION} and latest"
-          else
-            echo "✅ Promoted ${SOURCE_TAG} to ${VERSION} (latest skipped for prerelease/non-main)"
-          fi
-
-  attest-manifest:
-    name: Attest Release Manifest
-    runs-on: ubuntu-latest
-    needs: [manifest]
-    if: needs.manifest.result == 'success'
-    continue-on-error: true
-    permissions:
-      attestations: write
-      id-token: write
-      packages: write
-
-    steps:
-      - name: Set lowercase image name
-        run: echo "IMAGE_NAME_LC=${GITHUB_REPOSITORY,,}" >> "$GITHUB_ENV"
-
-      - name: Log in to Container Registry
-        uses: docker/login-action@b45d80f862d83dbcd57f89517bcf500b2ab88fb2 # v4
-        with:
-          registry: ${{ env.REGISTRY }}
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Generate artifact attestation
-        uses: actions/attest-build-provenance@v4
-        with:
-          subject-name: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME_LC }}
-          subject-digest: ${{ needs.manifest.outputs.digest }}
-          push-to-registry: true
-
-  create-release:
+  github-release:
     name: Create GitHub Release
+    needs: [docker-release]
     runs-on: ubuntu-latest
-    needs: [validate, manifest]
-    permissions:
-      contents: write
-
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
         with:
           fetch-depth: 0
 
-      - name: Configure git identity
-        run: |
-          git config user.name 'github-actions[bot]'
-          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-
-      - name: Create Git tag
+      - name: Install git-cliff
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          VERSION: ${{ needs.validate.outputs.version }}
+          CLIFF_VERSION: 2.8.0
         run: |
-          # Create and push tag
-          if git rev-parse "$VERSION" >/dev/null 2>&1; then
-            echo "⚠️  Tag already exists, skipping tag creation"
-          else
-            git tag -a "$VERSION" -m "Release $VERSION"
-            git push origin "$VERSION"
-            echo "✅ Created and pushed tag $VERSION"
-          fi
+          curl -sSL "https://github.com/orhun/git-cliff/releases/download/v${CLIFF_VERSION}/git-cliff-${CLIFF_VERSION}-x86_64-unknown-linux-gnu.tar.gz" | \
+            tar -xz --strip-components=1 -C /usr/local/bin "git-cliff-${CLIFF_VERSION}/git-cliff"
 
-      - name: Build release notes body
-        id: notes
-        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8
+      - name: Generate changelog
         env:
-          VERSION: ${{ needs.validate.outputs.version }}
-          SOURCE_TAG: ${{ needs.validate.outputs.source_tag }}
-          EXTRA_NOTES: ${{ github.event.inputs.release_notes }}
-        with:
-          script: |
-            const version = process.env.VERSION;
-            const sourceTag = process.env.SOURCE_TAG;
-            const extraNotes = (process.env.EXTRA_NOTES || '').trim();
-            const owner = context.repo.owner;
-            const repo = context.repo.repo;
-            const imageRef = `ghcr.io/${owner.toLowerCase()}/${repo.toLowerCase()}:${version}`;
-            const hiddenAuthorPattern = /@github-actions\[bot\]/i;
-            const contributorBotPattern = /@(github-actions\[bot\]|dependabot\[bot\]|renovate\[bot\])/i;
-
-            const releases = await github.rest.repos.listReleases({
-              owner,
-              repo,
-              per_page: 100
-            });
-            const releaseCount = releases.data.filter((r) => !r.draft).length;
-            const isFirstRelease = releaseCount === 0;
-
-            const generated = await github.rest.repos.generateReleaseNotes({
-              owner,
-              repo,
-              tag_name: version,
-              target_commitish: context.ref.replace('refs/heads/', ''),
-              configuration_file_path: '.github/release.yml'
-            });
-
-            let generatedBody = generated.data.body || '';
-            generatedBody = generatedBody
-              .split('\n')
-              .filter((line) => !hiddenAuthorPattern.test(line))
-              .join('\n');
-
-            // Remove bot entries from "New Contributors" only.
-            generatedBody = generatedBody.replace(
-              /(^##+\s+New Contributors\s*$[\s\S]*?)(?=^##+\s+|$)/m,
-              (section) => {
-                const lines = section.split('\n').filter((line) => !contributorBotPattern.test(line));
-                const hasContributorBullet = lines.some((line) => /^[-*]\s+@/.test(line.trim()));
-                return hasContributorBullet ? `${lines.join('\n').trim()}\n\n` : '';
-              }
-            );
-            generatedBody = generatedBody.replace(/\n{3,}/g, '\n\n').trim();
-
-            const preface = [];
-            preface.push(`Promoted from CI candidate: \`${sourceTag}\``);
-            preface.push(`Container image: \`${imageRef}\``);
-
-            if (isFirstRelease) {
-              preface.push('');
-              preface.push('## Initial Release');
-              preface.push('- First official Cinephage release.');
-              preface.push('- Multi-arch images published for `linux/amd64` and `linux/arm64`.');
-              preface.push('- Pin deployments to this version tag for stable rollouts.');
-            }
-
-            if (extraNotes.length > 0) {
-              preface.push('');
-              preface.push('## Maintainer Notes');
-              preface.push(extraNotes);
-            }
-
-            const body = `${preface.join('\n')}\n\n---\n\n${generatedBody}`.trim();
-            core.setOutput('body', body);
+          TAG: ${{ github.ref_name }}
+        run: |
+          git-cliff --tag "$TAG" -o CHANGELOG.md
 
       - name: Create GitHub Release
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: ${{ needs.validate.outputs.version }}
-          name: ${{ needs.validate.outputs.version }}
-          body: ${{ steps.notes.outputs.body }}
-          draft: false
-          prerelease: ${{ needs.validate.outputs.is_prerelease == 'true' }}
-
-  cleanup-images:
-    name: Cleanup Old Images
-    runs-on: ubuntu-latest
-    needs: [manifest]
-    if: success()
-    permissions:
-      packages: write
-      contents: read
-
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
-
-      - name: Set lowercase image name
-        run: echo "IMAGE_NAME_LC=${GITHUB_REPOSITORY,,}" >> "$GITHUB_ENV"
-
-      - name: Cleanup untagged images
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          PACKAGE_NAME: ${{ env.IMAGE_NAME_LC }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ github.ref_name }}
         run: |
-          echo "🧹 Cleaning up old untagged images..."
-
-          # Get package versions using GitHub API
-          API_RESPONSE=$(curl -s -H "Authorization: Bearer ${GITHUB_TOKEN}" \
-            "https://api.github.com/user/packages/container/${PACKAGE_NAME}/versions")
-
-          # Check if API call was successful
-          if echo "$API_RESPONSE" | jq -e '.message' > /dev/null 2>&1; then
-            echo "⚠️  API Error: $(echo "$API_RESPONSE" | jq -r '.message')"
-            echo "Skipping cleanup..."
-            exit 0
-          fi
-
-          # Get untagged versions (versions with no tags)
-          UNTAGGED_VERSIONS=$(echo "$API_RESPONSE" | jq -r '.[] | select(.metadata.container.tags | length == 0) | .id' | sort -rn)
-
-          if [ -z "$UNTAGGED_VERSIONS" ]; then
-            echo "✅ No untagged images found to clean up"
-            exit 0
-          fi
-
-          # Count untagged versions
-          COUNT=$(echo "$UNTAGGED_VERSIONS" | grep -c . || echo "0")
-          echo "Found ${COUNT} untagged image version(s)"
-
-          # Keep the last 5 untagged versions for safety, delete the rest
-          TO_DELETE=$(echo "$UNTAGGED_VERSIONS" | tail -n +6)
-
-          if [ -z "$TO_DELETE" ]; then
-            echo "✅ All untagged images are within the safety threshold (keeping last 5)"
-            exit 0
-          fi
-
-          DELETE_COUNT=$(echo "$TO_DELETE" | grep -c . || echo "0")
-          echo "Deleting ${DELETE_COUNT} old untagged version(s) (keeping last 5)..."
-
-          # Delete untagged versions
-          echo "$TO_DELETE" | while read -r version_id; do
-            if [ -n "$version_id" ] && [ "$version_id" != "null" ]; then
-              echo "  Deleting version: ${version_id}"
-              DELETE_RESPONSE=$(curl -s -w "\n%{http_code}" -X DELETE \
-                -H "Authorization: Bearer ${GITHUB_TOKEN}" \
-                "https://api.github.com/user/packages/container/${PACKAGE_NAME}/versions/${version_id}")
-              
-              HTTP_CODE=$(echo "$DELETE_RESPONSE" | tail -n 1)
-              if [ "$HTTP_CODE" = "204" ]; then
-                echo "    ✅ Deleted successfully"
-              else
-                echo "    ⚠️  Failed to delete (HTTP ${HTTP_CODE})"
-              fi
-            fi
-          done
-
-          echo "✅ Cleanup complete"
+          gh release create "$TAG" \
+            --title "$TAG" \
+            --notes-file CHANGELOG.md \
+            --verify-tag

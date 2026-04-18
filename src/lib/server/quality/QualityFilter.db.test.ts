@@ -5,7 +5,7 @@ import {
 	clearTestDb,
 	type TestDatabase
 } from '../../../test/db-helper';
-import { scoringProfiles, profileSizeLimits } from '$lib/server/db/schema';
+import { scoringProfiles } from '$lib/server/db/schema';
 import { COMPACT_PROFILE, BALANCED_PROFILE } from '../scoring';
 
 const testDb: TestDatabase = createTestDb();
@@ -50,7 +50,7 @@ describe('QualityFilter (database)', () => {
 	});
 
 	describe('getDefaultScoringProfile', () => {
-		it('should merge episode size limits from profileSizeLimits for a built-in default profile', async () => {
+		it('should return size limits from scoringProfiles for a built-in default profile', async () => {
 			testDb.db
 				.insert(scoringProfiles)
 				.values({
@@ -58,28 +58,17 @@ describe('QualityFilter (database)', () => {
 					name: 'Compact',
 					description: 'Compact profile',
 					isDefault: true,
+					isBuiltIn: true,
 					formatScores: COMPACT_PROFILE.formatScores,
 					resolutionOrder: COMPACT_PROFILE.resolutionOrder,
 					upgradesAllowed: COMPACT_PROFILE.upgradesAllowed,
 					minScore: COMPACT_PROFILE.minScore,
 					upgradeUntilScore: COMPACT_PROFILE.upgradeUntilScore,
 					minScoreIncrement: COMPACT_PROFILE.minScoreIncrement,
-					movieMinSizeGb: null,
-					movieMaxSizeGb: null,
-					episodeMinSizeMb: null,
-					episodeMaxSizeMb: null
-				})
-				.run();
-
-			testDb.db
-				.insert(profileSizeLimits)
-				.values({
-					profileId: 'compact',
 					movieMinSizeGb: 0.5,
 					movieMaxSizeGb: 5.0,
 					episodeMinSizeMb: 50,
-					episodeMaxSizeMb: 450,
-					isDefault: false
+					episodeMaxSizeMb: 450
 				})
 				.run();
 
@@ -92,7 +81,7 @@ describe('QualityFilter (database)', () => {
 			expect(profile.name).toBe('Compact');
 		});
 
-		it('should return null size limits when profileSizeLimits has no entry for a built-in default', async () => {
+		it('should return null size limits when scoringProfiles has null values for a built-in default', async () => {
 			testDb.db
 				.insert(scoringProfiles)
 				.values({
@@ -100,6 +89,7 @@ describe('QualityFilter (database)', () => {
 					name: 'Compact',
 					description: 'Compact profile',
 					isDefault: true,
+					isBuiltIn: true,
 					formatScores: COMPACT_PROFILE.formatScores,
 					resolutionOrder: COMPACT_PROFILE.resolutionOrder,
 					upgradesAllowed: COMPACT_PROFILE.upgradesAllowed,
@@ -153,7 +143,7 @@ describe('QualityFilter (database)', () => {
 	});
 
 	describe('getProfile', () => {
-		it('should merge size limits from profileSizeLimits for built-in profiles', async () => {
+		it('should return size limits from scoringProfiles for built-in profiles', async () => {
 			testDb.db
 				.insert(scoringProfiles)
 				.values({
@@ -161,28 +151,17 @@ describe('QualityFilter (database)', () => {
 					name: 'Compact',
 					description: 'Compact profile',
 					isDefault: false,
+					isBuiltIn: true,
 					formatScores: COMPACT_PROFILE.formatScores,
 					resolutionOrder: COMPACT_PROFILE.resolutionOrder,
 					upgradesAllowed: COMPACT_PROFILE.upgradesAllowed,
 					minScore: COMPACT_PROFILE.minScore,
 					upgradeUntilScore: COMPACT_PROFILE.upgradeUntilScore,
 					minScoreIncrement: COMPACT_PROFILE.minScoreIncrement,
-					movieMinSizeGb: null,
-					movieMaxSizeGb: null,
-					episodeMinSizeMb: null,
-					episodeMaxSizeMb: null
-				})
-				.run();
-
-			testDb.db
-				.insert(profileSizeLimits)
-				.values({
-					profileId: 'compact',
 					movieMinSizeGb: 0.5,
 					movieMaxSizeGb: 5.0,
 					episodeMinSizeMb: 50,
-					episodeMaxSizeMb: 450,
-					isDefault: false
+					episodeMaxSizeMb: 450
 				})
 				.run();
 

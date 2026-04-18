@@ -27,6 +27,7 @@ import { initPersistentStreamCache } from '$lib/server/streaming/cache/Persisten
 import { getNntpManager } from '$lib/server/streaming/usenet/NntpManager';
 import { getExtractionCacheManager } from '$lib/server/streaming/nzb/extraction/ExtractionCacheManager';
 import { getMediaBrowserNotifier } from '$lib/server/notifications/mediabrowser';
+import { getMediaServerStatsSyncService } from '$lib/server/mediaServerStats/MediaServerStatsSyncService.js';
 import { getEpgScheduler } from '$lib/server/livetv/epg';
 import { getLiveTvAccountManager } from '$lib/server/livetv/LiveTvAccountManager';
 import { getLiveTvChannelService } from '$lib/server/livetv/LiveTvChannelService';
@@ -318,6 +319,10 @@ async function initializeServices(): Promise<void> {
 			const mediaBrowserNotifier = getMediaBrowserNotifier();
 			serviceManager.register(mediaBrowserNotifier);
 			logger.info('MediaBrowser notifier initialized for Jellyfin/Emby/Plex integration');
+
+			// Initialize MediaServer stats sync service
+			const mediaServerStatsSync = getMediaServerStatsSyncService();
+			serviceManager.register(mediaServerStatsSync);
 
 			// Initialize Live TV services
 			const liveTvAccountManager = getLiveTvAccountManager();

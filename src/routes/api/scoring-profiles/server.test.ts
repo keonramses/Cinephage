@@ -12,8 +12,9 @@ import {
 	type ErrorResponse,
 	type DeleteResponse
 } from '../../../test/api-helper';
-import { scoringProfiles, profileSizeLimits } from '$lib/server/db/schema';
+import { scoringProfiles } from '$lib/server/db/schema';
 import { eq } from 'drizzle-orm';
+import { DEFAULT_PROFILES } from '$lib/server/scoring';
 
 const testDb: TestDatabase = createTestDb();
 
@@ -46,6 +47,27 @@ vi.mock('$lib/logging', () => ({
 	createChildLogger: vi.fn(() => mockLogger)
 }));
 
+function seedBuiltInProfiles() {
+	for (const profile of DEFAULT_PROFILES) {
+		testDb.db
+			.insert(scoringProfiles)
+			.values({
+				id: profile.id,
+				name: profile.name,
+				description: profile.description ?? null,
+				formatScores: profile.formatScores,
+				resolutionOrder: profile.resolutionOrder,
+				upgradesAllowed: profile.upgradesAllowed,
+				minScore: profile.minScore,
+				upgradeUntilScore: profile.upgradeUntilScore,
+				minScoreIncrement: profile.minScoreIncrement,
+				isBuiltIn: true,
+				isDefault: profile.id === 'balanced'
+			})
+			.run();
+	}
+}
+
 const { GET, POST, PUT, DELETE } = await import('./+server');
 
 describe('Scoring Profiles API', () => {
@@ -55,6 +77,7 @@ describe('Scoring Profiles API', () => {
 
 	beforeEach(() => {
 		clearTestDb(testDb);
+		seedBuiltInProfiles();
 	});
 
 	describe('GET /api/scoring-profiles', () => {
@@ -99,14 +122,16 @@ describe('Scoring Profiles API', () => {
 			expect(customProfile?.isBuiltIn).toBe(false);
 		});
 
-		it('applies size limit overrides to built-in profiles', async () => {
-			await testDb.db.insert(profileSizeLimits).values({
-				profileId: 'balanced',
-				movieMinSizeGb: 1.5,
-				movieMaxSizeGb: 50,
-				episodeMinSizeMb: 200,
-				episodeMaxSizeMb: 5000
-			});
+		it('returns size limits on built-in profiles', async () => {
+			await testDb.db
+				.update(scoringProfiles)
+				.set({
+					movieMinSizeGb: 1.5,
+					movieMaxSizeGb: 50,
+					episodeMinSizeMb: 200,
+					episodeMaxSizeMb: 5000
+				})
+				.where(eq(scoringProfiles.id, 'balanced'));
 
 			const { data } = await api.get<ProfilesListResponse>(GET);
 
@@ -118,7 +143,7 @@ describe('Scoring Profiles API', () => {
 		});
 
 		it('returns custom profile as default when set', async () => {
-			await testDb.db.insert(scoringProfiles).values({
+			await api.post<ProfileResponse>(POST, {
 				id: 'my-default',
 				name: 'My Default',
 				isDefault: true
