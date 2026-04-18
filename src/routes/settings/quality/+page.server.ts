@@ -1,7 +1,7 @@
 import type { PageServerLoad } from './$types';
 import type { Resolution } from '$lib/server/scoring/types';
 import { db } from '$lib/server/db';
-import { scoringProfiles, customFormats, profileSizeLimits } from '$lib/server/db/schema';
+import { scoringProfiles, customFormats } from '$lib/server/db/schema';
 import { DEFAULT_PROFILES, DEFAULT_RESOLUTION_ORDER, ALL_FORMATS } from '$lib/server/scoring';
 
 // Built-in profile IDs - derived from DEFAULT_PROFILES for single source of truth
@@ -27,22 +27,13 @@ export const load: PageServerLoad = async ({ url }) => {
 	// Load Profiles
 	// ===================
 
-	// Get custom profiles from database (excluding built-in IDs)
 	const dbProfiles = await db.select().from(scoringProfiles);
 	const customProfiles = dbProfiles.filter((p) => !BUILT_IN_PROFILE_IDS.includes(p.id));
+	const builtInDbMap = new Map(
+		dbProfiles.filter((p) => BUILT_IN_PROFILE_IDS.includes(p.id)).map((p) => [p.id, p])
+	);
 
-	// Get overrides for built-in profiles
-	const overrides = await db.select().from(profileSizeLimits);
-	const overridesMap = new Map(overrides.map((o) => [o.profileId, o]));
-
-	// Check for default status in custom profiles
-	const customDefaultId = customProfiles.find((p) => p.isDefault)?.id;
-
-	// Check for default status in built-in profile overrides
-	const builtInDefaultId = overrides.find((o) => o.isDefault)?.profileId;
-
-	// Determine which profile is default
-	const dbDefaultId = customDefaultId ?? builtInDefaultId;
+	const dbDefaultId = dbProfiles.find((p) => p.isDefault)?.id;
 
 	// Map custom profiles from database
 	const mappedCustomProfiles = customProfiles.map((p) => ({
@@ -69,16 +60,15 @@ export const load: PageServerLoad = async ({ url }) => {
 
 	// Build built-in profiles from code + overrides from DB
 	const builtInProfiles = DEFAULT_PROFILES.map((p) => {
-		const profileOverrides = overridesMap.get(p.id);
+		const dbProfile = builtInDbMap.get(p.id);
 
 		return {
 			...p,
-			movieMinSizeGb: toNullableNumber(profileOverrides?.movieMinSizeGb),
-			movieMaxSizeGb: toNullableNumber(profileOverrides?.movieMaxSizeGb),
-			episodeMinSizeMb: toNullableNumber(profileOverrides?.episodeMinSizeMb),
-			episodeMaxSizeMb: toNullableNumber(profileOverrides?.episodeMaxSizeMb),
+			movieMinSizeGb: toNullableNumber(dbProfile?.movieMinSizeGb),
+			movieMaxSizeGb: toNullableNumber(dbProfile?.movieMaxSizeGb),
+			episodeMinSizeMb: toNullableNumber(dbProfile?.episodeMinSizeMb),
+			episodeMaxSizeMb: toNullableNumber(dbProfile?.episodeMaxSizeMb),
 			isBuiltIn: true,
-			// Default to Balanced only if no DB default is set
 			isDefault: dbDefaultId === p.id || (!dbDefaultId && p.id === 'balanced')
 		};
 	});

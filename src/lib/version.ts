@@ -1,4 +1,4 @@
-export const PLACEHOLDER_PACKAGE_VERSION = '0.0.1';
+export const PLACEHOLDER_PACKAGE_VERSION = '0.1.0';
 
 function readVersion(value: string | undefined): string | null {
 	const normalized = value?.trim();

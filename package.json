@@ -1,7 +1,7 @@
 {
 	"name": "cinephage",
 	"private": true,
-	"version": "0.0.1",
+	"version": "0.2.0",
 	"license": "GPL-3.0-or-later",
 	"type": "module",
 	"scripts": {
@@ -45,9 +45,7 @@
 		"@vitest/browser": "^4.1.4",
 		"@vitest/browser-playwright": "^4.1.4",
 		"@vitest/coverage-v8": "^4.1.4",
-		"better-sqlite3": "^12.9.0",
 		"daisyui": "^5.5.19",
-		"dotenv": "^17.4.2",
 		"drizzle-orm": "^0.45.2",
 		"eslint": "^10.1.0",
 		"eslint-config-prettier": "^10.1.8",
@@ -76,13 +74,15 @@
 		"@rollup/rollup-linux-x64-gnu": "^4.60.0"
 	},
 	"dependencies": {
-		"@better-auth/api-key": "^1.5.6",
+		"@better-auth/api-key": "^1.6.3",
 		"adm-zip": "^0.5.16",
-		"camoufox-js": "^0.9.3",
+		"better-sqlite3": "^12.9.0",
+		"camoufox-js": "^0.10.0",
 		"cheerio": "^1.2.0",
 		"chokidar": "^5.0.0",
 		"crypto-js": "^4.2.0",
-		"fast-xml-parser": "^5.5.12",
+		"dotenv": "^17.4.2",
+		"fast-xml-parser": "^5.6.0",
 		"fflate": "^0.8.2",
 		"guessit-js": "^3.8.1",
 		"iconv-lite": "^0.7.2",

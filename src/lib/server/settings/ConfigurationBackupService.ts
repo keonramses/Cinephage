@@ -10,7 +10,6 @@ import {
 import { db } from '$lib/server/db';
 import { getCookieStore } from '$lib/server/indexers/auth/CookieStore.js';
 import {
-	builtInProfileScoreOverrides,
 	captchaSolverSettings,
 	channelCategories,
 	channelLineupBackups,
@@ -29,7 +28,6 @@ import {
 	namingPresets,
 	namingSettings,
 	nntpServers,
-	profileSizeLimits,
 	rootFolders,
 	scoringProfiles,
 	settings,
@@ -59,8 +57,6 @@ type TableName =
 	| 'captchaSolverSettings'
 	| 'taskSettings'
 	| 'scoringProfiles'
-	| 'profileSizeLimits'
-	| 'builtInProfileScoreOverrides'
 	| 'customFormats'
 	| 'downloadClients'
 	| 'rootFolders'
@@ -196,18 +192,6 @@ const TABLES: TableBackupConfig[] = [
 		table: scoringProfiles,
 		getRecordKey: (row) => String(row.id),
 		conflictTarget: scoringProfiles.id
-	},
-	{
-		name: 'profileSizeLimits',
-		table: profileSizeLimits,
-		getRecordKey: (row) => String(row.profileId),
-		conflictTarget: profileSizeLimits.profileId
-	},
-	{
-		name: 'builtInProfileScoreOverrides',
-		table: builtInProfileScoreOverrides,
-		getRecordKey: (row) => String(row.profileId),
-		conflictTarget: builtInProfileScoreOverrides.profileId
 	},
 	{
 		name: 'customFormats',
@@ -372,14 +356,7 @@ const SECTIONS: Array<{
 	{
 		id: 'profiles',
 		label: 'Profiles & Formats',
-		tableNames: [
-			'scoringProfiles',
-			'profileSizeLimits',
-			'builtInProfileScoreOverrides',
-			'customFormats',
-			'delayProfiles',
-			'languageProfiles'
-		]
+		tableNames: ['scoringProfiles', 'customFormats', 'delayProfiles', 'languageProfiles']
 	},
 	{
 		id: 'downloads',
