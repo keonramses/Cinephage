@@ -5,7 +5,8 @@
 	"license": "GPL-3.0-or-later",
 	"type": "module",
 	"scripts": {
-		"dev": "vite dev --host",
+		"dev": "vite dev",
+		"dev:host": "vite dev --host",
 		"build": "NODE_OPTIONS=--max-old-space-size=8192 VITE_SSR_BUILD=1 vite build",
 		"start": "node server.js",
 		"preview": "vite preview",

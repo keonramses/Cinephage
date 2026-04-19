@@ -2,8 +2,11 @@
 	"name": "Cinephage",
 	"dockerComposeFile": "docker-compose.yml",
 	"service": "cinephage",
-	"remoteUser": "node",
-	"mounts": ["source=workspace-scripts,target=/workspace-scripts/,type=bind,consistency=cached"],
-	"postCreateCommand": "/workspace-scripts/init.sh",
-	"initializeCommand": "mkdir -p .devcontainer/downloads .devcontainer/media .devcontainer/config/transmission"
+	"runServices": ["cinephage"],
+	"overrideCommand": false,
+	"workspaceFolder": "/workspace",
+	"forwardPorts": [3000, 5173],
+	"remoteUser": "root",
+	"postCreateCommand": ".devcontainer/workspace-scripts/init.sh",
+	"initializeCommand": "mkdir -p .devcontainer/downloads/incomplete .devcontainer/media .devcontainer/config/transmission .devcontainer/config/qbittorrent .devcontainer/config/sabnzbd"
 }
