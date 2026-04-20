@@ -93,6 +93,45 @@ We follow conventional commit messages:
 
 Example: `feat: add subtitle auto-download scheduler`
 
+## Release Tagging
+
+Release tags must follow `vMAJOR.MINOR.PATCH` with a constrained patch cycle:
+
+- `0.1.0` -> `0.1.1` -> ... -> `0.1.9` -> `0.2.0`
+
+Use this flow when preparing a release:
+
+1. Compute next version:
+
+   ```bash
+   npm run version:next
+   ```
+
+2. Bump `package.json` version using the same cycle:
+
+   ```bash
+   npm run version:bump-cycle
+   ```
+
+3. Commit the version bump:
+
+   ```bash
+   git add package.json package-lock.json
+   git commit -m "chore: bump version to <MAJOR.MINOR.PATCH>"
+   ```
+
+4. Create and push the release tag:
+
+   ```bash
+   git tag v<MAJOR.MINOR.PATCH>
+   git push origin main --tags
+   ```
+
+Notes:
+
+- GitHub release notes are generated from commits since the previous tag.
+- Changelog lines include commit author attribution.
+
 ## Detailed Documentation
 
 For more detailed development guides:
