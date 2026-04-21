@@ -76,15 +76,15 @@ jobs:
             exit 0
           fi
 
-          # Check for features
-          if echo "$COMMITS" | grep -qE "^feat(\([^)]*\))?: "; then
+          # Check for features (excluding ci/docs/test/style only changes)
+          if echo "$COMMITS" | grep -qE "^feat(\([^)]*\))?: " | grep -qvE "^feat\((ci|docs|test|style)\):"; then
             echo "Feature detected"
             echo "bump=minor" >> "$GITHUB_OUTPUT"
             exit 0
           fi
 
-          # Check for fixes, perf, refactor
-          if echo "$COMMITS" | grep -qE "^(fix|perf|refactor)(\([^)]*\))?: "; then
+          # Check for fixes, perf, refactor (excluding ci/docs/test/style only changes)
+          if echo "$COMMITS" | grep -qE "^(fix|perf|refactor)(\([^)]*\))?: " | grep -qvE "^(fix|perf|refactor)\((ci|docs|test|style)\):"; then
             echo "Fix/perf/refactor detected"
             echo "bump=patch" >> "$GITHUB_OUTPUT"
             exit 0
