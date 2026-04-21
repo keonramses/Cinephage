@@ -1,0 +1,200 @@
+name: Auto Release
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'Dry run (no actual release)'
+        required: true
+        type: boolean
+        default: true
+      force_bump:
+        description: 'Force bump type (auto|patch|minor|major)'
+        required: true
+        type: choice
+        options: [auto, patch, minor, major]
+        default: auto
+
+concurrency:
+  group: auto-release-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: write
+
+jobs:
+  auto-release:
+    name: Create Release
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Configure git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Setup Node.js
+        uses: actions/setup-node@53b83947a5a98c8d113130e565377fae1a50d02f # v6
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install git-cliff
+        env:
+          CLIFF_VERSION: 2.8.0
+        run: |
+          curl -sSL "https://github.com/orhun/git-cliff/releases/download/v${CLIFF_VERSION}/git-cliff-${CLIFF_VERSION}-x86_64-unknown-linux-gnu.tar.gz" | \
+            tar -xz --strip-components=1 -C /usr/local/bin "git-cliff-${CLIFF_VERSION}/git-cliff"
+
+      - name: Determine version bump
+        id: bump
+        run: |
+          LAST_TAG="$(git describe --tags --abbrev=0 2>/dev/null || echo '')"
+          if [ -z "$LAST_TAG" ]; then
+            echo "No previous tag found, defaulting to patch"
+            echo "bump=patch" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          echo "Last tag: ${LAST_TAG}"
+
+          # Get commits since last tag
+          COMMITS="$(git log "${LAST_TAG}..HEAD" --pretty=format:%s)"
+
+          if [ -z "$COMMITS" ]; then
+            echo "No commits since last tag"
+            echo "bump=none" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          # Check for manual override
+          if echo "$COMMITS" | grep -qi "Release-As:"; then
+            OVERRIDE="$(echo "$COMMITS" | grep -i "Release-As:" | head -1 | sed 's/.*Release-As: *//i' | tr -d ' ')"
+            if [ -n "$OVERRIDE" ]; then
+              echo "Manual override detected: ${OVERRIDE}"
+              echo "bump=manual" >> "$GITHUB_OUTPUT"
+              echo "version=${OVERRIDE}" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+          fi
+
+          # Check for breaking changes
+          if echo "$COMMITS" | grep -qE "^[a-z]+(\([^)]*\))?!:|BREAKING CHANGE:"; then
+            echo "Breaking change detected"
+            echo "bump=major" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          # Check for features
+          if echo "$COMMITS" | grep -qE "^feat(\([^)]*\))?: "; then
+            echo "Feature detected"
+            echo "bump=minor" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          # Check for fixes, perf, refactor
+          if echo "$COMMITS" | grep -qE "^(fix|perf|refactor)(\([^)]*\))?: "; then
+            echo "Fix/perf/refactor detected"
+            echo "bump=patch" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          echo "No releasable commits found (only docs/test/style/ci changes)"
+          echo "bump=none" >> "$GITHUB_OUTPUT"
+
+      - name: Check dry run
+        if: github.event_name == 'workflow_dispatch' && github.event.inputs.dry_run == 'true'
+        run: |
+          echo "DRY RUN MODE"
+          echo "Would bump: ${{ steps.bump.outputs.bump }}"
+          if [ "${{ steps.bump.outputs.bump }}" == "manual" ]; then
+            echo "Version: ${{ steps.bump.outputs.version }}"
+          fi
+          echo "No changes will be made"
+          exit 0
+
+      - name: Skip if no releasable commits
+        if: steps.bump.outputs.bump == 'none'
+        run: |
+          echo "No releasable commits (feat/fix/perf/refactor/breaking) found since last tag"
+          echo "Skipping release"
+          exit 0
+
+      - name: Compute next version
+        id: version
+        run: |
+          CURRENT_VERSION="$(node -p "require('./package.json').version")"
+          BUMP="${{ steps.bump.outputs.bump }}"
+
+          if [ "$BUMP" == "manual" ]; then
+            NEXT_VERSION="${{ steps.bump.outputs.version }}"
+          else
+            # Parse current version
+            MAJOR="$(echo "$CURRENT_VERSION" | cut -d. -f1)"
+            MINOR="$(echo "$CURRENT_VERSION" | cut -d. -f2)"
+            PATCH="$(echo "$CURRENT_VERSION" | cut -d. -f3)"
+
+            case "$BUMP" in
+              major)
+                MAJOR=$((MAJOR + 1))
+                MINOR=0
+                PATCH=0
+                ;;
+              minor)
+                MINOR=$((MINOR + 1))
+                PATCH=0
+                ;;
+              patch)
+                PATCH=$((PATCH + 1))
+                ;;
+            esac
+
+            NEXT_VERSION="${MAJOR}.${MINOR}.${PATCH}"
+          fi
+
+          echo "current=${CURRENT_VERSION}" >> "$GITHUB_OUTPUT"
+          echo "next=${NEXT_VERSION}" >> "$GITHUB_OUTPUT"
+          echo "Current: ${CURRENT_VERSION} → Next: ${NEXT_VERSION}"
+
+      - name: Update package.json and package-lock.json
+        run: |
+          NEXT_VERSION="${{ steps.version.outputs.next }}"
+          node -e "
+            const fs = require('fs');
+            const pkg = JSON.parse(fs.readFileSync('package.json', 'utf8'));
+            pkg.version = '${NEXT_VERSION}';
+            fs.writeFileSync('package.json', JSON.stringify(pkg, null, '\t') + '\n');
+            
+            if (fs.existsSync('package-lock.json')) {
+              const lock = JSON.parse(fs.readFileSync('package-lock.json', 'utf8'));
+              lock.version = '${NEXT_VERSION}';
+              if (lock.packages && lock.packages['']) {
+                lock.packages[''].version = '${NEXT_VERSION}';
+              }
+              fs.writeFileSync('package-lock.json', JSON.stringify(lock, null, '\t') + '\n');
+            }
+          "
+
+      - name: Generate CHANGELOG
+        run: |
+          git-cliff --tag "v${{ steps.version.outputs.next }}" -o CHANGELOG.md
+
+      - name: Commit version bump and changelog
+        run: |
+          git add package.json package-lock.json CHANGELOG.md
+          git commit -m "chore: release v${{ steps.version.outputs.next }}"
+
+      - name: Create and push tag
+        run: |
+          TAG="v${{ steps.version.outputs.next }}"
+          git tag "$TAG"
+          git push origin main --tags

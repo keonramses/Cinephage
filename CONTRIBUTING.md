@@ -130,44 +130,38 @@ We follow conventional commit messages:
 
 Example: `feat: add subtitle auto-download scheduler`
 
-## Release Tagging
+## Releases
 
-Release tags must follow `vMAJOR.MINOR.PATCH` with a constrained patch cycle:
+Releases are automated. When you merge `dev` into `main`, a workflow will:
 
-- `0.1.0` -> `0.1.1` -> ... -> `0.1.9` -> `0.2.0`
+1. Analyze commits since the last release
+2. Determine version bump (patch/minor/major) from commit types
+3. Update `package.json`, `package-lock.json`, and `CHANGELOG.md`
+4. Create a git tag (e.g., `v0.3.0`)
+5. Trigger the release pipeline (Docker build, GitHub Release, Discord)
 
-Use this flow when preparing a release:
+### Commit Types and Version Bumps
 
-1. Compute next version:
+| Commit Type                              | Version Bump  | Example                       |
+| ---------------------------------------- | ------------- | ----------------------------- |
+| `fix:`                                   | Patch (0.0.x) | `fix: correct login redirect` |
+| `feat:`                                  | Minor (0.x.0) | `feat: add dark mode`         |
+| `feat!:` or `BREAKING CHANGE:`           | Major (x.0.0) | `feat!: redesign API`         |
+| `docs:`, `test:`, `style:`, `chore(ci):` | No release    | `docs: update README`         |
 
-   ```bash
-   npm run version:next
-   ```
+### Manual Override
 
-2. Bump `package.json` version using the same cycle:
+To force a specific version, include `Release-As: x.y.z` in any commit body:
 
-   ```bash
-   npm run version:bump-cycle
-   ```
+```bash
+git commit -m "chore: prepare release" -m "Release-As: 1.0.0"
+```
 
-3. Commit the version bump:
+### Dry Run
 
-   ```bash
-   git add package.json package-lock.json
-   git commit -m "chore: bump version to <MAJOR.MINOR.PATCH>"
-   ```
-
-4. Create and push the release tag:
-
-   ```bash
-   git tag v<MAJOR.MINOR.PATCH>
-   git push origin main --tags
-   ```
-
-Notes:
-
-- GitHub release notes are generated from commits since the previous tag.
-- Changelog lines include commit author attribution.
+You can test the release process without creating an actual release using the
+[Auto Release workflow](https://github.com/MoldyTaint/Cinephage/actions/workflows/auto-release.yml)
+with `dry_run` enabled.
 
 ## Detailed Documentation
 
