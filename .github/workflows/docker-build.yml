@@ -20,6 +20,11 @@ on:
         required: false
         type: string
         default: ''
+      checkout_ref:
+        description: 'Git ref to checkout (defaults to workflow ref)'
+        required: false
+        type: string
+        default: ''
   push:
     branches: [main, dev, experimental, 'experimental/**']
     paths:
@@ -133,6 +138,8 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        with:
+          ref: ${{ inputs.checkout_ref || github.ref }}
 
       - name: Set lowercase image name
         run: echo "IMAGE_NAME_LC=${GITHUB_REPOSITORY,,}" >> "$GITHUB_ENV"
@@ -205,6 +212,8 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        with:
+          ref: ${{ inputs.checkout_ref || github.ref }}
 
       - name: Set lowercase image name
         run: echo "IMAGE_NAME_LC=${GITHUB_REPOSITORY,,}" >> "$GITHUB_ENV"
