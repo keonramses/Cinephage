@@ -262,7 +262,9 @@ export class TransmissionClient implements IDownloadClient {
 			ratioLimit: torrent.seedRatioLimit,
 			seedingTimeLimit: torrent.seedIdleLimit,
 			canMoveFiles: status !== 'downloading' && status !== 'seeding' && status !== 'queued',
-			canBeRemoved: this.hasReachedSeedLimit(torrent, status, sessionInfo),
+			canBeRemoved:
+				status !== 'downloading' &&
+				(status !== 'seeding' || this.hasReachedSeedLimit(torrent, status, sessionInfo)),
 			errorMessage
 		};
 	}
@@ -537,7 +539,7 @@ export class TransmissionClient implements IDownloadClient {
 	}
 
 	async getDefaultSavePath(): Promise<string> {
-		const session = await this.rpcRequest<TransmissionSessionInfo>('session-get');
+		const session = await this.getSessionInfo();
 		return session['download-dir'] || '';
 	}
 
