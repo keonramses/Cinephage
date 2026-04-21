@@ -36,5 +36,3 @@ jobs:
                 checkout_ref: '${{ steps.release.outputs.tag_name }}'
               }
             });
-
-
