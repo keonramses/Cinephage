@@ -17,3 +17,6 @@ RUN curl -fsSL https://github.com/kaegi/alass/releases/download/v2.0.0/alass-lin
 	&& chmod +x /usr/local/bin/alass-cli
 
 ENV ALASS_PATH=/usr/local/bin/alass-cli
+
+COPY ./workspace-scripts/devcontainer-entrypoint.sh /usr/local/bin/devcontainer-entrypoint.sh
+RUN chmod +x /usr/local/bin/devcontainer-entrypoint.sh

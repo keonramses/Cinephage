@@ -15,8 +15,3 @@ npm install
 if [ ! -f "${HOME}/.cache/camoufox/version.json" ]; then
   npx --yes camoufox fetch
 fi
-
-# Ensure Camoufox binary is executable (required in some container filesystems).
-if [ -f "${HOME}/.cache/camoufox/camoufox-bin" ]; then
-  chmod +x "${HOME}/.cache/camoufox/camoufox-bin"
-fi
