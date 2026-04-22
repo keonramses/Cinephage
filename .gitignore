@@ -62,6 +62,7 @@ AGENTS.md
 Inspiration/
 
 # Additional IDE/Editor files
+.vscode/
 .idea/
 *.swp
 *.swo
