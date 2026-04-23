@@ -16,6 +16,7 @@ export interface DiscoverParams {
 	minDate: string | null;
 	maxDate: string | null;
 	minRating: string | null;
+	certification: string | null;
 	excludeInLibrary: boolean;
 }
 
@@ -36,6 +37,7 @@ export function parseDiscoverParams(searchParams: URLSearchParams): DiscoverPara
 		minDate: searchParams.get('primary_release_date.gte') || null,
 		maxDate: searchParams.get('primary_release_date.lte') || null,
 		minRating: searchParams.get('vote_average.gte') || null,
+		certification: searchParams.get('certification') || null,
 		excludeInLibrary: searchParams.get('exclude_in_library') === 'true'
 	};
 }
@@ -54,6 +56,7 @@ export function isDefaultView(searchParams: URLSearchParams, params: DiscoverPar
 		!searchParams.has('primary_release_date.gte') &&
 		!searchParams.has('primary_release_date.lte') &&
 		!searchParams.has('vote_average.gte') &&
+		!searchParams.has('certification') &&
 		(!searchParams.has('page') || searchParams.get('page') === '1') &&
 		params.sortBy === 'popularity.desc'
 	);

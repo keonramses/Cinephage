@@ -394,6 +394,8 @@
 	"discover_filterBadgeTvShows": "Serien",
 	"discover_filter_mediaType": "Medientyp",
 	"discover_filter_minRating": "Min. Bewertung",
+	"discover_filter_contentRating": "Altersfreigabe",
+	"discover_certificationTvNote": "Die Altersfreigabe-Filterung gilt nur für Filme.",
 	"discover_filter_originalLanguage": "Originalsprache",
 	"discover_filter_releaseYear": "Erscheinungsjahr",
 	"discover_filter_sortBy": "Sortieren nach",

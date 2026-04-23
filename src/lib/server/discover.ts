@@ -43,6 +43,7 @@ export interface DiscoverParams {
 	minDate: string | null;
 	maxDate: string | null;
 	minRating: string | null;
+	certification: string | null;
 }
 
 export async function getDiscoverResults(params: DiscoverParams) {
@@ -57,7 +58,8 @@ export async function getDiscoverResults(params: DiscoverParams) {
 		withOriginalLanguage,
 		minDate,
 		maxDate,
-		minRating
+		minRating,
+		certification
 	} = params;
 
 	const fetchOptions = (endpoint: string, p: string = page) => {
@@ -105,6 +107,11 @@ export async function getDiscoverResults(params: DiscoverParams) {
 			queryParams.set('vote_count.gte', String(SEARCH.MIN_VOTE_COUNT));
 		}
 
+		if (certification && endpoint.includes('movie')) {
+			queryParams.set('certification', certification);
+			queryParams.set('certification_country', 'US');
+		}
+
 		return `${endpoint}?${queryParams.toString()}`;
 	};
 
@@ -122,14 +129,18 @@ export async function getDiscoverResults(params: DiscoverParams) {
 		results = data.results;
 		totalPages = data.total_pages;
 		totalResults = data.total_results;
-	} else if (type === 'movie') {
-		const data = (await fetchMovies()) as PaginatedResponse<Movie>;
-		results = data.results.map((m) => ({ ...m, media_type: 'movie' }));
-		totalPages = data.total_pages;
-		totalResults = data.total_results;
+	} else if (type === 'tv' && certification) {
+		results = [];
+		totalPages = 0;
+		totalResults = 0;
 	} else if (type === 'tv') {
 		const data = (await fetchTV()) as PaginatedResponse<TVShow>;
 		results = data.results.map((t) => ({ ...t, media_type: 'tv' }));
+		totalPages = data.total_pages;
+		totalResults = data.total_results;
+	} else if (type === 'movie' || certification) {
+		const data = (await fetchMovies()) as PaginatedResponse<Movie>;
+		results = data.results.map((m) => ({ ...m, media_type: 'movie' }));
 		totalPages = data.total_pages;
 		totalResults = data.total_results;
 	} else {

@@ -1,0 +1,13 @@
+{
+	"name": "Cinephage",
+	"dockerComposeFile": "docker-compose.yml",
+	"service": "cinephage",
+	"runServices": ["cinephage"],
+	"overrideCommand": false,
+	"workspaceFolder": "/workspace",
+	"forwardPorts": [3000, 5173],
+	"remoteUser": "node",
+	"updateRemoteUserUID": true,
+	"postCreateCommand": ".devcontainer/workspace-scripts/postCreate.sh",
+	"initializeCommand": ".devcontainer/workspace-scripts/initialize.sh"
+}

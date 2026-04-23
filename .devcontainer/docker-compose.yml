@@ -1,0 +1,62 @@
+services:
+  cinephage:
+    build: .
+    image: cinephage:devcontainer
+    entrypoint: /usr/local/bin/devcontainer-entrypoint.sh
+    command: sleep infinity
+    restart: 'no'
+    working_dir: /workspace
+    volumes:
+      - ..:/workspace:cached
+      - ./media:/media
+      - ./downloads:/downloads
+    ports:
+      - '3000:3000'
+      - '5173:5173'
+
+  transmission:
+    image: linuxserver/transmission:4.1.1
+    container_name: transmission
+    restart: unless-stopped
+    profiles:
+      - download-client
+    volumes:
+      - ./config/transmission:/config
+      - ./downloads:/downloads
+    environment:
+      - PUID=${PUID:-1000}
+      - PGID=${PGID:-1000}
+    ports:
+      - '9091:9091'
+
+  qbittorrent:
+    image: linuxserver/qbittorrent:latest
+    container_name: qbittorrent
+    restart: unless-stopped
+    profiles:
+      - download-client
+    environment:
+      - PUID=${PUID:-1000}
+      - PGID=${PGID:-1000}
+      - WEBUI_PORT=8080
+    volumes:
+      - ./config/qbittorrent:/config
+      - ./downloads:/downloads
+    ports:
+      - '8081:8080'
+
+  sabnzbd:
+    image: linuxserver/sabnzbd:latest
+    container_name: sabnzbd
+    restart: unless-stopped
+    profiles:
+      - usenet-client
+    environment:
+      - PUID=${PUID:-1000}
+      - PGID=${PGID:-1000}
+    volumes:
+      - ./config/sabnzbd:/config
+      - ./downloads:/downloads
+      - ./downloads/incomplete:/incomplete-downloads
+    ports:
+      - '8080:8080'

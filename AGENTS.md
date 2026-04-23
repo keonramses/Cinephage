@@ -2,13 +2,22 @@
 
 Guidelines for agentic coding assistants working in the Cinephage codebase.
 
+## Prerequisites
+
+- **Node.js 22+** (CI uses 22, devcontainer uses 24)
+- **npm** (package-lock.json present — use `npm ci`)
+- Optional: **ffmpeg/ffprobe** for media info extraction
+
 ## Build/Lint/Test Commands
 
 ```bash
 npm run dev              # Start dev server
-npm run build            # Production build
-npm start                # Run production server
+npm run dev:host         # Start dev server accessible on LAN (devcontainer)
+npm run build            # Production build (sets NODE_OPTIONS=--max-old-space-size=8192)
+npm start                # Run production server (node server.js)
+npm run preview          # Preview production build
 npm run check            # TypeScript + Svelte type checking
+npm run check:watch      # Type checking in watch mode
 npm run lint             # ESLint + Prettier validation
 npm run lint:fix         # Auto-fix lint issues
 npm run format           # Auto-format code with Prettier
@@ -17,6 +26,10 @@ npm run test:unit        # Run tests in watch mode
 npm run test:coverage    # Run tests with coverage report
 npm run test:live        # Run live network tests (hits real APIs)
 npm run deps:audit       # Dependency audit (unused/unlisted packages)
+
+# Database utilities
+npm run db:reset         # Delete SQLite database (recreated on next startup)
+npm run db:info          # Show current schema version
 
 # Run a single test file
 npx vitest run path/to/test.ts
@@ -28,17 +41,28 @@ npx vitest run -t "test name pattern"
 npx vitest run src/lib/server/monitoring
 ```
 
+**CI Pipeline:** Four parallel jobs — `lint`, `typecheck`, `test:coverage`, `build`. The `typecheck` job runs `rm -rf src/lib/paraglide && npm run build` first because `npm run check` requires generated Paraglide files.
+
 ## Code Style
 
 ### Formatting (Prettier)
 
-- **Tabs** for indentation (not spaces)
+Config lives in `.prettierrc`:
+- **Tabs** for indentation
 - **Single quotes** for strings
 - **No trailing commas**
 - **Print width**: 100 characters
-- Plugins: `prettier-plugin-svelte`, `prettier-plugin-tailwindcss`
+- **Plugins**: `prettier-plugin-svelte`, `prettier-plugin-tailwindcss`
+- **Tailwind stylesheet**: `src/routes/layout.css`
 
 Run `npm run format` before committing.
+
+### ESLint Specifics
+
+- `no-console` is **error** in source files (including `.svelte`)
+- `@typescript-eslint/no-explicit-any` is **off** in test files
+- Svelte-specific overrides: `svelte/no-navigation-without-resolve`, `svelte/prefer-writable-derived`, and `svelte/valid-prop-names-in-kit-pages` are disabled
+- Underscore-prefixed unused variables are allowed (`^_` pattern)
 
 ### Imports
 
@@ -72,14 +96,14 @@ export type NewMovieRecord = typeof movies.$inferInsert;
 
 ### Naming Conventions
 
-| Type                     | Convention           | Example                                         |
-| ------------------------ | -------------------- | ----------------------------------------------- |
-| Variables/functions      | camelCase            | `movieCount`, `getMovieById`                    |
-| Classes/interfaces/types | PascalCase           | `MovieUpgradeableSpecification`, `MovieContext` |
-| Constants                | SCREAMING_SNAKE_CASE | `CURRENT_SCHEMA_VERSION`, `SECURITY_HEADERS`    |
-| Files                    | kebab-case           | `upgradeable-specification.ts`                  |
-| Svelte components        | PascalCase           | `IndexerModal.svelte`                           |
-| Database tables          | camelCase (plural)   | `movies`, `episodeFiles`                        |
+| Type | Convention | Example |
+|------|-----------|---------|
+| Variables/functions | camelCase | `movieCount`, `getMovieById` |
+| Classes/interfaces/types | PascalCase | `MovieUpgradeableSpecification`, `MovieContext` |
+| Constants | SCREAMING_SNAKE_CASE | `CURRENT_SCHEMA_VERSION`, `SECURITY_HEADERS` |
+| Files | kebab-case | `upgradeable-specification.ts` |
+| Svelte components | PascalCase | `IndexerModal.svelte` |
+| Database tables | camelCase (plural) | `movies`, `episodeFiles` |
 
 ## Error Handling
 
@@ -237,6 +261,10 @@ serviceManager.register(getDownloadMonitor());
 serviceManager.register(getMonitoringScheduler());
 ```
 
+## Dev Server Behavior
+
+In dev mode, Vite lazily loads modules on first request. A custom `eagerInitPlugin` in `vite.config.ts` automatically pings `/health` when the dev server starts, forcing `hooks.server.ts` to load and starting all background services immediately. If this fails, services start on the first real request.
+
 ## Database
 
 ### Schema Location
@@ -268,14 +296,21 @@ await db.insert(movies).values({ title: 'Test', tmdbId: 123 });
 await db.update(movies).set({ monitored: true }).where(eq(movies.id, id));
 ```
 
+### Native Module Externalization
+
+`better-sqlite3` is externalized from Vite's SSR bundling (`vite.config.ts` `ssr.external`). Do not attempt to bundle it.
+
 ## Testing
 
 ### Test Conventions
 
 - **Naming**: Always `.test.ts`, never `.spec.ts`
-- **DB tests**: Use `createTestDb()` / `destroyTestDb()` from `$test/db-helper` for per-suite isolation. Never mock `$lib/server/db` when a real in-memory DB works.
+- **Environment**: Node (not jsdom/browser)
+- **Setup file**: `src/test/setup.ts` — mocks `$env/dynamic/private` and loads `.env`
+- **DB tests**: Use `createTestDb()` / `destroyTestDb()` from `src/test/db-helper` for per-suite isolation. Never mock `$lib/server/db` when a real in-memory DB works.
 - **Avoid `as any`**: Use typed fixture functions for test data. If testing private methods, use `@ts-expect-error` with a comment.
-- **Coverage**: Run `npm run test:coverage` before committing. Thresholds are enforced in CI.
+- **Coverage**: Run `npm run test:coverage` before committing. Thresholds are enforced in CI:
+  - statements: 21%, branches: 15%, functions: 22%, lines: 21%
 - **Live tests**: Tests hitting real APIs must use `describe.skipIf()` gated on `LIVE_TESTS=true`. Run with `npm run test:live`.
 - **No dead tests**: Never commit placeholder or skipped tests.
 - **No `__tests__/` directories**: Tests are colocated with source files.
@@ -337,6 +372,10 @@ src/lib/server/monitoring/specifications/
 └── UpgradeableSpecification.test.ts
 ```
 
+## Internationalization (Paraglide)
+
+The project uses `@inlang/paraglide-js` for i18n. Generated files live in `src/lib/paraglide/` and are created during build. **Type checking requires these generated files** — if you get type errors about missing paraglide modules, run `npm run build` first.
+
 ## Commit Convention
 
 Use conventional commits:
@@ -353,12 +392,43 @@ Example: `feat: add subtitle auto-download scheduler`
 
 ## Key Files
 
-| File                               | Purpose                                                  |
-| ---------------------------------- | -------------------------------------------------------- |
-| `src/hooks.server.ts`              | Server startup, service initialization, request handling |
-| `src/lib/server/db/schema.ts`      | Database schema definitions                              |
-| `src/lib/server/db/schema-sync.ts` | Schema migrations                                        |
-| `src/lib/validation/schemas.ts`    | Zod validation schemas                                   |
-| `src/lib/errors/index.ts`          | Error classes (AppError hierarchy)                       |
-| `src/lib/logging/index.ts`         | Logger utility                                           |
-| `CLAUDE.md`                        | Architecture overview and common patterns                |
+| File | Purpose |
+|------|---------|
+| `src/hooks.server.ts` | Server startup, service initialization, request handling |
+| `src/lib/server/db/schema.ts` | Database schema definitions |
+| `src/lib/server/db/schema-sync.ts` | Schema migrations |
+| `src/lib/validation/schemas.ts` | Zod validation schemas |
+| `src/lib/errors/index.ts` | Error classes (AppError hierarchy) |
+| `src/lib/logging/index.ts` | Logger utility |
+| `src/test/db-helper.ts` | Test database utilities |
+| `src/test/setup.ts` | Vitest setup (env mocking) |
+| `vite.config.ts` | Vite config with eager init plugin, coverage thresholds |
+| `svelte.config.js` | SvelteKit config with CSRF trusted origins |
+| `server.js` | Custom production entrypoint (wraps adapter-node, loads dotenv) |
+| `.env.example` | All environment variables documented |
+
+## Domain-Specific Guides
+
+Several subdirectories contain their own `AGENTS.md` with deeper architectural context:
+
+| Domain | Path |
+|--------|------|
+| Indexers | `src/lib/server/indexers/AGENTS.md` |
+| Live TV / IPTV | `src/lib/server/livetv/AGENTS.md` |
+| Monitoring / Specifications | `src/lib/server/monitoring/AGENTS.md` |
+| Streaming / Usenet | `src/lib/server/streaming/AGENTS.md` |
+| Subtitles | `src/lib/server/subtitles/AGENTS.md` |
+| Library | `src/lib/server/library/AGENTS.md` |
+| Download Clients | `src/lib/server/downloadClients/AGENTS.md` |
+
+## Devcontainer
+
+A devcontainer is available (`.devcontainer/`). Optional sidecars for integration testing:
+
+```bash
+cd .devcontainer
+docker compose --profile download-client up -d transmission qbittorrent
+docker compose --profile usenet-client up -d sabnzbd
+```
+
+Sidecar ports: Transmission `9091`, qBittorrent `8081`, SABnzbd `8080`.

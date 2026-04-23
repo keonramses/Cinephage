@@ -394,6 +394,8 @@
 	"discover_filterBadgeTvShows": "TV Shows",
 	"discover_filter_mediaType": "Media Type",
 	"discover_filter_minRating": "Min Rating",
+	"discover_filter_contentRating": "Content Rating",
+	"discover_certificationTvNote": "Content rating filtering only applies to movies.",
 	"discover_filter_originalLanguage": "Original Language",
 	"discover_filter_releaseYear": "Release Year",
 	"discover_filter_sortBy": "Sort By",

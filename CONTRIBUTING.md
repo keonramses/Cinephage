@@ -8,9 +8,9 @@ Want to contribute? Here's how to get set up.
 
 - Node.js 20 or higher
 - npm 10 or higher
-- A running instance of qBittorrent (for download client testing)
+- Optional: A running download client for integration testing (qBittorrent, Transmission, etc.)
 
-### Getting Started
+### Getting Started (Bare Metal)
 
 1. Clone the repository:
 
@@ -35,6 +35,43 @@ Want to contribute? Here's how to get set up.
    ```bash
    npm run dev
    ```
+
+### Getting Started (Devcontainer)
+
+1. a) VS Code: Open the repository in VS Code and choose **Reopen in Container**.  
+   b) IntelliJ IDEA: See the [official documentation](https://www.jetbrains.com/help/idea/dev-containers-starting-page.html) on how to use devcontainers.
+2. The container will copy `.env.example` to `.env` (if missing), generate a `BETTER_AUTH_SECRET`, and install dependencies.
+3. Start the app from the container shell:
+   ```bash
+   npm run dev:host
+   ```
+
+Notes:
+
+- The devcontainer runs as the `node` remote user, and may remap that user UID/GID to your host user when
+  `updateRemoteUserUID` is enabled.
+- The `.devcontainer/.env` `PUID`/`PGID` values are used by optional sidecars (`transmission`, `qbittorrent`,
+  `sabnzbd`), and can be changed in that file.
+- On startup, the devcontainer entrypoint repairs `/workspace` ownership to `node` only when an ownership mismatch is
+  detected.
+- The devcontainer uses `node:24-trixie-slim` to stay aligned with the project runtime baseline.
+- Optional sidecars are available and not started by default:
+  - `download-client` profile: Transmission + qBittorrent
+  - `usenet-client` profile: SABnzbd
+
+Start optional sidecars from host:
+
+```bash
+cd .devcontainer
+docker compose --profile download-client up -d transmission qbittorrent
+docker compose --profile usenet-client up -d sabnzbd
+```
+
+Default sidecar ports:
+
+- Transmission Web UI: `9091`
+- qBittorrent Web UI: `8081`
+- SABnzbd Web UI: `8080`
 
 ## Development Workflow
 
@@ -92,6 +129,39 @@ We follow conventional commit messages:
 - `chore:` Build process or auxiliary tool changes
 
 Example: `feat: add subtitle auto-download scheduler`
+
+## Releases
+
+Releases are automated. When you merge `dev` into `main`, a workflow will:
+
+1. Analyze commits since the last release
+2. Determine version bump (patch/minor/major) from commit types
+3. Update `package.json`, `package-lock.json`, and `CHANGELOG.md`
+4. Create a git tag (e.g., `v0.3.0`)
+5. Trigger the release pipeline (Docker build, GitHub Release, Discord)
+
+### Commit Types and Version Bumps
+
+| Commit Type                              | Version Bump  | Example                       |
+| ---------------------------------------- | ------------- | ----------------------------- |
+| `fix:`                                   | Patch (0.0.x) | `fix: correct login redirect` |
+| `feat:`                                  | Minor (0.x.0) | `feat: add dark mode`         |
+| `feat!:` or `BREAKING CHANGE:`           | Major (x.0.0) | `feat!: redesign API`         |
+| `docs:`, `test:`, `style:`, `chore(ci):` | No release    | `docs: update README`         |
+
+### Manual Override
+
+To force a specific version, include `Release-As: x.y.z` in any commit body:
+
+```bash
+git commit -m "chore: prepare release" -m "Release-As: 1.0.0"
+```
+
+### Dry Run
+
+You can test the release process without creating an actual release using the
+[Auto Release workflow](https://github.com/MoldyTaint/Cinephage/actions/workflows/auto-release.yml)
+with `dry_run` enabled.
 
 ## Detailed Documentation
 

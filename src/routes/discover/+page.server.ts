@@ -2,6 +2,7 @@ import { tmdb } from '$lib/server/tmdb';
 import { getDiscoverResults } from '$lib/server/discover';
 import { enrichWithLibraryStatus, filterInLibrary } from '$lib/server/library/status';
 import type { WatchProvider } from '$lib/types/tmdb';
+import type { TmdbCertificationsResponse } from '$lib/server/tmdb';
 import { logger } from '$lib/logging';
 import { parseDiscoverParams, isDefaultView as checkDefaultView } from '$lib/utils/discoverParams';
 
@@ -22,6 +23,7 @@ export const load: PageServerLoad = async ({ url }) => {
 		minDate,
 		maxDate,
 		minRating,
+		certification,
 		excludeInLibrary
 	} = params;
 	const isDefaultViewCheck = checkDefaultView(url.searchParams, params);
@@ -34,6 +36,7 @@ export const load: PageServerLoad = async ({ url }) => {
 			tmdbConfigured: false,
 			providers: [],
 			genres: [],
+			certifications: [],
 			filters: {
 				type,
 				sort_by: sortBy,
@@ -42,19 +45,20 @@ export const load: PageServerLoad = async ({ url }) => {
 				with_watch_providers: withWatchProviders,
 				with_genres: withGenres,
 				with_original_language: withOriginalLanguage,
+				certification,
 				exclude_in_library: excludeInLibrary
 			}
 		};
 	}
 
 	try {
-		// Always fetch providers and genres
-		const [providersData, movieGenresData, tvGenresData] = await Promise.all([
+		const [providersData, movieGenresData, tvGenresData, movieCertifications] = await Promise.all([
 			tmdb.fetch(`/watch/providers/movie?watch_region=${watchRegion}`) as Promise<{
 				results: WatchProvider[];
 			} | null>,
 			tmdb.fetch('/genre/movie/list') as Promise<{ genres: { id: number; name: string }[] } | null>,
-			tmdb.fetch('/genre/tv/list') as Promise<{ genres: { id: number; name: string }[] } | null>
+			tmdb.fetch('/genre/tv/list') as Promise<{ genres: { id: number; name: string }[] } | null>,
+			tmdb.getCertifications('movie') as Promise<TmdbCertificationsResponse>
 		]);
 
 		// Handle null responses (shouldn't happen since we checked tmdbConfigured, but be safe)
@@ -64,6 +68,7 @@ export const load: PageServerLoad = async ({ url }) => {
 				tmdbConfigured: false,
 				providers: [],
 				genres: [],
+				certifications: [],
 				filters: {
 					type,
 					sort_by: sortBy,
@@ -72,6 +77,7 @@ export const load: PageServerLoad = async ({ url }) => {
 					with_watch_providers: withWatchProviders,
 					with_genres: withGenres,
 					with_original_language: withOriginalLanguage,
+					certification,
 					exclude_in_library: excludeInLibrary
 				}
 			};
@@ -85,6 +91,12 @@ export const load: PageServerLoad = async ({ url }) => {
 		tvGenresData.genres.forEach((g) => allGenres.set(g.id, g));
 		const genres = Array.from(allGenres.values()).sort((a, b) => a.name.localeCompare(b.name));
 
+		const usCertifications = (movieCertifications.certifications['US'] ?? []).map((c) => ({
+			certification: c.certification,
+			meaning: c.meaning,
+			order: c.order
+		}));
+
 		// Type for paginated TMDB results
 		interface TmdbPaginatedResult {
 			results: Array<{ id: number } & Record<string, unknown>>;
@@ -93,7 +105,7 @@ export const load: PageServerLoad = async ({ url }) => {
 			total_results: number;
 		}
 
-		if (trending === 'day' || trending === 'week') {
+		if ((trending === 'day' || trending === 'week') && !certification) {
 			const trendingResults = (await tmdb.fetch(
 				`/trending/all/${trending}?page=${page}`
 			)) as TmdbPaginatedResult;
@@ -112,6 +124,7 @@ export const load: PageServerLoad = async ({ url }) => {
 				},
 				providers,
 				genres,
+				certifications: usCertifications,
 				filters: {
 					type,
 					sort_by: sortBy,
@@ -119,12 +132,13 @@ export const load: PageServerLoad = async ({ url }) => {
 					with_watch_providers: withWatchProviders,
 					with_genres: withGenres,
 					with_original_language: withOriginalLanguage,
+					certification,
 					exclude_in_library: excludeInLibrary
 				}
 			};
 		}
 
-		if (topRated === 'true') {
+		if (topRated === 'true' && !certification) {
 			let endpoint: string;
 			if (type === 'movie') {
 				endpoint = `/movie/top_rated?page=${page}`;
@@ -164,6 +178,7 @@ export const load: PageServerLoad = async ({ url }) => {
 					},
 					providers,
 					genres,
+					certifications: usCertifications,
 					filters: {
 						type,
 						sort_by: sortBy,
@@ -171,6 +186,7 @@ export const load: PageServerLoad = async ({ url }) => {
 						with_watch_providers: withWatchProviders,
 						with_genres: withGenres,
 						with_original_language: withOriginalLanguage,
+						certification,
 						exclude_in_library: excludeInLibrary
 					}
 				};
@@ -195,6 +211,7 @@ export const load: PageServerLoad = async ({ url }) => {
 				},
 				providers,
 				genres,
+				certifications: usCertifications,
 				filters: {
 					type,
 					sort_by: sortBy,
@@ -202,6 +219,7 @@ export const load: PageServerLoad = async ({ url }) => {
 					with_watch_providers: withWatchProviders,
 					with_genres: withGenres,
 					with_original_language: withOriginalLanguage,
+					certification,
 					exclude_in_library: excludeInLibrary
 				}
 			};
@@ -245,6 +263,7 @@ export const load: PageServerLoad = async ({ url }) => {
 				},
 				providers,
 				genres,
+				certifications: usCertifications,
 				filters: {
 					type,
 					sort_by: sortBy,
@@ -252,6 +271,7 @@ export const load: PageServerLoad = async ({ url }) => {
 					with_watch_providers: withWatchProviders,
 					with_genres: withGenres,
 					with_original_language: withOriginalLanguage,
+					certification,
 					exclude_in_library: excludeInLibrary
 				}
 			};
@@ -267,7 +287,8 @@ export const load: PageServerLoad = async ({ url }) => {
 				withOriginalLanguage,
 				minDate,
 				maxDate,
-				minRating
+				minRating,
+				certification
 			});
 
 			// Enrich results with library status
@@ -282,6 +303,7 @@ export const load: PageServerLoad = async ({ url }) => {
 				pagination,
 				providers,
 				genres,
+				certifications: usCertifications,
 				filters: {
 					type,
 					sort_by: sortBy,
@@ -289,6 +311,7 @@ export const load: PageServerLoad = async ({ url }) => {
 					with_watch_providers: withWatchProviders,
 					with_genres: withGenres,
 					with_original_language: withOriginalLanguage,
+					certification,
 					exclude_in_library: excludeInLibrary
 				}
 			};
@@ -297,10 +320,11 @@ export const load: PageServerLoad = async ({ url }) => {
 		logger.error({ err: e, ...{ type, sortBy } }, 'Discover load error');
 		return {
 			viewType: 'error',
-			tmdbConfigured: true, // API key exists but request failed
+			tmdbConfigured: true,
 			error: 'Failed to load content',
 			providers: [],
 			genres: [],
+			certifications: [],
 			filters: {
 				type,
 				sort_by: sortBy,
@@ -309,6 +333,7 @@ export const load: PageServerLoad = async ({ url }) => {
 				with_watch_providers: withWatchProviders,
 				with_genres: withGenres,
 				with_original_language: withOriginalLanguage,
+				certification,
 				exclude_in_library: excludeInLibrary
 			}
 		};

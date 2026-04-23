@@ -22,6 +22,10 @@ interface TransmissionSessionInfo {
 	version?: string;
 	'rpc-version'?: number;
 	'download-dir'?: string;
+	'idle-seeding-limit-enabled': boolean;
+	'idle-seeding-limit': number;
+	'seed-ratio-limited': boolean;
+	'seed-ratio-limit': number;
 }
 
 interface TransmissionTorrent {
@@ -30,6 +34,7 @@ interface TransmissionTorrent {
 	hashString: string;
 	percentDone: number;
 	status: number;
+	isFinished: boolean;
 	totalSize: number;
 	rateDownload: number;
 	rateUpload: number;
@@ -42,6 +47,7 @@ interface TransmissionTorrent {
 	uploadRatio?: number;
 	seedRatioLimit?: number;
 	seedIdleLimit?: number;
+	seedIdleMode?: TransmissionIdleMode;
 	error?: number;
 	errorString?: string;
 }
@@ -64,12 +70,31 @@ interface TransmissionTorrentAddResponse {
 type TransmissionTorrentStatus = DownloadInfo['status'];
 type TransmissionId = number | string;
 
+enum TransmissionRatioMode {
+	/* follow the global settings */
+	GLOBAL = 0,
+	/* override the global settings, seeding until a certain ratio */
+	SINGLE = 1,
+	/* override the global settings, seeding regardless of ratio */
+	UNLIMITED = 2
+}
+
+enum TransmissionIdleMode {
+	/* follow the global settings */
+	GLOBAL = 0,
+	/* override the global settings, seeding until a idle time */
+	SINGLE = 1,
+	/* override the global settings, seeding regardless of activity */
+	UNLIMITED = 2
+}
+
 const TORRENT_FIELDS = [
 	'id',
 	'name',
 	'hashString',
 	'percentDone',
 	'status',
+	'isFinished',
 	'totalSize',
 	'rateDownload',
 	'rateUpload',
@@ -82,8 +107,19 @@ const TORRENT_FIELDS = [
 	'uploadRatio',
 	'seedRatioLimit',
 	'seedIdleLimit',
+	'seedIdleMode',
 	'error',
 	'errorString'
+];
+
+const SESSION_FIELDS = [
+	'version',
+	'rpc-version',
+	'download-dir',
+	'idle-seeding-limit-enabled',
+	'idle-seeding-limit',
+	'seed-ratio-limited',
+	'seed-ratio-limit'
 ];
 
 function mapTransmissionStatus(
@@ -128,8 +164,30 @@ export class TransmissionClient implements IDownloadClient {
 	private config: DownloadClientConfig;
 	private sessionId: string | null = null;
 
+	// Cache for session info (refresh every 5 minutes)
+	private sessionInfoCache: { prefs: TransmissionSessionInfo; expiry: number } | null = null;
+	private readonly SESSION_INFO_CACHE_TTL = 5 * 60 * 1000; // 5 minutes
+
 	constructor(config: DownloadClientConfig) {
 		this.config = config;
+	}
+
+	/**
+	 * Get session info with caching
+	 */
+	private async getSessionInfo(forceUpdate: boolean = false): Promise<TransmissionSessionInfo> {
+		if (!forceUpdate && this.sessionInfoCache && Date.now() < this.sessionInfoCache.expiry) {
+			return this.sessionInfoCache.prefs;
+		}
+
+		const prefs = await this.rpcRequest<TransmissionSessionInfo>('session-get', {
+			fields: SESSION_FIELDS
+		});
+		this.sessionInfoCache = {
+			prefs,
+			expiry: Date.now() + this.SESSION_INFO_CACHE_TTL
+		};
+		return prefs;
 	}
 
 	private get rpcUrl(): string {
@@ -203,11 +261,22 @@ export class TransmissionClient implements IDownloadClient {
 			completedOn: normalizeTimestamp(torrent.doneDate),
 			seedingTime: torrent.secondsSeeding,
 			ratioLimit: torrent.seedRatioLimit,
+			// Transmission doesn't support seeding time limits, only idle time limits.
+			// We map seedIdleLimit here for informational purposes, but it's not a true seeding time limit.
 			seedingTimeLimit: torrent.seedIdleLimit,
 			canMoveFiles: status !== 'downloading' && status !== 'seeding' && status !== 'queued',
-			canBeRemoved: status !== 'downloading',
+			canBeRemoved:
+				status !== 'downloading' && (status !== 'seeding' || this.hasReachedSeedLimit(torrent)),
 			errorMessage
 		};
+	}
+
+	private hasReachedSeedLimit(torrent: TransmissionTorrent): boolean {
+		// isFinished is set by Transmission when seeding limits are reached.
+		// This includes both ratio limits and idle time limits.
+		// Transmission handles idle time tracking internally (time since last activity),
+		// so we rely on isFinished rather than trying to compute it ourselves.
+		return torrent.isFinished;
 	}
 
 	private async rpcRequest<T>(method: string, args: Record<string, unknown> = {}): Promise<T> {
@@ -273,7 +342,7 @@ export class TransmissionClient implements IDownloadClient {
 	async test(): Promise<ConnectionTestResult> {
 		try {
 			const [session, torrents] = await Promise.all([
-				this.rpcRequest<TransmissionSessionInfo>('session-get'),
+				this.getSessionInfo(true),
 				this.rpcRequest<{ torrents: Array<{ labels?: string[] }> }>('torrent-get', {
 					fields: ['labels'],
 					ids: 'recently-active'
@@ -348,24 +417,6 @@ export class TransmissionClient implements IDownloadClient {
 			args.bandwidthPriority = 1;
 		}
 
-		if (typeof options.seedRatioLimit === 'number') {
-			if (options.seedRatioLimit < 0) {
-				args.seedRatioMode = 2;
-			} else {
-				args.seedRatioMode = 1;
-				args.seedRatioLimit = options.seedRatioLimit;
-			}
-		}
-
-		if (typeof options.seedTimeLimit === 'number') {
-			if (options.seedTimeLimit < 0) {
-				args.seedIdleMode = 2;
-			} else {
-				args.seedIdleMode = 1;
-				args.seedIdleLimit = Math.max(0, Math.round(options.seedTimeLimit));
-			}
-		}
-
 		if (selectedFileIndices.length > 0) {
 			args['files-wanted'] = selectedFileIndices;
 			const keepSet = new Set(selectedFileIndices);
@@ -395,7 +446,13 @@ export class TransmissionClient implements IDownloadClient {
 			throw new Error('Transmission did not return torrent add result');
 		}
 
-		return added.hashString || String(added.id);
+		const torrentId = added.hashString || String(added.id);
+		await this.setSeedingConfig(torrentId, {
+			ratioLimit: options.seedRatioLimit,
+			seedingTimeLimit: options.seedTimeLimit
+		});
+
+		return torrentId;
 	}
 
 	async getDownloads(category?: string): Promise<DownloadInfo[]> {
@@ -442,7 +499,7 @@ export class TransmissionClient implements IDownloadClient {
 	}
 
 	async getDefaultSavePath(): Promise<string> {
-		const session = await this.rpcRequest<TransmissionSessionInfo>('session-get');
+		const session = await this.getSessionInfo();
 		return session['download-dir'] || '';
 	}
 
@@ -490,18 +547,18 @@ export class TransmissionClient implements IDownloadClient {
 
 		if (typeof config.ratioLimit === 'number') {
 			if (config.ratioLimit < 0) {
-				args.seedRatioMode = 2;
+				args.seedRatioMode = TransmissionRatioMode.UNLIMITED;
 			} else {
-				args.seedRatioMode = 1;
+				args.seedRatioMode = TransmissionRatioMode.SINGLE;
 				args.seedRatioLimit = config.ratioLimit;
 			}
 		}
 
 		if (typeof config.seedingTimeLimit === 'number') {
 			if (config.seedingTimeLimit < 0) {
-				args.seedIdleMode = 2;
+				args.seedIdleMode = TransmissionIdleMode.UNLIMITED;
 			} else {
-				args.seedIdleMode = 1;
+				args.seedIdleMode = TransmissionIdleMode.SINGLE;
 				args.seedIdleLimit = Math.max(0, Math.round(config.seedingTimeLimit));
 			}
 		}

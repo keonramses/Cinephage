@@ -3,14 +3,14 @@ header = """
 """
 body = """
 {% if version %}\
-    ## {{ version | trim_start_matches(pat="v") }} ({{ date | date(format="%Y-%m-%d") }})
+    ## {{ version | trim_start_matches(pat="v") }} ({{ timestamp | date(format="%Y-%m-%d") }})
 {% else %}\
     ## Unreleased
 {% endif %}\
 {% for group, commits in commits | group_by(attribute="group") %}
     ### {{ group | striptags | trim | upper_first }}
     {% for commit in commits %}
-        - {{ commit.message | upper_first }} ([{{ commit.id | truncate(length=7, end="") }}](https://github.com/MoldyTaint/Cinephage/commit/{{ commit.id }}))\
+        - {{ commit.message | upper_first }} ([{{ commit.id | truncate(length=7, end="") }}](https://github.com/MoldyTaint/Cinephage/commit/{{ commit.id }})) — by {{ commit.author.name }}\
     {% endfor %}
 {% endfor %}\n
 """
@@ -31,7 +31,7 @@ commit_parsers = [
     { message = "^style", group = "<!-- 4 -->Styling" },
     { message = "^docs", group = "<!-- 5 -->Documentation" },
     { message = "^test", group = "<!-- 6 -->Testing" },
-    { message = "^chore\\(release\\)|^chore: bump version", skip = true },
+    { message = "^chore\\(release\\)|^chore: bump version|^chore: release v", skip = true },
     { message = "^chore", group = "<!-- 7 -->Miscellaneous" },
 ]
 protect_breaking_commits = false

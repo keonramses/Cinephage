@@ -16,6 +16,8 @@
 		minYear,
 		maxYear,
 		minRating,
+		certifications,
+		selectedCertification,
 		onTypeChange,
 		onSortChange,
 		onProviderToggle,
@@ -23,6 +25,7 @@
 		onLanguageChange,
 		onYearChange,
 		onRatingChange,
+		onCertificationChange,
 		onReset,
 		onApply
 	} = $props<{
@@ -37,6 +40,8 @@
 		minYear: string;
 		maxYear: string;
 		minRating: number;
+		certifications: { certification: string; meaning: string; order: number }[];
+		selectedCertification: string;
 		onTypeChange: (type: string) => void;
 		onSortChange: (sort: string) => void;
 		onProviderToggle: (id: number) => void;
@@ -44,6 +49,7 @@
 		onLanguageChange: (language: string) => void;
 		onYearChange: (min: string, max: string) => void;
 		onRatingChange: (rating: number) => void;
+		onCertificationChange: (cert: string) => void;
 		onReset: () => void;
 		onApply: () => void;
 	}>();
@@ -94,7 +100,6 @@
 			</button>
 		</div>
 
-		<!-- Content -->
 		<div class="custom-scrollbar flex-1 overflow-y-auto p-4">
 			<FilterPanel
 				{type}
@@ -107,6 +112,8 @@
 				{minYear}
 				{maxYear}
 				{minRating}
+				{certifications}
+				{selectedCertification}
 				{onTypeChange}
 				{onSortChange}
 				{onProviderToggle}
@@ -114,6 +121,7 @@
 				{onLanguageChange}
 				{onYearChange}
 				{onRatingChange}
+				{onCertificationChange}
 			/>
 		</div>
 

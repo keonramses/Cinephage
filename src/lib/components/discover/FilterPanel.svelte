@@ -14,13 +14,16 @@
 		minYear,
 		maxYear,
 		minRating,
+		certifications,
+		selectedCertification,
 		onTypeChange,
 		onSortChange,
 		onProviderToggle,
 		onGenreToggle,
 		onLanguageChange,
 		onYearChange,
-		onRatingChange
+		onRatingChange,
+		onCertificationChange
 	} = $props<{
 		type: string;
 		sortBy: string;
@@ -32,6 +35,8 @@
 		minYear: string;
 		maxYear: string;
 		minRating: number;
+		certifications: { certification: string; meaning: string; order: number }[];
+		selectedCertification: string;
 		onTypeChange: (type: string) => void;
 		onSortChange: (sort: string) => void;
 		onProviderToggle: (id: number) => void;
@@ -39,6 +44,7 @@
 		onLanguageChange: (language: string) => void;
 		onYearChange: (min: string, max: string) => void;
 		onRatingChange: (rating: number) => void;
+		onCertificationChange: (cert: string) => void;
 	}>();
 
 	// Common languages for filtering
@@ -173,6 +179,39 @@
 			<span>10</span>
 		</div>
 	</div>
+
+	<!-- Content Rating -->
+	{#if certifications.length > 0 && type !== 'tv'}
+		<div class="form-control">
+			<span class="label text-sm font-bold tracking-wide text-base-content/70 uppercase">
+				<span>{m.discover_filter_contentRating()}</span>
+				{#if selectedCertification}
+					<button
+						class="badge cursor-pointer badge-ghost badge-sm"
+						onclick={() => onCertificationChange('')}
+					>
+						&times;
+					</button>
+				{/if}
+			</span>
+			<div class="flex flex-wrap gap-2">
+				{#each certifications as cert (cert.certification)}
+					<button
+						class="btn btn-sm {selectedCertification === cert.certification
+							? 'btn-primary'
+							: 'border-base-300 btn-outline hover:btn-primary'}"
+						onclick={() =>
+							onCertificationChange(
+								selectedCertification === cert.certification ? '' : cert.certification
+							)}
+						title={cert.meaning}
+					>
+						{cert.certification}
+					</button>
+				{/each}
+			</div>
+		</div>
+	{/if}
 
 	<!-- Genres -->
 	<div class="form-control">

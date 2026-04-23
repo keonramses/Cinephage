@@ -187,6 +187,7 @@
 	let minYear = $derived(extractYear($page.url.searchParams.get('primary_release_date.gte')));
 	let maxYear = $derived(extractYear($page.url.searchParams.get('primary_release_date.lte')));
 	let minRating = $derived(Number($page.url.searchParams.get('vote_average.gte')) || 0);
+	let selectedCertification = $derived($page.url.searchParams.get('certification') || '');
 	let excludeInLibrary = $derived($page.url.searchParams.get('exclude_in_library') === 'true');
 
 	function updateFilter(key: string, value: string | null) {
@@ -233,6 +234,10 @@
 			current.add(genreId);
 		}
 		updateFilter('with_genres', Array.from(current).join(','));
+	}
+
+	function toggleCertification(cert: string) {
+		updateFilter('certification', cert || null);
 	}
 
 	function toggleExcludeInLibrary() {
@@ -405,7 +410,7 @@
 
 			<div class="flex flex-1 items-center justify-end gap-3">
 				<!-- Active Filters Summary -->
-				{#if selectedProviders.length > 0 || type !== 'all' || selectedGenres.length > 0 || selectedLanguage || minYear || maxYear || minRating > 0}
+				{#if selectedProviders.length > 0 || type !== 'all' || selectedGenres.length > 0 || selectedLanguage || minYear || maxYear || minRating > 0 || selectedCertification}
 					<div class="hidden items-center gap-2 md:flex">
 						{#if type !== 'all'}
 							<div class="badge badge-sm badge-primary">
@@ -420,6 +425,11 @@
 						{#if selectedLanguage}
 							<div class="badge badge-outline badge-sm">
 								{m.discover_filterBadgeLanguage()}
+							</div>
+						{/if}
+						{#if selectedCertification}
+							<div class="badge badge-outline badge-sm">
+								{selectedCertification}
 							</div>
 						{/if}
 						<button class="btn text-error btn-ghost btn-xs" onclick={resetFilters}
@@ -691,6 +701,8 @@
 		{minYear}
 		{maxYear}
 		{minRating}
+		certifications={data.certifications}
+		{selectedCertification}
 		providers={data.providers}
 		onTypeChange={(t) => updateFilter('type', t)}
 		onSortChange={(s) => updateFilter('sort_by', s)}
@@ -699,6 +711,7 @@
 		onLanguageChange={(lang) => updateFilter('with_original_language', lang || null)}
 		onYearChange={updateYear}
 		onRatingChange={(r) => updateFilter('vote_average.gte', String(r))}
+		onCertificationChange={toggleCertification}
 		onReset={resetFilters}
 		onApply={applyFilters}
 	/>

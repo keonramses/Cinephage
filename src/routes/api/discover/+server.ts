@@ -22,6 +22,7 @@ const discoverQuerySchema = z.object({
 	'primary_release_date.gte': z.string().nullable().default(null),
 	'primary_release_date.lte': z.string().nullable().default(null),
 	'vote_average.gte': z.string().nullable().default(null),
+	certification: z.string().nullable().default(null),
 	exclude_in_library: z.enum(['true', 'false']).optional()
 });
 
@@ -104,7 +105,8 @@ export const GET: RequestHandler = async ({ url }) => {
 				withOriginalLanguage: params.with_original_language,
 				minDate: params['primary_release_date.gte'],
 				maxDate: params['primary_release_date.lte'],
-				minRating: params['vote_average.gte']
+				minRating: params['vote_average.gte'],
+				certification: params.certification
 			});
 			results = discoverResult.results;
 			pagination = discoverResult.pagination;

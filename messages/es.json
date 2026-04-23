@@ -394,6 +394,8 @@
 	"discover_filterBadgeTvShows": "Series de TV",
 	"discover_filter_mediaType": "Tipo de medio",
 	"discover_filter_minRating": "Puntuación mín.",
+	"discover_filter_contentRating": "Clasificación",
+	"discover_certificationTvNote": "El filtrado por clasificación solo aplica a películas.",
 	"discover_filter_originalLanguage": "Idioma original",
 	"discover_filter_releaseYear": "Año de lanzamiento",
 	"discover_filter_sortBy": "Ordenar por",
