@@ -1,11 +1,8 @@
 import { logger } from '$lib/logging';
 import { getCinephageApiService } from '../cinephage-api/CinephageApiService';
-import { filterStreamsByLanguage } from '../language-utils';
-import { resolveHlsUrl } from '../utils/hls-rewrite.js';
 import type {
 	PlaybackMediaType,
 	PlaybackSession,
-	PlaybackSessionAttempt,
 	PlaybackSessionSubtitle,
 	StreamSource
 } from '../types';
@@ -20,26 +17,6 @@ interface PlaybackLaunchParams {
 	episode?: number;
 	forceRefresh?: boolean;
 	signal?: AbortSignal;
-}
-
-interface ProbeResult {
-	success: boolean;
-	entryUrl: string;
-	sourceType: StreamSource['type'];
-	error?: string;
-	statusCode?: number;
-}
-
-function firstNonCommentLine(content: string): string | null {
-	for (const line of content.split('\n')) {
-		const trimmed = line.trim();
-		if (!trimmed || trimmed.startsWith('#')) {
-			continue;
-		}
-		return trimmed;
-	}
-
-	return null;
 }
 
 function buildSourceHeaders(source: StreamSource): Record<string, string> {
@@ -64,183 +41,8 @@ function normalizeSubtitleList(source: StreamSource): PlaybackSessionSubtitle[] 
 	}));
 }
 
-function inferStatusCode(error: unknown): number | undefined {
-	if (!(error instanceof Error)) {
-		return undefined;
-	}
-
-	const match = error.message.match(/HTTP (\d+)/i);
-	if (!match) {
-		return undefined;
-	}
-
-	return parseInt(match[1], 10);
-}
-
-async function getPreferredLanguages(tmdbId: number, type: PlaybackMediaType): Promise<string[]> {
-	try {
-		if (type === 'movie') {
-			const { getPreferredLanguagesForMovie } = await import('../language-profile-helper');
-			return await getPreferredLanguagesForMovie(tmdbId);
-		}
-
-		const { getPreferredLanguagesForSeries } = await import('../language-profile-helper');
-		return await getPreferredLanguagesForSeries(tmdbId);
-	} catch {
-		return [];
-	}
-}
-
 function isAborted(signal?: AbortSignal): boolean {
 	return signal?.aborted === true;
-}
-
-async function fetchTextWithSignal(
-	url: string,
-	headers: Record<string, string>,
-	signal?: AbortSignal
-): Promise<Response> {
-	return await fetch(url, {
-		headers: {
-			Accept: '*/*',
-			...headers
-		},
-		signal
-	});
-}
-
-async function probeSource(source: StreamSource, signal?: AbortSignal): Promise<ProbeResult> {
-	const headers = buildSourceHeaders(source);
-
-	try {
-		if (isAborted(signal)) {
-			return {
-				success: false,
-				entryUrl: source.url,
-				sourceType: source.type,
-				error: 'Aborted'
-			};
-		}
-
-		const response = await fetchTextWithSignal(source.url, headers, signal);
-		if (!response.ok) {
-			return {
-				success: false,
-				entryUrl: source.url,
-				sourceType: source.type,
-				error: `HTTP ${response.status}`,
-				statusCode: response.status
-			};
-		}
-
-		if (source.type === 'mp4') {
-			return {
-				success: true,
-				entryUrl: response.url,
-				sourceType: 'mp4'
-			};
-		}
-
-		const playlist = await response.text();
-		if (!playlist.trimStart().startsWith('#EXTM3U')) {
-			return {
-				success: false,
-				entryUrl: source.url,
-				sourceType: source.type,
-				error: 'Source did not return an HLS playlist'
-			};
-		}
-
-		let mediaPlaylistUrl = response.url;
-		if (playlist.includes('#EXT-X-STREAM-INF')) {
-			const firstVariant = firstNonCommentLine(playlist);
-			if (!firstVariant) {
-				return {
-					success: false,
-					entryUrl: response.url,
-					sourceType: source.type,
-					error: 'Master playlist did not contain any variants'
-				};
-			}
-
-			mediaPlaylistUrl = resolveHlsUrl(
-				firstVariant,
-				new URL(response.url),
-				new URL(response.url).pathname.substring(
-					0,
-					new URL(response.url).pathname.lastIndexOf('/') + 1
-				)
-			);
-		}
-
-		if (isAborted(signal)) {
-			return {
-				success: false,
-				entryUrl: response.url,
-				sourceType: source.type,
-				error: 'Aborted'
-			};
-		}
-
-		const mediaResponse = await fetchTextWithSignal(mediaPlaylistUrl, headers, signal);
-		if (!mediaResponse.ok) {
-			return {
-				success: false,
-				entryUrl: response.url,
-				sourceType: source.type,
-				error: `HTTP ${mediaResponse.status}`,
-				statusCode: mediaResponse.status
-			};
-		}
-
-		const mediaPlaylist = await mediaResponse.text();
-		const firstAsset = firstNonCommentLine(mediaPlaylist);
-		if (!firstAsset) {
-			return {
-				success: false,
-				entryUrl: response.url,
-				sourceType: source.type,
-				error: 'Media playlist did not contain any segments'
-			};
-		}
-
-		const mediaBase = new URL(mediaResponse.url);
-		const mediaBasePath = mediaBase.pathname.substring(0, mediaBase.pathname.lastIndexOf('/') + 1);
-		const assetUrl = resolveHlsUrl(firstAsset, mediaBase, mediaBasePath);
-		if (isAborted(signal)) {
-			return {
-				success: false,
-				entryUrl: response.url,
-				sourceType: source.type,
-				error: 'Aborted'
-			};
-		}
-
-		const assetResponse = await fetchTextWithSignal(assetUrl, headers, signal);
-		if (!assetResponse.ok) {
-			return {
-				success: false,
-				entryUrl: response.url,
-				sourceType: source.type,
-				error: `HTTP ${assetResponse.status}`,
-				statusCode: assetResponse.status
-			};
-		}
-
-		return {
-			success: true,
-			entryUrl: response.url,
-			sourceType: source.type
-		};
-	} catch (error) {
-		return {
-			success: false,
-			entryUrl: source.url,
-			sourceType: source.type,
-			error: error instanceof Error ? error.message : String(error),
-			statusCode: inferStatusCode(error)
-		};
-	}
 }
 
 export class PlaybackSessionService {
@@ -273,11 +75,6 @@ export class PlaybackSessionService {
 			}
 		}
 
-		const preferredLanguages = await getPreferredLanguages(params.tmdbId, params.type);
-		if (isAborted(params.signal)) {
-			return { session: null, error: 'Aborted' };
-		}
-
 		const lookup = await this.api.getStreams({
 			tmdbId: params.tmdbId,
 			type: params.type,
@@ -297,79 +94,48 @@ export class PlaybackSessionService {
 			};
 		}
 
-		const { matching, fallback } = filterStreamsByLanguage(lookup.sources, preferredLanguages);
-		const orderedSources = [...matching, ...fallback];
-		const attempts: PlaybackSessionAttempt[] = [];
+		// The API now returns a single pre-validated stream.
+		// Skip probing and use it directly for instant playback startup.
+		const source = lookup.sources[0];
 
-		for (const source of orderedSources) {
-			if (isAborted(params.signal)) {
-				return { session: null, error: 'Aborted' };
-			}
+		const session = this.store.createSession({
+			mediaType: params.type,
+			tmdbId: params.tmdbId,
+			season: params.season,
+			episode: params.episode,
+			provider: source.provider,
+			entryUrl: source.url,
+			sourceType: source.type,
+			requestHeaders: buildSourceHeaders(source),
+			subtitles: normalizeSubtitleList(source),
+			attempts: []
+		});
 
-			const probe = await probeSource(source, params.signal);
-			if (probe.error === 'Aborted') {
-				return { session: null, error: 'Aborted' };
-			}
-
-			attempts.push({
+		logger.info(
+			{
+				sessionToken: session.token,
 				provider: source.provider,
-				url: source.url,
-				success: probe.success,
-				error: probe.error,
-				statusCode: probe.statusCode
-			});
-
-			if (!probe.success) {
-				continue;
-			}
-
-			const session = this.store.createSession({
-				mediaType: params.type,
+				sourceType: source.type,
+				entryUrl: source.url,
+				quality: source.quality,
+				language: source.language,
 				tmdbId: params.tmdbId,
+				mediaType: params.type,
 				season: params.season,
 				episode: params.episode,
-				provider: source.provider,
-				entryUrl: probe.entryUrl,
-				sourceType: probe.sourceType,
-				requestHeaders: buildSourceHeaders(source),
-				subtitles: normalizeSubtitleList(source),
-				attempts
-			});
-
-			logger.info(
-				{
-					sessionToken: session.token,
-					provider: source.provider,
-					sourceType: probe.sourceType,
-					entryUrl: probe.entryUrl,
-					quality: source.quality,
-					language: source.language,
-					attempts: attempts.length,
-					tmdbId: params.tmdbId,
-					mediaType: params.type,
-					season: params.season,
-					episode: params.episode,
-					...streamLog
-				},
-				'Playback session created'
-			);
-
-			return {
-				session,
-				extractionResult: {
-					success: lookup.success,
-					sources: lookup.sources,
-					error: lookup.error,
-					meta: lookup.meta
-				}
-			};
-		}
+				...streamLog
+			},
+			'Playback session created'
+		);
 
 		return {
-			session: null,
-			error: isAborted(params.signal)
-				? 'Aborted'
-				: attempts[attempts.length - 1]?.error || 'All stream sources failed'
+			session,
+			extractionResult: {
+				success: lookup.success,
+				sources: lookup.sources,
+				error: lookup.error,
+				meta: lookup.meta
+			}
 		};
 	}
 }
