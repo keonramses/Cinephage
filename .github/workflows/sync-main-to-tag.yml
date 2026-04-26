@@ -3,11 +3,6 @@ name: Sync main to tag
 on:
   push:
     tags: ['v*']
-  workflow_dispatch:
-    inputs:
-      tag_name:
-        required: true
-        type: string
 
 permissions:
   contents: write
@@ -23,13 +18,10 @@ jobs:
 
       - name: Fast-forward main to tag
         run: |
-          TAG="${{ inputs.tag_name || github.ref_name }}"
-
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
 
-          TAG_COMMIT="$(git rev-parse "refs/tags/${TAG}")"
-          echo "Tag: ${TAG}"
+          TAG_COMMIT="$(git rev-parse "refs/tags/${{ github.ref_name }}")"
           echo "Tag commit: ${TAG_COMMIT}"
 
           git fetch origin main
