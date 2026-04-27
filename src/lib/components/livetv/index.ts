@@ -30,4 +30,3 @@ export { default as EpgSourcePickerModal } from './EpgSourcePickerModal.svelte';
 export { default as EpgCoverageTable } from './EpgCoverageTable.svelte';
 export { default as EpgGuideGrid } from './EpgGuideGrid.svelte';
 export { default as ChannelScheduleModal } from './ChannelScheduleModal.svelte';
-
