@@ -67,7 +67,7 @@ export const providerDefinitions: LiveTvProviderDefinition[] = [
 	{
 		id: 'm3u',
 		name: 'M3U Playlist',
-		description: 'Playlist file via URL, file upload, or Free IPTV from iptv-org',
+		description: 'Playlist file via URL or file upload',
 		icon: 'List',
 		requiresAuth: false,
 		authDescription: 'None (URL or File)',

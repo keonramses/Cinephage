@@ -15,7 +15,7 @@ import type { LiveTvAccount } from '$lib/types/livetv';
 
 // Validation schema for testing Live TV accounts
 const liveTvAccountTestSchema = z.object({
-	providerType: z.enum(['stalker', 'xstream', 'm3u', 'iptvorg']),
+	providerType: z.enum(['stalker', 'xstream', 'm3u']),
 	// Stalker-specific config
 	stalkerConfig: z
 		.object({
@@ -47,14 +47,7 @@ const liveTvAccountTestSchema = z.object({
 			epgUrl: z.string().url().optional()
 		})
 		.optional(),
-	// IPTV-Org-specific config
-	iptvOrgConfig: z
-		.object({
-			countries: z.array(z.string()).optional(),
-			categories: z.array(z.string()).optional(),
-			languages: z.array(z.string()).optional()
-		})
-		.optional()
+
 });
 
 /**
@@ -99,11 +92,7 @@ function getFriendlyValidationMessage(error: ValidationError): string {
 				if (field === 'm3uConfig') {
 					return 'Please provide a valid M3U URL or playlist content.';
 				}
-				if (field === 'iptvOrgConfig') {
-					return 'Please select at least one country.';
-				}
-
-				const friendlyField = field
+					const friendlyField = field
 					.replace(/([a-z])([A-Z])/g, '$1 $2')
 					.replace(/Config$/, ' configuration')
 					.toLowerCase();
@@ -147,7 +136,7 @@ export const POST: RequestHandler = async ({ request }) => {
 			stalkerConfig: parsed.data.stalkerConfig,
 			xstreamConfig: parsed.data.xstreamConfig,
 			m3uConfig: parsed.data.m3uConfig,
-			iptvOrgConfig: parsed.data.iptvOrgConfig,
+
 			playbackLimit: null,
 			channelCount: null,
 			categoryCount: null,
