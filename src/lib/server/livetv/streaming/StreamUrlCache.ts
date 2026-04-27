@@ -224,7 +224,7 @@ class StreamUrlCache {
 			accountId: cached.accountId,
 			channelId: cached.channelId,
 			lineupItemId: cached.lineupItemId,
-			providerType: cached.providerType as 'stalker' | 'xstream' | 'm3u' | 'iptvorg',
+			providerType: cached.providerType as LiveTvProviderType,
 			providerHeaders: cached.providerHeaders
 		};
 	}

@@ -61,7 +61,7 @@ function toChannelResponse(
 	const providerData: CachedChannel = {
 		id: record.id,
 		accountId: record.accountId,
-		providerType: record.providerType,
+		providerType: record.providerType as LiveTvProviderType,
 		externalId: record.externalId,
 		name: record.name,
 		number: record.number,
@@ -116,7 +116,7 @@ function toLineupItem(
 		categoryId: record.categoryId,
 		addedAt: record.addedAt || new Date().toISOString(),
 		updatedAt: record.updatedAt || new Date().toISOString(),
-		providerType: providerType as 'stalker' | 'xstream' | 'm3u' | 'iptvorg',
+		providerType: providerType as LiveTvProviderType,
 		channel: channelData,
 		accountName,
 		category: toCategoryResponse(category),
@@ -142,7 +142,7 @@ class ChannelLineupService {
 			.select({
 				item: channelLineupItems,
 				accountName: livetvAccounts.name,
-				providerType: livetvAccounts.providerType,
+				providerType: livetvAccounts.providerType as LiveTvProviderType,
 				channel: livetvChannels,
 				category: channelCategories,
 				epgSourceChannel: epgSourceChannels,
@@ -204,7 +204,7 @@ class ChannelLineupService {
 			.select({
 				item: channelLineupItems,
 				accountName: livetvAccounts.name,
-				providerType: livetvAccounts.providerType,
+				providerType: livetvAccounts.providerType as LiveTvProviderType,
 				channel: livetvChannels,
 				category: channelCategories,
 				epgSourceChannel: epgSourceChannels,
@@ -499,7 +499,7 @@ class ChannelLineupService {
 				backup: channelLineupBackups,
 				channel: livetvChannels,
 				accountName: livetvAccounts.name,
-				providerType: livetvAccounts.providerType,
+				providerType: livetvAccounts.providerType as LiveTvProviderType,
 				categoryTitle: livetvCategories.title
 			})
 			.from(channelLineupBackups)
@@ -517,7 +517,7 @@ class ChannelLineupService {
 			priority: row.backup.priority,
 			createdAt: row.backup.createdAt || new Date().toISOString(),
 			updatedAt: row.backup.updatedAt || new Date().toISOString(),
-			providerType: row.providerType as 'stalker' | 'xstream' | 'm3u' | 'iptvorg',
+			providerType: row.providerType as LiveTvProviderType,
 			channel: toChannelResponse(row.channel, row.categoryTitle || null),
 			accountName: row.accountName || 'Unknown Account'
 		}));

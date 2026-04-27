@@ -60,7 +60,7 @@ export function recordToAccount(record: LivetvAccountRecord): LiveTvAccount {
 	return {
 		id: record.id,
 		name: record.name,
-		providerType: record.providerType,
+		providerType: record.providerType as LiveTvProviderType,
 		enabled: record.enabled ?? true,
 		// Provider configs
 		stalkerConfig: record.stalkerConfig ?? undefined,

@@ -23,7 +23,7 @@ describe('normalizeLiveTvChannelName', () => {
 
 	it('keeps meaningful channel variants and brands intact', () => {
 		expect(normalizeLiveTvChannelName('UK| EDEN +1', 'stalker')).toBe('EDEN +1');
-		expect(normalizeLiveTvChannelName('Disney+', 'iptvorg')).toBe('Disney+');
+		expect(normalizeLiveTvChannelName('Disney+', 'm3u')).toBe('Disney+');
 		expect(normalizeLiveTvChannelName('Paramount+', 'm3u')).toBe('Paramount+');
 		expect(normalizeLiveTvChannelName('ABC 9 WAUSAU WI (WAOW)', 'stalker')).toBe(
 			'ABC 9 WAUSAU WI (WAOW)'
@@ -63,7 +63,7 @@ describe('normalizeLiveTvChannelName', () => {
 	});
 
 	it('leaves already clean names alone', () => {
-		expect(normalizeLiveTvChannelName('Mythbusters', 'iptvorg')).toBe('Mythbusters');
-		expect(normalizeLiveTvChannelName('Court TV', 'iptvorg')).toBe('Court TV');
+		expect(normalizeLiveTvChannelName('Mythbusters', 'm3u')).toBe('Mythbusters');
+		expect(normalizeLiveTvChannelName('Court TV', 'm3u')).toBe('Court TV');
 	});
 });

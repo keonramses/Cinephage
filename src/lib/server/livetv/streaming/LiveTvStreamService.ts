@@ -17,7 +17,7 @@ import { resolveAndValidateUrl } from '$lib/server/http/ssrf-protection';
 import type { BackgroundService, ServiceStatus } from '$lib/server/services/background-service.js';
 import { ValidationError, ExternalServiceError } from '$lib/errors';
 import { STB_USER_AGENT } from '$lib/server/livetv/stalker/StalkerPortalClient.js';
-import type { FetchStreamResult, StreamError, CachedChannel } from '$lib/types/livetv';
+import type { FetchStreamResult, StreamError, CachedChannel, LiveTvProviderType } from '$lib/types/livetv';
 
 const logger = createChildLogger({ module: 'LiveTvStreamService' });
 
@@ -30,7 +30,7 @@ export interface StreamUrlResolution {
 	accountId: string;
 	channelId: string;
 	lineupItemId: string;
-	providerType: 'stalker' | 'xstream' | 'm3u' | 'iptvorg';
+	providerType: LiveTvProviderType;
 	providerHeaders?: Record<string, string>;
 }
 
@@ -51,7 +51,7 @@ interface StreamSource {
 	accountId: string;
 	channelId: string;
 	channel: CachedChannel;
-	providerType: 'stalker' | 'xstream' | 'm3u' | 'iptvorg';
+	providerType: LiveTvProviderType;
 	priority: number;
 }
 

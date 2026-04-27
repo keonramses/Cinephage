@@ -15,8 +15,6 @@ function getProviderLabel(providerType?: LiveTvProviderType): string {
 			return 'XStream server';
 		case 'stalker':
 			return 'Stalker portal';
-		case 'iptvorg':
-			return 'IPTV-Org source';
 		default:
 			return 'provider';
 	}
