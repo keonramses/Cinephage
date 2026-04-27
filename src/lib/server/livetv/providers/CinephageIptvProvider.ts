@@ -408,7 +408,8 @@ export class CinephageIptvProvider implements LiveTvProvider {
 				headers['User-Agent'] = m3uData.attributes['user-agent'];
 			}
 
-			const type = this.detectStreamType(m3uData.url);
+			// Cinephage API streams are always HLS (confirmed by API channel detail protocol field)
+			const type: 'hls' | 'direct' | 'unknown' = 'hls';
 
 			return {
 				success: true,
