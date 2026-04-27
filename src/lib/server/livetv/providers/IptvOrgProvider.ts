@@ -443,6 +443,117 @@ export class IptvOrgProvider implements LiveTvProvider {
 	// Private Helpers
 	// ============================================================================
 
+	private async fetchCinephagePlaylist(config: IptvOrgConfig): Promise<string> {
+		const params = new URLSearchParams();
+
+		if (config.countries && config.countries.length > 0) {
+			for (const country of config.countries) {
+				params.append('country', country);
+			}
+		}
+
+		if (config.categories && config.categories.length > 0) {
+			for (const category of config.categories) {
+				params.append('category', category);
+			}
+		}
+
+		const url = `${CINEPHAGE_API_BASE}/api/v1/iptv/playlist.m3u?${params.toString()}`;
+		const headers = await this.getAuthHeaders();
+
+		const response = await fetch(url, {
+			headers: {
+				...headers,
+				Accept: 'audio/x-mpegurl, text/plain, */*'
+			},
+			signal: AbortSignal.timeout(60000)
+		});
+
+		if (!response.ok) {
+			if (response.status === 401) {
+				throw new Error('Cinephage API rejected authentication. Verify version and commit.');
+			}
+			if (response.status === 429) {
+				throw new Error('Cinephage API rate limited the IPTV request.');
+			}
+			throw new Error(`Cinephage API returned HTTP ${response.status}`);
+		}
+
+		return response.text();
+	}
+
+	private parseIptvPlaylist(content: string): Array<{
+		channelId: string;
+		name: string;
+		logo?: string;
+		groupTitle?: string;
+		resolution?: string;
+		sourceProvider?: string;
+		url: string;
+	}> {
+		const entries: Array<{
+			channelId: string;
+			name: string;
+			logo?: string;
+			groupTitle?: string;
+			resolution?: string;
+			sourceProvider?: string;
+			url: string;
+		}> = [];
+
+		const lines = content.split('\n');
+		let currentAttrs: Record<string, string> = {};
+		let currentName = '';
+
+		for (let i = 0; i < lines.length; i++) {
+			const line = lines[i].trim();
+
+			if (line.startsWith('#EXTM3U')) {
+				continue;
+			}
+
+			if (line.startsWith('#EXTINF:')) {
+				const match = line.match(/#EXTINF:([^,]*),(.*)/);
+				if (match) {
+					currentName = match[2].trim();
+					currentAttrs = this.parseM3uAttributes(match[1]);
+				}
+			} else if (line && !line.startsWith('#')) {
+				const channelId = currentAttrs['tvg-id'];
+				if (channelId) {
+					entries.push({
+						channelId,
+						name: currentAttrs['tvg-name'] || currentName || 'Unknown',
+						logo: currentAttrs['tvg-logo'],
+						groupTitle: currentAttrs['group-title'],
+						resolution: currentAttrs['tvg-resolution'],
+						sourceProvider: currentAttrs['tvg-source'],
+						url: line
+					});
+				}
+
+				currentAttrs = {};
+				currentName = '';
+			}
+		}
+
+		return entries;
+	}
+
+	private parseM3uAttributes(attributesString: string): Record<string, string> {
+		const attributes: Record<string, string> = {};
+		const attrRegex = /([A-Za-z0-9_-]+)\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s,]+))/g;
+		let attrMatch: RegExpExecArray | null;
+
+		while ((attrMatch = attrRegex.exec(attributesString)) !== null) {
+			const key = attrMatch[1].toLowerCase();
+			const value = attrMatch[2] ?? attrMatch[3] ?? attrMatch[4] ?? '';
+			attributes[key] = value;
+		}
+
+		return attributes;
+	}
+
 	private detectStreamType(url: string): 'hls' | 'direct' | 'unknown' {
 		const lowerUrl = url.toLowerCase();
 		if (lowerUrl.includes('.m3u8') || lowerUrl.includes('/hls/')) {
