@@ -1,60 +1,100 @@
 /**
- * IPTV-Org Countries API
+ * IPTV Countries API
  *
- * GET /api/livetv/iptvorg/countries - List all countries from IPTV-Org
- * Cached for 24 hours to avoid hitting their API too frequently
+ * GET /api/livetv/iptvorg/countries - List all IPTV countries from Cinephage API
+ * Cached for 24 hours to avoid hitting the API too frequently
  */
 
 import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
 import { logger } from '$lib/logging';
+import { getStreamingIndexerSettings } from '$lib/server/streaming/settings.js';
 
-interface IptvOrgCountry {
-	name: string;
+const CINEPHAGE_API_BASE = 'https://api.cinephage.net';
+const CACHE_TTL = 24 * 60 * 60 * 1000; // 24 hours
+
+interface CinephageCountry {
 	code: string;
-	languages: string[];
-	flag: string;
+	name: string;
+	channel_count?: number;
+	flag?: string | null;
+	languages?: string | null;
 }
 
 interface CachedData {
-	data: IptvOrgCountry[];
+	data: CinephageCountry[];
 	fetchedAt: number;
 }
 
-const CACHE_TTL = 24 * 60 * 60 * 1000; // 24 hours
-const IPTVORG_API_BASE = 'https://iptv-org.github.io/api';
-
 let cachedCountries: CachedData | null = null;
 
-async function fetchCountries(): Promise<IptvOrgCountry[]> {
-	const response = await fetch(`${IPTVORG_API_BASE}/countries.json`, {
-		headers: {
-			'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
-		},
+async function getAuthHeaders(): Promise<Record<string, string>> {
+	const settings = await getStreamingIndexerSettings();
+	const version = settings?.cinephageVersion;
+	const commit = settings?.cinephageCommit;
+
+	if (!version || !commit) {
+		throw new Error('Cinephage API not configured: missing cinephageVersion or cinephageCommit');
+	}
+
+	return {
+		'X-Cinephage-Version': version,
+		'X-Cinephage-Commit': commit
+	};
+}
+
+async function fetchCinephageCountries(): Promise<CinephageCountry[]> {
+	const headers = await getAuthHeaders();
+
+	const response = await fetch(`${CINEPHAGE_API_BASE}/api/v1/iptv/countries`, {
+		headers: { ...headers, Accept: 'application/json' },
 		signal: AbortSignal.timeout(30000)
 	});
 
 	if (!response.ok) {
-		throw new Error(`Failed to fetch countries: HTTP ${response.status}`);
+		if (response.status === 401) {
+			throw new Error('Cinephage API rejected authentication');
+		}
+		if (response.status === 429) {
+			throw new Error('Cinephage API rate limited this request');
+		}
+		throw new Error(`Cinephage API returned HTTP ${response.status}`);
 	}
 
-	return response.json();
+	const data = (await response.json()) as { countries?: CinephageCountry[] };
+
+	if (!data.countries || !Array.isArray(data.countries)) {
+		throw new Error('Unexpected response format from Cinephage API');
+	}
+
+	return data.countries;
 }
 
-async function getCachedCountries(): Promise<IptvOrgCountry[]> {
-	// Return cached data if still valid
+async function getCachedCountries(): Promise<CinephageCountry[]> {
 	if (cachedCountries && Date.now() - cachedCountries.fetchedAt < CACHE_TTL) {
 		return cachedCountries.data;
 	}
 
-	// Fetch fresh data
-	logger.info('[IptvOrgCountries] Fetching fresh countries data from IPTV-Org API');
-	const countries = await fetchCountries();
+	logger.info('[IptvOrgCountries] Fetching fresh countries data from Cinephage API');
+
+	let countries: CinephageCountry[];
+	try {
+		countries = await fetchCinephageCountries();
+	} catch (error) {
+		// If cache exists, serve stale data on fetch failure
+		if (cachedCountries) {
+			logger.warn(
+				{ err: error },
+				'[IptvOrgCountries] Cinephage API fetch failed, serving stale cache'
+			);
+			return cachedCountries.data;
+		}
+		throw error;
+	}
 
 	// Sort by name
 	countries.sort((a, b) => a.name.localeCompare(b.name));
 
-	// Update cache
 	cachedCountries = {
 		data: countries,
 		fetchedAt: Date.now()
@@ -64,9 +104,6 @@ async function getCachedCountries(): Promise<IptvOrgCountry[]> {
 	return countries;
 }
 
-/**
- * List all countries from IPTV-Org
- */
 export const GET: RequestHandler = async () => {
 	try {
 		const countries = await getCachedCountries();
@@ -76,9 +113,9 @@ export const GET: RequestHandler = async () => {
 			countries: countries.map((c) => ({
 				code: c.code,
 				name: c.name,
-				flag: c.flag
+				flag: c.flag || ''
 			})),
-			cached: cachedCountries ? Date.now() - cachedCountries.fetchedAt < CACHE_TTL : false,
+			cached: cachedCountries !== null && Date.now() - cachedCountries.fetchedAt < CACHE_TTL,
 			count: countries.length
 		});
 	} catch (error) {
