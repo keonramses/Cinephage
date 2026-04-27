@@ -495,7 +495,7 @@ export class LiveTvAccountManager implements BackgroundService {
 
 		if (updates.cinephageIptvConfig && existing.providerType === 'cinephage-iptv') {
 			updateData.iptvOrgConfig = {
-				...existing.iptvOrgConfig,
+				...existing.cinephageIptvConfig,
 				...updates.cinephageIptvConfig
 			} as Record<string, unknown>;
 		}

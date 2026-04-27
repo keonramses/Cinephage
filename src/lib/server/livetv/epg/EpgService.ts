@@ -105,7 +105,7 @@ export class EpgService {
 			.select({
 				lineupItemId: channelLineupItems.id,
 				channelId: channelLineupItems.channelId,
-				providerType: livetvChannels.providerType as LiveTvProviderType,
+				providerType: livetvChannels.providerType,
 				name: livetvChannels.name,
 				categoryId: livetvChannels.categoryId
 			})
@@ -125,7 +125,7 @@ export class EpgService {
 		const channelsWithEpg = await db
 			.select({
 				channelId: livetvChannels.id,
-				providerType: livetvChannels.providerType as LiveTvProviderType,
+				providerType: livetvChannels.providerType,
 				name: livetvChannels.name,
 				categoryId: livetvChannels.categoryId,
 				programCount: sql<number>`count(${epgPrograms.id})`

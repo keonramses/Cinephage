@@ -143,7 +143,7 @@ class ChannelLineupService {
 			.select({
 				item: channelLineupItems,
 				accountName: livetvAccounts.name,
-				providerType: livetvAccounts.providerType as LiveTvProviderType,
+				providerType: livetvAccounts.providerType,
 				channel: livetvChannels,
 				category: channelCategories,
 				epgSourceChannel: epgSourceChannels,
@@ -205,7 +205,7 @@ class ChannelLineupService {
 			.select({
 				item: channelLineupItems,
 				accountName: livetvAccounts.name,
-				providerType: livetvAccounts.providerType as LiveTvProviderType,
+				providerType: livetvAccounts.providerType,
 				channel: livetvChannels,
 				category: channelCategories,
 				epgSourceChannel: epgSourceChannels,
@@ -500,7 +500,7 @@ class ChannelLineupService {
 				backup: channelLineupBackups,
 				channel: livetvChannels,
 				accountName: livetvAccounts.name,
-				providerType: livetvAccounts.providerType as LiveTvProviderType,
+				providerType: livetvAccounts.providerType,
 				categoryTitle: livetvCategories.title
 			})
 			.from(channelLineupBackups)
