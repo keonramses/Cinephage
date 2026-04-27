@@ -62,7 +62,7 @@ jobs:
         if: env.RELEASE_TAG
         run: |
           VERSION="${RELEASE_TAG#v}"
-          COMMIT=$(git rev-list -n 1 "$RELEASE_TAG")
+          COMMIT=$(git rev-parse --short=7 "$RELEASE_TAG^{commit}")
 
           echo "Publishing ${VERSION} (${COMMIT})"
 
