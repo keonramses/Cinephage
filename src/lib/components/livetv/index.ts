@@ -31,5 +31,3 @@ export { default as EpgCoverageTable } from './EpgCoverageTable.svelte';
 export { default as EpgGuideGrid } from './EpgGuideGrid.svelte';
 export { default as ChannelScheduleModal } from './ChannelScheduleModal.svelte';
 
-// IPTV-Org
-export { default as IptvOrgSelector } from './IptvOrgSelector.svelte';
