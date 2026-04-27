@@ -133,26 +133,22 @@ export class IptvOrgProvider implements LiveTvProvider {
 				throw new Error('IPTV-Org config not found for account');
 			}
 
-			logger.info('[IptvOrgProvider] Fetching blocklist');
-			await this.loadBlocklist();
+			// Verify auth is configured
+			await this.getAuthHeaders();
 
-			logger.info('[IptvOrgProvider] Fetching channels');
-			const channels = await this.fetchIptvOrgChannels(config);
+			logger.info('[IptvOrgProvider] Fetching playlist from Cinephage API');
+			const playlistContent = await this.fetchCinephagePlaylist(config);
+			const entries = this.parseIptvPlaylist(playlistContent);
 
-			logger.info('[IptvOrgProvider] Fetching streams');
-			const streams = await this.fetchIptvOrgStreams(config);
+			logger.info({ count: entries.length }, '[IptvOrgProvider] Parsed playlist entries');
 
-			logger.info('[IptvOrgProvider] Fetching categories');
-			const categories = await this.fetchIptvOrgCategories();
-
-			logger.info(
-				{
-					channels: channels.length,
-					streams: streams.length
-				},
-				'[IptvOrgProvider] Matching channels to streams'
-			);
-			const matchedChannels = this.matchChannelsToStreams(channels, streams, config);
+			// Collect unique categories from parsed entries
+			const categoryNames = new Set<string>();
+			for (const entry of entries) {
+				if (entry.groupTitle) {
+					categoryNames.add(entry.groupTitle);
+				}
+			}
 
 			// Get existing categories
 			const existingCategories = await db
@@ -164,24 +160,14 @@ export class IptvOrgProvider implements LiveTvProvider {
 			let categoriesAdded = 0;
 			let categoriesUpdated = 0;
 
-			// Create categories from IPTV-Org categories
-			const categoryNames = new Set<string>();
-			for (const channel of matchedChannels) {
-				if (channel.categories) {
-					channel.categories.forEach((c) => categoryNames.add(c));
-				}
-			}
-
-			for (const categoryId of categoryNames) {
-				const category = categories.find((c) => c.id === categoryId);
-				const title = category?.name || categoryId;
-				const existingId = categoryMap.get(categoryId);
+			for (const categoryName of categoryNames) {
+				const existingId = categoryMap.get(categoryName);
 
 				if (existingId) {
 					await db
 						.update(livetvCategories)
 						.set({
-							title,
+							title: categoryName,
 							updatedAt: new Date().toISOString()
 						})
 						.where(eq(livetvCategories.id, existingId));
@@ -191,12 +177,12 @@ export class IptvOrgProvider implements LiveTvProvider {
 					await db.insert(livetvCategories).values({
 						accountId,
 						providerType: 'iptvorg',
-						externalId: categoryId,
-						title,
+						externalId: categoryName,
+						title: categoryName,
 						createdAt: new Date().toISOString(),
 						updatedAt: new Date().toISOString()
 					});
-					categoryMap.set(categoryId, newId);
+					categoryMap.set(categoryName, newId);
 					categoriesAdded++;
 				}
 			}
@@ -212,36 +198,33 @@ export class IptvOrgProvider implements LiveTvProvider {
 			let channelsUpdated = 0;
 			let channelsRemoved = 0;
 
-			// Sync channels
-			for (let i = 0; i < matchedChannels.length; i++) {
-				const channel = matchedChannels[i];
-				const stream = channel.stream;
+			// Sync channels from playlist entries
+			for (let i = 0; i < entries.length; i++) {
+				const entry = entries[i];
 
 				const m3uData: M3uChannelData = {
-					tvgId: channel.id,
-					tvgName: channel.name,
-					groupTitle: channel.categories?.[0],
-					url: stream.url,
-					tvgLogo: undefined,
-					attributes: {
-						referrer: stream.referrer || '',
-						'user-agent': stream.user_agent || ''
-					}
+					tvgId: entry.channelId,
+					tvgName: entry.name,
+					groupTitle: entry.groupTitle,
+					url: entry.url,
+					tvgLogo: entry.logo,
+					attributes: {}
 				};
 
-				// Get category ID (use first category)
-				const categoryId = channel.categories?.[0] ? categoryMap.get(channel.categories[0]) : null;
+				const categoryId = entry.groupTitle
+					? categoryMap.get(entry.groupTitle) ?? null
+					: null;
 
-				const existingId = channelMap.get(channel.id);
+				const existingId = channelMap.get(entry.channelId);
 
 				if (existingId) {
 					await db
 						.update(livetvChannels)
 						.set({
-							name: channel.name,
-							logo: null,
+							name: entry.name,
+							logo: entry.logo ?? null,
 							categoryId,
-							providerCategoryId: channel.categories?.[0] || null,
+							providerCategoryId: entry.groupTitle ?? null,
 							m3uData,
 							updatedAt: new Date().toISOString()
 						})
@@ -251,11 +234,11 @@ export class IptvOrgProvider implements LiveTvProvider {
 					await db.insert(livetvChannels).values({
 						accountId,
 						providerType: 'iptvorg',
-						externalId: channel.id,
-						name: channel.name,
-						logo: null,
+						externalId: entry.channelId,
+						name: entry.name,
+						logo: entry.logo ?? null,
 						categoryId,
-						providerCategoryId: channel.categories?.[0] || null,
+						providerCategoryId: entry.groupTitle ?? null,
 						m3uData,
 						createdAt: new Date().toISOString(),
 						updatedAt: new Date().toISOString()
@@ -264,7 +247,8 @@ export class IptvOrgProvider implements LiveTvProvider {
 				}
 			}
 
-			const providerChannelIds = matchedChannels.map((channel) => channel.id);
+			// Remove stale channels
+			const providerChannelIds = entries.map((entry) => entry.channelId);
 			if (providerChannelIds.length > 0) {
 				const deletedChannels = await db
 					.delete(livetvChannels)
@@ -277,6 +261,7 @@ export class IptvOrgProvider implements LiveTvProvider {
 				channelsRemoved = deletedChannels.changes ?? 0;
 			}
 
+			// Remove stale categories
 			const providerCategoryIds = Array.from(categoryNames);
 			const staleCategoryIds = existingCategories
 				.filter((category) => !providerCategoryIds.includes(category.externalId))
@@ -290,7 +275,7 @@ export class IptvOrgProvider implements LiveTvProvider {
 			await db
 				.update(livetvAccounts)
 				.set({
-					channelCount: matchedChannels.length,
+					channelCount: entries.length,
 					categoryCount: categoryNames.size,
 					lastSyncAt: new Date().toISOString(),
 					lastSyncError: null,
@@ -314,7 +299,7 @@ export class IptvOrgProvider implements LiveTvProvider {
 					channelsRemoved,
 					duration
 				},
-				'[IptvOrgProvider] Channel sync completed'
+				'[IptvOrgProvider] Channel sync completed via Cinephage API'
 			);
 
 			return {
