@@ -89,6 +89,23 @@ export interface ValidatedStreamResult extends StreamResult {
 	validation: StreamValidation;
 }
 
+export interface CinephageApiStream {
+	url: string;
+	provider: string;
+	quality: string;
+	protocol: 'hls' | 'mp4';
+	headers: Record<string, string>;
+	subtitles?: StreamSubtitle[];
+}
+
+export interface CinephageApiErrorBody {
+	message: string;
+	details?: {
+		limit?: number;
+		resetAt?: string;
+	};
+}
+
 export interface ExtractionResult {
 	success: boolean;
 	sources: StreamSource[];

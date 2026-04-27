@@ -15,38 +15,43 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
+      - name: Set tag
+        run: echo "TAG=${{ inputs.tag_name || github.ref_name }}" >> "$GITHUB_ENV"
+
       - name: Skip dev prereleases
         run: |
-          TAG="${{ inputs.tag_name || github.ref_name }}"
           if echo "$TAG" | grep -qE '\-dev\.[0-9]+$'; then
-            echo "Skipping dev prerelease: ${TAG}"
+            echo "Skipping dev prerelease: $TAG"
             exit 0
           fi
 
-      - name: Publish release to API
+      - name: Checkout repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        with:
+          fetch-depth: 0
+
+      - name: Resolve tag commit SHA
+        run: echo "COMMIT=$(git rev-list -n 1 "$TAG")" >> "$GITHUB_ENV"
+
+      - name: Publish build to Cinephage API
         run: |
-          TAG="${{ inputs.tag_name || github.ref_name }}"
           VERSION="${TAG#v}"
-          COMMIT="${GITHUB_SHA}"
 
-          echo "Publishing release ${TAG} (${COMMIT})"
+          echo "Publishing ${VERSION} (${COMMIT})"
 
-          RESPONSE=$(curl -sS -w '\n%{http_code}' -X POST "https://api.cinephage.net/sys/a7x9k2m/publish" \
+          RESPONSE=$(curl -sS -w '\n%{http_code}' \
+            -X POST "${{ secrets.CINEPHAGE_BUILD_URL }}" \
             -H "Content-Type: application/json" \
-            -H "X-Automation-Key: ${{ secrets.AUTOMATION_KEY }}" \
-            -d "{\"version\":\"${VERSION}\",\"commit\":\"${COMMIT}\"}")
+            -H "X-API-Key: ${{ secrets.CINEPHAGE_BUILD_KEY }}" \
+            -d "{\"version\":\"${VERSION}\",\"commit\":\"${COMMIT}\",\"platform\":\"cinephage\"}")
+
           HTTP_CODE=$(echo "$RESPONSE" | tail -n1)
           BODY=$(echo "$RESPONSE" | sed '$d')
 
           echo "HTTP ${HTTP_CODE}"
 
-          if [ "$HTTP_CODE" -ge 400 ]; then
-            echo "::error::API returned HTTP ${HTTP_CODE}: ${BODY}"
-            exit 1
-          fi
-
-          if [ "$(echo "$BODY" | jq -r '.success')" != "true" ]; then
-            echo "::error::API did not return success: ${BODY}"
+          if [ "$HTTP_CODE" != "201" ]; then
+            echo "::error::API returned HTTP ${HTTP_CODE}, expected 201: ${BODY}"
             exit 1
           fi
 

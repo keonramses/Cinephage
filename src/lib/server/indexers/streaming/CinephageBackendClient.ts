@@ -1,5 +1,10 @@
 import { logger } from '$lib/logging';
-import type { StreamSource, StreamSubtitle, StreamType } from '$lib/server/streaming/types';
+import type {
+	StreamSource,
+	StreamSubtitle,
+	StreamType,
+	CinephageApiErrorBody
+} from '$lib/server/streaming/types';
 import { getStreamingIndexerSettings } from '$lib/server/streaming/settings';
 
 const streamLog = { logDomain: 'streams' as const };
@@ -15,6 +20,12 @@ interface CinephageBackendConfig {
 }
 
 interface CinephageBackendResponse {
+	url?: string;
+	provider?: string;
+	quality?: string;
+	protocol?: string;
+	headers?: Record<string, unknown>;
+	subtitles?: unknown[];
 	success?: boolean;
 	tmdbId?: string | number;
 	type?: string;
@@ -29,6 +40,7 @@ interface CinephageBackendResponse {
 		sources?: unknown[];
 	};
 	meta?: Record<string, unknown>;
+	error?: CinephageApiErrorBody;
 }
 
 export interface CinephageStreamLookupParams {
@@ -114,6 +126,10 @@ function normalizeSubtitles(value: unknown): StreamSubtitle[] | undefined {
 }
 
 function extractStreams(payload: CinephageBackendResponse): unknown[] {
+	if (typeof payload.url === 'string' && typeof payload.provider === 'string') {
+		return [payload];
+	}
+
 	if (Array.isArray(payload.streams)) {
 		return payload.streams;
 	}
@@ -174,7 +190,10 @@ function normalizeSource(entry: unknown, apiBaseUrl: string): StreamSource | nul
 	const server = getFirstString(entry.server, entry.source, entry.sourceName, entry.name);
 	const provider = getFirstString(entry.provider, entry.providerId, entry.backend) ?? 'cinephage';
 	const language = getFirstString(entry.language, entry.audioLanguage, entry.audioLang, entry.lang);
-	const type = normalizeStreamType(getFirstString(entry.type, entry.streamType, entry.format), url);
+	const type = normalizeStreamType(
+		getFirstString(entry.protocol, entry.type, entry.streamType, entry.format),
+		url
+	);
 
 	return {
 		quality,
@@ -232,7 +251,7 @@ export class CinephageBackendClient {
 		const config = await loadConfig();
 
 		try {
-			const response = await fetch(`${config.baseUrl}/health`, {
+			const response = await fetch(`${config.baseUrl}/api/v1/health`, {
 				method: 'GET',
 				headers: { Accept: 'application/json' }
 			});
@@ -288,16 +307,61 @@ export class CinephageBackendClient {
 				};
 			}
 
-			if (response.status === 429) {
-				const body = await response.json().catch(() => ({}));
-				const retryAfter =
-					isRecord(body) && typeof body.retryAfter === 'number' ? body.retryAfter : undefined;
+			if (response.status === 403) {
 				return {
 					success: false,
 					sources: [],
-					error: retryAfter
-						? `Cinephage backend rate limited this request (${retryAfter}s)`
-						: 'Cinephage backend rate limited this request'
+					error: 'Cinephage API returned forbidden: insufficient permissions'
+				};
+			}
+
+			if (response.status === 429) {
+				let errorMessage = 'Cinephage backend rate limited this request';
+
+				try {
+					const errorBody = (await response.json()) as CinephageBackendResponse;
+					const details = errorBody.error?.details;
+					if (details) {
+						const parts = [errorMessage];
+						if (typeof details.limit === 'number') parts.push(`limit: ${details.limit}/window`);
+						if (typeof details.resetAt === 'string') parts.push(`resets at ${details.resetAt}`);
+						errorMessage = parts.join(', ');
+					}
+				} catch {
+					// Use default message if body parsing fails
+				}
+
+				return {
+					success: false,
+					sources: [],
+					error: errorMessage
+				};
+			}
+
+			if (response.status === 502) {
+				return {
+					success: false,
+					sources: [],
+					error: 'Cinephage API returned 502: no streams available for this content'
+				};
+			}
+
+			if (response.status === 400) {
+				let errorMessage = 'Cinephage API returned HTTP 400';
+
+				try {
+					const errorBody = (await response.json()) as CinephageBackendResponse;
+					if (errorBody.error?.message) {
+						errorMessage = errorBody.error.message;
+					}
+				} catch {
+					// Use default message if body parsing fails
+				}
+
+				return {
+					success: false,
+					sources: [],
+					error: errorMessage
 				};
 			}
 

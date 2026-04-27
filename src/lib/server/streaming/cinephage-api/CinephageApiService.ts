@@ -1,6 +1,12 @@
 import { createIndexerHttp } from '$lib/server/indexers/http';
 import { logger } from '$lib/logging';
-import type { PlaybackMediaType, StreamSource, StreamSubtitle, StreamType } from '../types';
+import type {
+	PlaybackMediaType,
+	StreamSource,
+	StreamSubtitle,
+	StreamType,
+	CinephageApiErrorBody
+} from '../types';
 import { getStreamingIndexerSettings } from '../settings';
 
 const streamLog = { logDomain: 'streams' as const };
@@ -16,6 +22,12 @@ interface CinephageApiConfig {
 }
 
 interface CinephageApiResponse {
+	url?: string;
+	provider?: string;
+	quality?: string;
+	protocol?: string;
+	headers?: Record<string, unknown>;
+	subtitles?: unknown[];
 	success?: boolean;
 	tmdbId?: string | number;
 	type?: string;
@@ -30,14 +42,7 @@ interface CinephageApiResponse {
 		sources?: unknown[];
 	};
 	meta?: Record<string, unknown>;
-}
-
-interface CinephageApiHealthPayload {
-	status?: string;
-	version?: string;
-	providers?: Array<Record<string, unknown>>;
-	rateLimit?: Record<string, unknown>;
-	cache?: Record<string, unknown>;
+	error?: CinephageApiErrorBody;
 }
 
 export interface CinephageStreamLookupParams {
@@ -128,6 +133,10 @@ function normalizeSubtitles(value: unknown): StreamSubtitle[] | undefined {
 }
 
 function extractStreams(payload: CinephageApiResponse): unknown[] {
+	if (typeof payload.url === 'string' && typeof payload.provider === 'string') {
+		return [payload];
+	}
+
 	if (Array.isArray(payload.streams)) {
 		return payload.streams;
 	}
@@ -188,7 +197,10 @@ function normalizeSource(entry: unknown, apiBaseUrl: string): StreamSource | nul
 	const server = getFirstString(entry.server, entry.source, entry.sourceName, entry.name);
 	const provider = getFirstString(entry.provider, entry.providerId, entry.backend) ?? 'cinephage';
 	const language = getFirstString(entry.language, entry.audioLanguage, entry.audioLang, entry.lang);
-	const type = normalizeStreamType(getFirstString(entry.type, entry.streamType, entry.format), url);
+	const type = normalizeStreamType(
+		getFirstString(entry.protocol, entry.type, entry.streamType, entry.format),
+		url
+	);
 
 	return {
 		quality,
@@ -245,10 +257,9 @@ export class CinephageApiService {
 		const config = await loadConfig();
 
 		try {
-			const response = await this.http.get(`${config.baseUrl}/health`, {
+			const response = await this.http.get(`${config.baseUrl}/api/v1/health`, {
 				headers: { Accept: 'application/json' }
 			});
-			const payload = JSON.parse(response.body) as CinephageApiHealthPayload;
 
 			return {
 				configured: config.configured,
@@ -256,11 +267,7 @@ export class CinephageApiService {
 				baseUrl: config.baseUrl,
 				missing: config.missing,
 				version: config.version,
-				commit: config.commit,
-				upstreamVersion: getFirstString(payload.version),
-				providers: Array.isArray(payload.providers) ? payload.providers : undefined,
-				rateLimit: isRecord(payload.rateLimit) ? payload.rateLimit : undefined,
-				cache: isRecord(payload.cache) ? payload.cache : undefined
+				commit: config.commit
 			};
 		} catch {
 			return {
@@ -313,11 +320,61 @@ export class CinephageApiService {
 				};
 			}
 
-			if (response.status === 429) {
+			if (response.status === 403) {
 				return {
 					success: false,
 					sources: [],
-					error: 'Cinephage API rate limited this request'
+					error: 'Cinephage API returned forbidden: insufficient permissions'
+				};
+			}
+
+			if (response.status === 429) {
+				let errorMessage = 'Cinephage API rate limited this request';
+
+				try {
+					const errorBody = JSON.parse(response.body) as CinephageApiResponse;
+					const details = errorBody.error?.details;
+					if (details) {
+						const parts = [errorMessage];
+						if (typeof details.limit === 'number') parts.push(`limit: ${details.limit}/window`);
+						if (typeof details.resetAt === 'string') parts.push(`resets at ${details.resetAt}`);
+						errorMessage = parts.join(', ');
+					}
+				} catch {
+					// Use default message if body parsing fails
+				}
+
+				return {
+					success: false,
+					sources: [],
+					error: errorMessage
+				};
+			}
+
+			if (response.status === 502) {
+				return {
+					success: false,
+					sources: [],
+					error: 'Cinephage API returned 502: no streams available for this content'
+				};
+			}
+
+			if (response.status === 400) {
+				let errorMessage = `Cinephage API returned HTTP 400`;
+
+				try {
+					const errorBody = JSON.parse(response.body) as CinephageApiResponse;
+					if (errorBody.error?.message) {
+						errorMessage = errorBody.error.message;
+					}
+				} catch {
+					// Use default message if body parsing fails
+				}
+
+				return {
+					success: false,
+					sources: [],
+					error: errorMessage
 				};
 			}
 

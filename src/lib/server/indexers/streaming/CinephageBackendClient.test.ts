@@ -180,6 +180,177 @@ describe('CinephageBackendClient', () => {
 		});
 	});
 
+	it('maps upstream 403 responses to insufficient permissions errors', async () => {
+		await testDb.db
+			.update(indexers)
+			.set({
+				settings: {
+					cinephageCommit: 'def4567890abcdef123456',
+					cinephageVersion: '2.0.0'
+				}
+			})
+			.where(eq(indexers.definitionId, CINEPHAGE_STREAM_DEFINITION_ID));
+
+		vi.stubGlobal(
+			'fetch',
+			vi.fn().mockResolvedValue({
+				ok: false,
+				status: 403
+			})
+		);
+
+		const client = new CinephageBackendClient();
+		const result = await client.getStreams({ tmdbId: 562, type: 'movie' });
+
+		expect(result).toEqual({
+			success: false,
+			sources: [],
+			error: 'Cinephage API returned forbidden: insufficient permissions'
+		});
+	});
+
+	it('maps upstream 429 responses and parses limit/resetAt from details', async () => {
+		await testDb.db
+			.update(indexers)
+			.set({
+				settings: {
+					cinephageCommit: 'def4567890abcdef123456',
+					cinephageVersion: '2.0.0'
+				}
+			})
+			.where(eq(indexers.definitionId, CINEPHAGE_STREAM_DEFINITION_ID));
+
+		vi.stubGlobal(
+			'fetch',
+			vi.fn().mockResolvedValue({
+				ok: false,
+				status: 429,
+				json: vi.fn().mockResolvedValue({
+					error: {
+						message: 'Rate limit exceeded',
+						details: {
+							limit: 60,
+							resetAt: '2026-04-27T05:00:00.000Z'
+						}
+					}
+				})
+			})
+		);
+
+		const client = new CinephageBackendClient();
+		const result = await client.getStreams({ tmdbId: 562, type: 'movie' });
+
+		expect(result.success).toBe(false);
+		expect(result.error).toContain('Cinephage backend rate limited this request');
+		expect(result.error).toContain('limit: 60');
+		expect(result.error).toContain('resets at 2026-04-27T05:00:00.000Z');
+	});
+
+	it('maps upstream 502 responses to no-streams errors', async () => {
+		await testDb.db
+			.update(indexers)
+			.set({
+				settings: {
+					cinephageCommit: 'def4567890abcdef123456',
+					cinephageVersion: '2.0.0'
+				}
+			})
+			.where(eq(indexers.definitionId, CINEPHAGE_STREAM_DEFINITION_ID));
+
+		vi.stubGlobal(
+			'fetch',
+			vi.fn().mockResolvedValue({
+				ok: false,
+				status: 502
+			})
+		);
+
+		const client = new CinephageBackendClient();
+		const result = await client.getStreams({ tmdbId: 562, type: 'movie' });
+
+		expect(result).toEqual({
+			success: false,
+			sources: [],
+			error: 'Cinephage API returned 502: no streams available for this content'
+		});
+	});
+
+	it('maps upstream 400 responses and extracts error message from body', async () => {
+		await testDb.db
+			.update(indexers)
+			.set({
+				settings: {
+					cinephageCommit: 'def4567890abcdef123456',
+					cinephageVersion: '2.0.0'
+				}
+			})
+			.where(eq(indexers.definitionId, CINEPHAGE_STREAM_DEFINITION_ID));
+
+		vi.stubGlobal(
+			'fetch',
+			vi.fn().mockResolvedValue({
+				ok: false,
+				status: 400,
+				json: vi.fn().mockResolvedValue({
+					error: {
+						message: 'TV streams require season and episode parameters'
+					}
+				})
+			})
+		);
+
+		const client = new CinephageBackendClient();
+		const result = await client.getStreams({ tmdbId: 562, type: 'movie' });
+
+		expect(result).toEqual({
+			success: false,
+			sources: [],
+			error: 'TV streams require season and episode parameters'
+		});
+	});
+
+	it('parses new single-stream response format (url, provider, protocol, headers)', async () => {
+		await testDb.db
+			.update(indexers)
+			.set({
+				settings: {
+					cinephageCommit: 'def4567890abcdef123456',
+					cinephageVersion: '2.0.0'
+				}
+			})
+			.where(eq(indexers.definitionId, CINEPHAGE_STREAM_DEFINITION_ID));
+
+		vi.stubGlobal(
+			'fetch',
+			vi.fn().mockResolvedValue({
+				ok: true,
+				status: 200,
+				json: vi.fn().mockResolvedValue({
+					url: 'https://vidlink.pro/playlist.m3u8?token=abc',
+					provider: 'Vidlink',
+					quality: '1080p',
+					protocol: 'hls',
+					headers: {
+						Origin: 'https://vidlink.pro',
+						Referer: 'https://vidlink.pro/'
+					}
+				})
+			})
+		);
+
+		const client = new CinephageBackendClient();
+		const result = await client.getStreams({ tmdbId: 550, type: 'movie' });
+
+		expect(result.success).toBe(true);
+		expect(result.sources).toHaveLength(1);
+		expect(result.sources[0]).toMatchObject({
+			url: 'https://vidlink.pro/playlist.m3u8?token=abc',
+			provider: 'Vidlink',
+			quality: '1080p',
+			type: 'hls'
+		});
+	});
+
 	it('keeps manual streaming auth values while cleaning unsupported keys', async () => {
 		await testDb.db
 			.update(indexers)
