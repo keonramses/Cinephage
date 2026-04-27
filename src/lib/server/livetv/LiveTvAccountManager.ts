@@ -23,8 +23,7 @@ import type {
 	LiveTvProviderType,
 	StalkerConfig,
 	XstreamConfig,
-	M3uConfig,
-	IptvOrgConfig
+	M3uConfig
 } from '$lib/types/livetv';
 
 const logger = createChildLogger({ module: 'LiveTvAccountManager' });
@@ -67,7 +66,6 @@ export function recordToAccount(record: LivetvAccountRecord): LiveTvAccount {
 		stalkerConfig: record.stalkerConfig ?? undefined,
 		xstreamConfig: record.xstreamConfig ?? undefined,
 		m3uConfig: record.m3uConfig ?? undefined,
-		iptvOrgConfig: record.iptvOrgConfig ?? undefined,
 		// Metadata from provider
 		playbackLimit: record.playbackLimit ?? null,
 		channelCount: record.channelCount ?? null,
@@ -301,7 +299,6 @@ export class LiveTvAccountManager implements BackgroundService {
 		let stalkerConfig: StalkerConfig | undefined;
 		let xstreamConfig: XstreamConfig | undefined;
 		let m3uConfig: M3uConfig | undefined;
-		let iptvOrgConfig: IptvOrgConfig | undefined;
 
 		if (input.providerType === 'stalker' && input.stalkerConfig) {
 			stalkerConfig = {
@@ -332,13 +329,6 @@ export class LiveTvAccountManager implements BackgroundService {
 				headers: input.m3uConfig.headers,
 				userAgent: input.m3uConfig.userAgent
 			};
-		} else if (input.providerType === 'iptvorg' && input.iptvOrgConfig) {
-			iptvOrgConfig = {
-				countries: input.iptvOrgConfig.countries || [],
-				categories: input.iptvOrgConfig.categories || [],
-				languages: input.iptvOrgConfig.languages || [],
-				autoSyncIntervalHours: input.iptvOrgConfig.autoSyncIntervalHours || 24
-			};
 		}
 
 		// Test connection if requested
@@ -352,7 +342,6 @@ export class LiveTvAccountManager implements BackgroundService {
 				stalkerConfig,
 				xstreamConfig,
 				m3uConfig,
-				iptvOrgConfig,
 				playbackLimit: null,
 				channelCount: null,
 				categoryCount: null,
@@ -393,7 +382,6 @@ export class LiveTvAccountManager implements BackgroundService {
 			stalkerConfig,
 			xstreamConfig,
 			m3uConfig,
-			iptvOrgConfig,
 			createdAt: now,
 			updatedAt: now
 		};
@@ -491,13 +479,6 @@ export class LiveTvAccountManager implements BackgroundService {
 				updateData.lastEpgSyncAt = null;
 				updateData.lastEpgSyncError = null;
 			}
-		}
-
-		if (updates.iptvOrgConfig && existing.providerType === 'iptvorg') {
-			updateData.iptvOrgConfig = {
-				...existing.iptvOrgConfig,
-				...updates.iptvOrgConfig
-			} as IptvOrgConfig;
 		}
 
 		const [record] = await db

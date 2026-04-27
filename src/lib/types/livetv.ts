@@ -5,10 +5,9 @@
  * - Stalker Portal
  * - XStream Codes
  * - M3U Playlists
- * - IPTV-Org
  */
 
-export type LiveTvProviderType = 'stalker' | 'xstream' | 'm3u' | 'iptvorg';
+export type LiveTvProviderType = 'stalker' | 'xstream' | 'm3u';
 
 // ============================================================================
 // PROVIDER INTERFACE TYPES (for provider implementations)
@@ -157,24 +156,6 @@ export interface M3uConfig {
 	userAgent?: string;
 }
 
-/**
- * IPTV-Org configuration
- */
-export interface IptvOrgConfig {
-	/** Countries to filter by (ISO 3166-1 alpha-2 codes, e.g., 'US', 'GB', 'CA') */
-	countries?: string[];
-	/** Categories to filter by (e.g., 'news', 'sports', 'entertainment') */
-	categories?: string[];
-	/** Languages to filter by (ISO 639-3 codes, e.g., 'eng', 'spa', 'fra') */
-	languages?: string[];
-	/** Last sync timestamp */
-	lastSyncAt?: string;
-	/** Auto-sync interval in hours (default: 24) */
-	autoSyncIntervalHours?: number;
-	/** Selected stream quality preference (default: null = all) */
-	preferredQuality?: string | null;
-}
-
 // ============================================================================
 // UNIFIED ACCOUNT TYPES
 // ============================================================================
@@ -192,7 +173,6 @@ export interface LiveTvAccount {
 	stalkerConfig?: StalkerConfig;
 	xstreamConfig?: XstreamConfig;
 	m3uConfig?: M3uConfig;
-	iptvOrgConfig?: IptvOrgConfig;
 
 	// Common metadata
 	playbackLimit: number | null;
@@ -233,7 +213,6 @@ export interface LiveTvAccountInput {
 	stalkerConfig?: StalkerConfig;
 	xstreamConfig?: XstreamConfig;
 	m3uConfig?: M3uConfig;
-	iptvOrgConfig?: IptvOrgConfig;
 }
 
 /**
@@ -247,7 +226,6 @@ export interface LiveTvAccountUpdate {
 	stalkerConfig?: Partial<StalkerConfig>;
 	xstreamConfig?: Partial<XstreamConfig>;
 	m3uConfig?: Partial<M3uConfig>;
-	iptvOrgConfig?: Partial<IptvOrgConfig>;
 }
 
 /**
