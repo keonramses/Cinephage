@@ -122,17 +122,14 @@ describe('MetadataRefreshTask', () => {
 		expect(result.itemsGrabbed).toBe(1);
 		expect(result.errors).toBe(0);
 
-		const updated = testDb.db
-			.select()
-			.from(movies)
-			.where(eq(movies.id, 'm1'))
-			.get();
-		expect(updated.title).toBe('New Title');
-		expect(updated.tmdbCollectionId).toBe(500);
-		expect(updated.collectionName).toBe('Test Collection');
-		expect(updated.imdbId).toBe('tt1234567');
-		expect(updated.genres).toEqual(['Action', 'Drama']);
-		expect(updated.year).toBe(2024);
+		const updated = testDb.db.select().from(movies).where(eq(movies.id, 'm1')).get();
+		expect(updated).toBeDefined();
+		expect(updated!.title).toBe('New Title');
+		expect(updated!.tmdbCollectionId).toBe(500);
+		expect(updated!.collectionName).toBe('Test Collection');
+		expect(updated!.imdbId).toBe('tt1234567');
+		expect(updated!.genres).toEqual(['Action', 'Drama']);
+		expect(updated!.year).toBe(2024);
 	});
 
 	it('handles TMDB API errors gracefully', async () => {

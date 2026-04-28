@@ -32,16 +32,16 @@
 	let collapsedGroups = new SvelteSet<string>();
 
 	function groupMoviesByCollection(moviesList: typeof data.movies) {
-		const groups = new Map<string, typeof data.movies>();
+		const groups: Record<string, typeof data.movies> = {};
 		for (const movie of moviesList) {
 			const key = movie.collectionName ?? '__none__';
-			if (!groups.has(key)) {
-				groups.set(key, []);
+			if (!groups[key]) {
+				groups[key] = [];
 			}
-			groups.get(key)!.push(movie);
+			groups[key].push(movie);
 		}
 		const result: { name: string | null; movies: typeof data.movies }[] = [];
-		for (const [key, groupMovies] of groups) {
+		for (const [key, groupMovies] of Object.entries(groups)) {
 			result.push({
 				name: key === '__none__' ? null : key,
 				movies: groupMovies
