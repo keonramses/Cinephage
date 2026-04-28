@@ -55,6 +55,14 @@ export interface LibraryMoviePageData {
 	}>;
 	queueItem: QueueItemInfo | null;
 	isSearching: boolean;
+	collectionMovies: {
+		id: string;
+		title: string;
+		year: number | null;
+		posterPath: string | null;
+		hasFile: boolean | null;
+		monitored: boolean | null;
+	}[];
 }
 
 export const load: PageServerLoad = async ({ params }): Promise<LibraryMoviePageData> => {
@@ -82,7 +90,8 @@ export const load: PageServerLoad = async ({ params }): Promise<LibraryMoviePage
 			minimumAvailability: movies.minimumAvailability,
 			wantsSubtitles: movies.wantsSubtitles,
 			added: movies.added,
-			hasFile: movies.hasFile
+			hasFile: movies.hasFile,
+			tmdbCollectionId: movies.tmdbCollectionId
 		})
 		.from(movies)
 		.leftJoin(rootFolders, eq(movies.rootFolderId, rootFolders.id))
@@ -216,7 +225,29 @@ export const load: PageServerLoad = async ({ params }): Promise<LibraryMoviePage
 				}
 			: null;
 
-	// Check if a search is currently running for this movie
+	let collectionMovies: {
+		id: string;
+		title: string;
+		year: number | null;
+		posterPath: string | null;
+		hasFile: boolean | null;
+		monitored: boolean | null;
+	}[] = [];
+	if (movie.tmdbCollectionId) {
+		collectionMovies = await db
+			.select({
+				id: movies.id,
+				title: movies.title,
+				year: movies.year,
+				posterPath: movies.posterPath,
+				hasFile: movies.hasFile,
+				monitored: movies.monitored
+			})
+			.from(movies)
+			.where(eq(movies.tmdbCollectionId, movie.tmdbCollectionId));
+		collectionMovies = collectionMovies.filter((m) => m.id !== movie.id);
+	}
+
 	const isSearching = isMovieSearching(id);
 
 	return {
@@ -224,6 +255,7 @@ export const load: PageServerLoad = async ({ params }): Promise<LibraryMoviePage
 		qualityProfiles: allQualityProfiles,
 		rootFolders: folders,
 		queueItem,
-		isSearching
+		isSearching,
+		collectionMovies
 	};
 };

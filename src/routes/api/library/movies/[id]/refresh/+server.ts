@@ -67,7 +67,9 @@ export const POST: RequestHandler = async ({ params }) => {
 				year: tmdbMovie.release_date
 					? new Date(tmdbMovie.release_date).getFullYear()
 					: movieData.year,
-				imdbId: externalIds?.imdb_id || movieData.imdbId
+				imdbId: externalIds?.imdb_id || movieData.imdbId,
+				tmdbCollectionId: tmdbMovie.belongs_to_collection?.id ?? movieData.tmdbCollectionId,
+				collectionName: tmdbMovie.belongs_to_collection?.name ?? movieData.collectionName
 			})
 			.where(eq(movies.id, id));
 
