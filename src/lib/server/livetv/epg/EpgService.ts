@@ -29,7 +29,8 @@ import type {
 	EpgProgramWithProgress,
 	EpgSyncResult,
 	ChannelNowNext,
-	LiveTvAccount
+	LiveTvAccount,
+	LiveTvProviderType
 } from '$lib/types/livetv';
 
 const logger = createChildLogger({ module: 'EpgService' });
@@ -140,7 +141,7 @@ export class EpgService {
 
 		const candidates: AutoAttachCandidate[] = channelsWithEpg.map((channel) => ({
 			channelId: channel.channelId,
-			providerType: channel.providerType,
+			providerType: channel.providerType as LiveTvProviderType,
 			name: channel.name,
 			categoryId: channel.categoryId,
 			programCount: channel.programCount
@@ -158,7 +159,7 @@ export class EpgService {
 				{
 					lineupItemId: row.lineupItemId,
 					channelId: row.channelId,
-					providerType: row.providerType,
+					providerType: row.providerType as LiveTvProviderType,
 					name: row.name,
 					categoryId: row.categoryId
 				} satisfies AutoAttachTarget,
@@ -229,7 +230,7 @@ export class EpgService {
 				success: false,
 				accountId,
 				accountName: account.name,
-				providerType: account.providerType,
+				providerType: account.providerType as LiveTvProviderType,
 				programsAdded: 0,
 				programsUpdated: 0,
 				programsRemoved: 0,
@@ -240,7 +241,7 @@ export class EpgService {
 		throwIfCancelled();
 
 		// Get the appropriate provider
-		const provider = getProvider(account.providerType);
+		const provider = getProvider(account.providerType as LiveTvProviderType);
 
 		// Check if provider supports EPG
 		if (!provider.hasEpgSupport()) {
@@ -248,7 +249,7 @@ export class EpgService {
 				success: true,
 				accountId,
 				accountName: account.name,
-				providerType: account.providerType,
+				providerType: account.providerType as LiveTvProviderType,
 				programsAdded: 0,
 				programsUpdated: 0,
 				programsRemoved: 0,
@@ -270,7 +271,7 @@ export class EpgService {
 			const liveTvAccount: LiveTvAccount = {
 				id: account.id,
 				name: account.name,
-				providerType: account.providerType,
+				providerType: account.providerType as LiveTvProviderType,
 				enabled: account.enabled ?? true,
 				stalkerConfig: account.stalkerConfig ?? undefined,
 				xstreamConfig: account.xstreamConfig ?? undefined,
@@ -311,7 +312,7 @@ export class EpgService {
 					{
 						accountId,
 						name: account.name,
-						providerType: account.providerType,
+						providerType: account.providerType as LiveTvProviderType,
 						existingPrograms: accountStats.programCount,
 						existingChannelsWithEpg: accountStats.channelsWithEpg
 					},
@@ -330,7 +331,7 @@ export class EpgService {
 					success: true,
 					accountId,
 					accountName: account.name,
-					providerType: account.providerType,
+					providerType: account.providerType as LiveTvProviderType,
 					programsAdded: 0,
 					programsUpdated: 0,
 					programsRemoved: 0,
@@ -366,7 +367,7 @@ export class EpgService {
 				{
 					accountId,
 					name: account.name,
-					providerType: account.providerType,
+					providerType: account.providerType as LiveTvProviderType,
 					...result,
 					autoAttachedCount,
 					channelsWithEpg: accountStats.channelsWithEpg,
@@ -388,7 +389,7 @@ export class EpgService {
 				success: true,
 				accountId,
 				accountName: account.name,
-				providerType: account.providerType,
+				providerType: account.providerType as LiveTvProviderType,
 				...result,
 				duration: Date.now() - startTime
 			};
@@ -399,7 +400,7 @@ export class EpgService {
 				{
 					accountId,
 					name: account.name,
-					providerType: account.providerType,
+					providerType: account.providerType as LiveTvProviderType,
 					error: message
 				},
 				cancelled ? 'EPG sync cancelled' : 'EPG sync failed'
@@ -417,7 +418,7 @@ export class EpgService {
 				success: false,
 				accountId,
 				accountName: account.name,
-				providerType: account.providerType,
+				providerType: account.providerType as LiveTvProviderType,
 				programsAdded: 0,
 				programsUpdated: 0,
 				programsRemoved: 0,
@@ -448,14 +449,14 @@ export class EpgService {
 				break;
 			}
 
-			const provider = getProvider(account.providerType);
+			const provider = getProvider(account.providerType as LiveTvProviderType);
 			if (provider.hasEpgSupport()) {
 				if (options.shouldCancelAccount?.(account.id)) {
 					results.push({
 						success: false,
 						accountId: account.id,
 						accountName: account.name,
-						providerType: account.providerType,
+						providerType: account.providerType as LiveTvProviderType,
 						programsAdded: 0,
 						programsUpdated: 0,
 						programsRemoved: 0,
@@ -546,7 +547,7 @@ export class EpgService {
 				channelId: localChannelId,
 				externalChannelId: program.externalChannelId,
 				accountId,
-				providerType: program.providerType,
+				providerType: program.providerType as LiveTvProviderType,
 				title: program.title,
 				description: program.description,
 				category: program.category,
@@ -867,7 +868,7 @@ export class EpgService {
 			channelId: record.channelId,
 			externalChannelId: record.externalChannelId,
 			accountId: record.accountId,
-			providerType: record.providerType as 'stalker' | 'xstream' | 'm3u' | 'iptvorg',
+			providerType: record.providerType as LiveTvProviderType,
 			title: record.title,
 			description: record.description,
 			category: record.category,

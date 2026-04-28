@@ -7,6 +7,10 @@ import { z } from 'zod';
 import { NamingService, type MediaNamingInfo } from '$lib/server/library/naming/NamingService.js';
 import { namingSettingsService } from '$lib/server/library/naming/NamingSettingsService.js';
 import {
+	extractLanguageCodes,
+	resolveLocalizedTitles
+} from '$lib/server/library/naming/localization.js';
+import {
 	validateRootFolder,
 	getAnimeSubtypeEnforcement,
 	getEffectiveScoringProfileId,
@@ -37,13 +41,21 @@ const bulkAddMoviesSchema = z.object({
  * Generate a folder name for a movie using the naming service
  * Uses database naming configuration instead of defaults
  */
-function generateMovieFolderName(title: string, year?: number, tmdbId?: number): string {
+function generateMovieFolderName(
+	title: string,
+	year?: number,
+	tmdbId?: number,
+	collectionName?: string,
+	localizedTitles?: Record<string, string>
+): string {
 	const config = namingSettingsService.getConfigSync();
 	const namingService = new NamingService(config);
 	const info: MediaNamingInfo = {
 		title,
 		year,
-		tmdbId
+		tmdbId,
+		collectionName,
+		localizedTitles
 	};
 	return namingService.generateMovieFolderName(info);
 }
@@ -135,7 +147,24 @@ export const POST: RequestHandler = async ({ request }) => {
 				const year = movieDetails.release_date
 					? new Date(movieDetails.release_date).getFullYear()
 					: undefined;
-				const folderName = generateMovieFolderName(movieDetails.title, year, tmdbId);
+				const collectionData = movieDetails.belongs_to_collection;
+				const namingConfig = namingSettingsService.getConfigSync();
+				const langCodes = [
+					...extractLanguageCodes(namingConfig.movieFolderFormat),
+					...extractLanguageCodes(namingConfig.movieFileFormat)
+				];
+				const uniqueLangCodes = [...new Set(langCodes)];
+				const localizedTitles =
+					uniqueLangCodes.length > 0
+						? await resolveLocalizedTitles(tmdbId, uniqueLangCodes)
+						: undefined;
+				const folderName = generateMovieFolderName(
+					movieDetails.title,
+					year,
+					tmdbId,
+					collectionData?.name,
+					localizedTitles
+				);
 
 				// Extract external IDs
 				const { imdbId } = await fetchMovieExternalIds(tmdbId);
@@ -165,7 +194,9 @@ export const POST: RequestHandler = async ({ request }) => {
 						minimumAvailability,
 						hasFile: false,
 						wantsSubtitles,
-						languageProfileId
+						languageProfileId,
+						tmdbCollectionId: collectionData?.id ?? null,
+						collectionName: collectionData?.name ?? null
 					})
 					.returning();
 

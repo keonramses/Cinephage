@@ -67,7 +67,7 @@ export const providerDefinitions: LiveTvProviderDefinition[] = [
 	{
 		id: 'm3u',
 		name: 'M3U Playlist',
-		description: 'Playlist file via URL, file upload, or Free IPTV from iptv-org',
+		description: 'Playlist file via URL or file upload',
 		icon: 'List',
 		requiresAuth: false,
 		authDescription: 'None (URL or File)',
@@ -76,6 +76,20 @@ export const providerDefinitions: LiveTvProviderDefinition[] = [
 			supportsArchive: false,
 			supportsCategories: true,
 			supportsAutoRefresh: true
+		}
+	},
+	{
+		id: 'cinephage-iptv',
+		name: 'Cinephage IPTV',
+		description: 'Free IPTV channels from the Cinephage network',
+		icon: 'Globe',
+		requiresAuth: false,
+		authDescription: 'Automatic (Cinephage account)',
+		features: {
+			supportsEpg: true,
+			supportsArchive: false,
+			supportsCategories: true,
+			supportsAutoRefresh: false
 		}
 	}
 ];

@@ -176,6 +176,6 @@ export const tmdbCache = new TmdbCache();
 /**
  * Generate a cache key for a TMDB request
  */
-export function getCacheKey(endpoint: string, skipFilters: boolean): string {
-	return `tmdb:${endpoint}:${skipFilters}`;
+export function getCacheKey(endpoint: string, skipFilters: boolean, language?: string): string {
+	return `tmdb:${endpoint}:${language ?? 'default'}:${skipFilters}`;
 }

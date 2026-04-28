@@ -15,7 +15,7 @@ import type { LiveTvAccount } from '$lib/types/livetv';
 
 // Validation schema for testing Live TV accounts
 const liveTvAccountTestSchema = z.object({
-	providerType: z.enum(['stalker', 'xstream', 'm3u', 'iptvorg']),
+	providerType: z.enum(['stalker', 'xstream', 'm3u', 'cinephage-iptv']),
 	// Stalker-specific config
 	stalkerConfig: z
 		.object({
@@ -47,8 +47,8 @@ const liveTvAccountTestSchema = z.object({
 			epgUrl: z.string().url().optional()
 		})
 		.optional(),
-	// IPTV-Org-specific config
-	iptvOrgConfig: z
+	// Cinephage IPTV config
+	cinephageIptvConfig: z
 		.object({
 			countries: z.array(z.string()).optional(),
 			categories: z.array(z.string()).optional(),
@@ -99,10 +99,6 @@ function getFriendlyValidationMessage(error: ValidationError): string {
 				if (field === 'm3uConfig') {
 					return 'Please provide a valid M3U URL or playlist content.';
 				}
-				if (field === 'iptvOrgConfig') {
-					return 'Please select at least one country.';
-				}
-
 				const friendlyField = field
 					.replace(/([a-z])([A-Z])/g, '$1 $2')
 					.replace(/Config$/, ' configuration')
@@ -147,7 +143,8 @@ export const POST: RequestHandler = async ({ request }) => {
 			stalkerConfig: parsed.data.stalkerConfig,
 			xstreamConfig: parsed.data.xstreamConfig,
 			m3uConfig: parsed.data.m3uConfig,
-			iptvOrgConfig: parsed.data.iptvOrgConfig,
+			cinephageIptvConfig: parsed.data.cinephageIptvConfig,
+
 			playbackLimit: null,
 			channelCount: null,
 			categoryCount: null,

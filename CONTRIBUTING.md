@@ -108,7 +108,7 @@ npm run build       # Build for production
 
 ## Pull Request Process
 
-1. Fork the repository and create your branch from `main`
+1. Fork the repository and create your branch from `dev`
 2. Make your changes following the code style guidelines
 3. Add or update tests as needed
 4. Ensure all tests pass: `npm run test`
@@ -132,13 +132,15 @@ Example: `feat: add subtitle auto-download scheduler`
 
 ## Releases
 
-Releases are automated. When you merge `dev` into `main`, a workflow will:
+Releases are automated via [release-please](https://github.com/google-github-actions/release-please-action)
+which runs on every push to `dev`. When it detects unreleased conventional commits:
 
-1. Analyze commits since the last release
-2. Determine version bump (patch/minor/major) from commit types
-3. Update `package.json`, `package-lock.json`, and `CHANGELOG.md`
-4. Create a git tag (e.g., `v0.3.0`)
-5. Trigger the release pipeline (Docker build, GitHub Release, Discord)
+1. release-please opens a release PR against `dev` with version bumps and changelog updates
+2. Merging the release PR creates a git tag (e.g., `v0.7.0`)
+3. The tag fast-forwards `main` to match the release commit
+4. GitHub Release is created from the tag
+5. Docker images are built and pushed (`:latest`, `:X.Y.Z`, etc.)
+6. Discord announcement is posted
 
 ### Commit Types and Version Bumps
 
@@ -160,8 +162,8 @@ git commit -m "chore: prepare release" -m "Release-As: 1.0.0"
 ### Dry Run
 
 You can test the release process without creating an actual release using the
-[Auto Release workflow](https://github.com/MoldyTaint/Cinephage/actions/workflows/auto-release.yml)
-with `dry_run` enabled.
+[Release Please workflow](https://github.com/MoldyTaint/Cinephage/actions/workflows/release-please.yml)
+with `workflow_dispatch` (dry-run mode).
 
 ## Detailed Documentation
 

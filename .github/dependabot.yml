@@ -5,6 +5,7 @@ updates:
     schedule:
       interval: 'weekly'
       day: 'monday'
+    target-branch: dev
     open-pull-requests-limit: 10
     labels:
       - 'Type: Chore'
@@ -38,6 +39,7 @@ updates:
     schedule:
       interval: 'weekly'
       day: 'monday'
+    target-branch: dev
     labels:
       - 'Type: Chore'
       - 'Dependencies'

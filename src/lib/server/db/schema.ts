@@ -723,7 +723,9 @@ export const movies = sqliteTable(
 		// Adaptive subtitle searching: consecutive failed subtitle search count
 		failedSubtitleAttempts: integer('failed_subtitle_attempts').default(0),
 		// Adaptive subtitle searching: when subtitle searching first began (ISO timestamp)
-		firstSubtitleSearchAt: text('first_subtitle_search_at')
+		firstSubtitleSearchAt: text('first_subtitle_search_at'),
+		tmdbCollectionId: integer('tmdb_collection_id'),
+		collectionName: text('collection_name')
 	},
 	(table) => [index('idx_movies_monitored_hasfile').on(table.monitored, table.hasFile)]
 );
@@ -3100,10 +3102,10 @@ export type EpgProgramRecord = typeof epgPrograms.$inferSelect;
 export type NewEpgProgramRecord = typeof epgPrograms.$inferInsert;
 
 // ============================================================================
-// LIVE TV - UNIFIED PROVIDER ACCOUNTS (Multi-provider support: Stalker, XStream, M3U)
+// LIVE TV - UNIFIED PROVIDER ACCOUNTS (Multi-provider support: Stalker, XStream, M3U, Cinephage)
 // ============================================================================
 
-export const livetvProviderTypeEnum = ['stalker', 'xstream', 'm3u', 'iptvorg'] as const;
+export const livetvProviderTypeEnum = ['stalker', 'xstream', 'm3u', 'cinephage-iptv'] as const;
 export type LiveTvProviderType = (typeof livetvProviderTypeEnum)[number];
 
 /**

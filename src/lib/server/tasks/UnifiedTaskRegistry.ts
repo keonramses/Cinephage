@@ -170,6 +170,14 @@ const MAINTENANCE_TASKS: UnifiedTaskDefinition[] = [
 			'Reprobe existing .strm files to refresh media info, excluding Streamer Profile .strm files.',
 		category: 'maintenance',
 		runEndpoint: '/api/streaming/strm/reprobe'
+	},
+	{
+		id: 'metadata-refresh',
+		name: 'Metadata Refresh',
+		description:
+			'Refresh metadata for all movies and series from TMDB. Updates titles, overviews, posters, collection data, and other metadata that may be missing or outdated.',
+		category: 'maintenance',
+		runEndpoint: '/api/monitoring/search/metadata-refresh'
 	}
 ];
 

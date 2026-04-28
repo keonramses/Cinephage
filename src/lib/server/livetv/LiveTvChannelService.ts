@@ -24,7 +24,8 @@ import type {
 	ChannelQueryOptions,
 	PaginatedChannelResponse,
 	AccountSyncStatus,
-	ChannelSyncResult
+	ChannelSyncResult,
+	LiveTvProviderType
 } from '$lib/types/livetv';
 
 const logger = createChildLogger({ module: 'LiveTvChannelService' });
@@ -36,7 +37,7 @@ function recordToChannel(record: LivetvChannelRecord): LiveTvChannel {
 	return {
 		id: record.id,
 		accountId: record.accountId,
-		providerType: record.providerType,
+		providerType: record.providerType as LiveTvProviderType,
 		externalId: record.externalId,
 		name: record.name,
 		number: record.number,
@@ -64,7 +65,7 @@ function recordToCachedChannel(
 	return {
 		id: record.id,
 		accountId: record.accountId,
-		providerType: record.providerType,
+		providerType: record.providerType as LiveTvProviderType,
 		externalId: record.externalId,
 		name: record.name,
 		number: record.number,
@@ -378,7 +379,7 @@ export class LiveTvChannelService implements BackgroundService {
 		return records.map((record) => ({
 			id: record.id,
 			accountId: record.accountId,
-			providerType: record.providerType,
+			providerType: record.providerType as LiveTvProviderType,
 			externalId: record.externalId,
 			title: record.title,
 			alias: record.alias,
@@ -411,7 +412,7 @@ export class LiveTvChannelService implements BackgroundService {
 		return {
 			id: record.id,
 			accountId: record.accountId,
-			providerType: record.providerType,
+			providerType: record.providerType as LiveTvProviderType,
 			externalId: record.externalId,
 			title: record.title,
 			alias: record.alias,
@@ -432,7 +433,7 @@ export class LiveTvChannelService implements BackgroundService {
 		return records.map((record) => ({
 			id: record.id,
 			name: record.name,
-			providerType: record.providerType,
+			providerType: record.providerType as LiveTvProviderType,
 			syncStatus: record.syncStatus ?? 'never',
 			lastSyncAt: record.lastSyncAt ?? null,
 			lastSyncError: record.lastSyncError ?? null,
@@ -477,7 +478,7 @@ export class LiveTvChannelService implements BackgroundService {
 			throw new NotFoundError('Account', accountId);
 		}
 
-		const provider = getProvider(account.providerType);
+		const provider = getProvider(account.providerType as LiveTvProviderType);
 		return provider.syncChannels(accountId);
 	}
 
@@ -490,7 +491,7 @@ export class LiveTvChannelService implements BackgroundService {
 		return records.map((record) => ({
 			id: record.id,
 			name: record.name,
-			providerType: record.providerType,
+			providerType: record.providerType as LiveTvProviderType,
 			syncStatus: record.syncStatus ?? 'never',
 			lastSyncAt: record.lastSyncAt ?? null,
 			lastSyncError: record.lastSyncError ?? null,

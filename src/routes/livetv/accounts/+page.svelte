@@ -160,15 +160,8 @@
 					break;
 				}
 				case 'm3u':
-					if (data.selectedCountries?.length) {
-						// IPTV-Org mode
-						body.providerType = 'iptvorg';
-						body.iptvOrgConfig = {
-							countries: data.selectedCountries
-						};
-					} else {
+					{
 						const normalizedEpgUrl = data.epgUrl.trim();
-						// Regular M3U mode
 						body.m3uConfig = {
 							url: data.url || undefined,
 							fileContent: data.fileContent || undefined,
@@ -176,6 +169,11 @@
 							epgUrl: normalizedEpgUrl || (modalMode === 'edit' ? '' : undefined),
 							autoRefresh: data.autoRefresh
 						};
+					}
+					break;
+				case 'cinephage-iptv':
+					if (data.cinephageIptvConfig) {
+						body.cinephageIptvConfig = data.cinephageIptvConfig;
 					}
 					break;
 			}
@@ -410,17 +408,15 @@
 				};
 				break;
 			case 'm3u':
-				if (config.countries) {
-					body.providerType = 'iptvorg';
-					body.iptvOrgConfig = {
-						countries: config.countries
-					};
-				} else {
-					body.m3uConfig = {
-						url: config.url,
-						fileContent: config.fileContent,
-						epgUrl: config.epgUrl
-					};
+				body.m3uConfig = {
+					url: config.url,
+					fileContent: config.fileContent,
+					epgUrl: config.epgUrl
+				};
+				break;
+			case 'cinephage-iptv':
+				if (config.cinephageIptvConfig) {
+					body.cinephageIptvConfig = config.cinephageIptvConfig;
 				}
 				break;
 		}

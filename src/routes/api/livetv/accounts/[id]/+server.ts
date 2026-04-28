@@ -58,6 +58,14 @@ const liveTvAccountUpdateSchema = z.object({
 			refreshIntervalHours: z.number().min(1).max(168).optional(),
 			autoRefresh: z.boolean().optional()
 		})
+		.optional(),
+	// Cinephage IPTV config updates
+	cinephageIptvConfig: z
+		.object({
+			countries: z.array(z.string()).optional(),
+			categories: z.array(z.string()).optional(),
+			languages: z.array(z.string()).optional()
+		})
 		.optional()
 });
 

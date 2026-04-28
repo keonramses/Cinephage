@@ -24,7 +24,7 @@ import type {
 	StalkerConfig,
 	XstreamConfig,
 	M3uConfig,
-	IptvOrgConfig
+	CinephageIptvConfig
 } from '$lib/types/livetv';
 
 const logger = createChildLogger({ module: 'LiveTvAccountManager' });
@@ -61,13 +61,13 @@ export function recordToAccount(record: LivetvAccountRecord): LiveTvAccount {
 	return {
 		id: record.id,
 		name: record.name,
-		providerType: record.providerType,
+		providerType: record.providerType as LiveTvProviderType,
 		enabled: record.enabled ?? true,
 		// Provider configs
 		stalkerConfig: record.stalkerConfig ?? undefined,
 		xstreamConfig: record.xstreamConfig ?? undefined,
 		m3uConfig: record.m3uConfig ?? undefined,
-		iptvOrgConfig: record.iptvOrgConfig ?? undefined,
+		cinephageIptvConfig: record.iptvOrgConfig as CinephageIptvConfig | undefined,
 		// Metadata from provider
 		playbackLimit: record.playbackLimit ?? null,
 		channelCount: record.channelCount ?? null,
@@ -301,7 +301,7 @@ export class LiveTvAccountManager implements BackgroundService {
 		let stalkerConfig: StalkerConfig | undefined;
 		let xstreamConfig: XstreamConfig | undefined;
 		let m3uConfig: M3uConfig | undefined;
-		let iptvOrgConfig: IptvOrgConfig | undefined;
+		let iptvOrgConfig: Record<string, unknown> | undefined;
 
 		if (input.providerType === 'stalker' && input.stalkerConfig) {
 			stalkerConfig = {
@@ -332,12 +332,12 @@ export class LiveTvAccountManager implements BackgroundService {
 				headers: input.m3uConfig.headers,
 				userAgent: input.m3uConfig.userAgent
 			};
-		} else if (input.providerType === 'iptvorg' && input.iptvOrgConfig) {
+		} else if (input.providerType === 'cinephage-iptv' && input.cinephageIptvConfig) {
 			iptvOrgConfig = {
-				countries: input.iptvOrgConfig.countries || [],
-				categories: input.iptvOrgConfig.categories || [],
-				languages: input.iptvOrgConfig.languages || [],
-				autoSyncIntervalHours: input.iptvOrgConfig.autoSyncIntervalHours || 24
+				countries: input.cinephageIptvConfig.countries || [],
+				categories: input.cinephageIptvConfig.categories || [],
+				languages: input.cinephageIptvConfig.languages || [],
+				autoSyncIntervalHours: input.cinephageIptvConfig.autoSyncIntervalHours || 24
 			};
 		}
 
@@ -352,7 +352,7 @@ export class LiveTvAccountManager implements BackgroundService {
 				stalkerConfig,
 				xstreamConfig,
 				m3uConfig,
-				iptvOrgConfig,
+				cinephageIptvConfig: input.cinephageIptvConfig,
 				playbackLimit: null,
 				channelCount: null,
 				categoryCount: null,
@@ -493,11 +493,11 @@ export class LiveTvAccountManager implements BackgroundService {
 			}
 		}
 
-		if (updates.iptvOrgConfig && existing.providerType === 'iptvorg') {
+		if (updates.cinephageIptvConfig && existing.providerType === 'cinephage-iptv') {
 			updateData.iptvOrgConfig = {
-				...existing.iptvOrgConfig,
-				...updates.iptvOrgConfig
-			} as IptvOrgConfig;
+				...existing.cinephageIptvConfig,
+				...updates.cinephageIptvConfig
+			} as Record<string, unknown>;
 		}
 
 		const [record] = await db

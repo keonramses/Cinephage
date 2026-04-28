@@ -1,25 +1,22 @@
 <script lang="ts">
-	import { CheckCircle2, XCircle, Link, FileText, Globe } from 'lucide-svelte';
+	import { CheckCircle2, XCircle, Link, FileText } from 'lucide-svelte';
 	import { SectionHeader } from '$lib/components/ui/modal';
-	import IptvOrgSelector from '../IptvOrgSelector.svelte';
 	import * as m from '$lib/paraglide/messages.js';
 
 	interface Props {
 		name: string;
-		inputMode: 'url' | 'file' | 'freeiptv';
+		inputMode: 'url' | 'file';
 		url: string;
 		fileContent: string;
 		fileName: string;
-		selectedCountries: string[];
 		epgUrl: string;
 		autoRefresh: boolean;
 		enabled: boolean;
 		mode: 'add' | 'edit';
 		onNameChange: (value: string) => void;
-		onInputModeChange: (mode: 'url' | 'file' | 'freeiptv') => void;
+		onInputModeChange: (mode: 'url' | 'file') => void;
 		onUrlChange: (value: string) => void;
 		onFileUpload: (content: string, name: string) => void;
-		onCountriesChange: (countries: string[]) => void;
 		onEpgUrlChange: (value: string) => void;
 		onAutoRefreshChange: (value: boolean) => void;
 		onEnabledChange: (value: boolean) => void;
@@ -31,7 +28,6 @@
 		url,
 		fileContent: _fileContent,
 		fileName,
-		selectedCountries,
 		epgUrl,
 		autoRefresh,
 		enabled,
@@ -40,7 +36,6 @@
 		onInputModeChange,
 		onUrlChange,
 		onFileUpload,
-		onCountriesChange,
 		onEpgUrlChange,
 		onAutoRefreshChange,
 		onEnabledChange
@@ -92,9 +87,7 @@
 			class="input-bordered input input-sm"
 			value={name}
 			oninput={(e) => onNameChange(e.currentTarget.value)}
-			placeholder={inputMode === 'freeiptv'
-				? m.livetv_form_m3u_freeIptvPlaceholder()
-				: m.livetv_form_m3u_m3uPlaylistPlaceholder()}
+			placeholder={m.livetv_form_m3u_m3uPlaylistPlaceholder()}
 		/>
 		<div class="label py-1">
 			<span class="label-text-alt text-xs">{m.livetv_form_m3u_namePlaceholder()}</span>
@@ -117,13 +110,6 @@
 			>
 				<FileText class="mr-2 inline h-4 w-4" />
 				{m.livetv_form_m3u_fileTab()}
-			</button>
-			<button
-				class="tab {inputMode === 'freeiptv' ? 'tab-active' : ''}"
-				onclick={() => onInputModeChange('freeiptv')}
-			>
-				<Globe class="mr-2 inline h-4 w-4" />
-				{m.livetv_form_m3u_freeIptvTab()}
 			</button>
 		</div>
 	{/if}
@@ -186,8 +172,6 @@
 						</div>
 					{/if}
 				</div>
-			{:else}
-				<IptvOrgSelector {selectedCountries} onChange={onCountriesChange} />
 			{/if}
 		</div>
 

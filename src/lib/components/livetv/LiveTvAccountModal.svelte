@@ -1,11 +1,12 @@
 <script lang="ts">
-	import { X, Loader2, XCircle, Tv, Radio, List } from 'lucide-svelte';
+	import { X, Loader2, XCircle, Tv, Radio, List, Globe } from 'lucide-svelte';
 	import ModalWrapper from '$lib/components/ui/modal/ModalWrapper.svelte';
 	import { TestResult } from '$lib/components/ui/modal';
 	import LiveTvProviderPicker from './LiveTvProviderPicker.svelte';
 	import StalkerAccountForm from './forms/StalkerAccountForm.svelte';
 	import XstreamAccountForm from './forms/XstreamAccountForm.svelte';
 	import M3uAccountForm from './forms/M3uAccountForm.svelte';
+	import CinephageIptvAccountForm from './forms/CinephageIptvAccountForm.svelte';
 	import { getProviderDefinition } from './providerDefinitions';
 	import type {
 		LiveTvAccount,
@@ -36,10 +37,10 @@
 		password?: string;
 		url?: string;
 		fileContent?: string;
-		selectedCountries?: string[];
 		epgUrl: string;
 		autoRefresh: boolean;
 		enabled: boolean;
+		cinephageIptvConfig?: { countries: string[] };
 	}
 
 	export interface TestConfig {
@@ -52,7 +53,7 @@
 		url?: string;
 		fileContent?: string;
 		epgUrl?: string;
-		countries?: string[];
+		cinephageIptvConfig?: { countries: string[] };
 	}
 
 	let {
@@ -85,12 +86,14 @@
 	let password = $state('');
 
 	// M3U form state
-	let inputMode = $state<'url' | 'file' | 'freeiptv'>('url');
+	let inputMode = $state<'url' | 'file'>('url');
 	let url = $state('');
 	let fileContent = $state('');
 	let fileName = $state('');
-	let selectedCountries = $state<string[]>([]);
 	let autoRefresh = $state(false);
+
+	// Cinephage IPTV form state
+	let selectedCountries = $state<string[]>([]);
 
 	// UI state
 	let testing = $state(false);
@@ -101,20 +104,13 @@
 		mode === 'add' ? m.livetv_accountModal_addTitle() : m.livetv_accountModal_editTitle()
 	);
 	const providerDef = $derived(selectedProvider ? getProviderDefinition(selectedProvider) : null);
-	const isIptvOrgAccount = $derived(account?.providerType === 'iptvorg');
-
 	// Reset form when modal opens
 	$effect(() => {
 		if (open) {
 			// Set provider type
 			if (mode === 'edit' && account) {
-				if (isIptvOrgAccount) {
-					selectedProvider = 'm3u';
-					inputMode = 'freeiptv';
-				} else {
-					selectedProvider = account.providerType;
-					inputMode = account.m3uConfig?.url ? 'url' : 'file';
-				}
+				selectedProvider = account.providerType;
+				inputMode = account.m3uConfig?.url ? 'url' : 'file';
 			} else {
 				selectedProvider = '';
 				inputMode = 'url';
@@ -138,8 +134,14 @@
 			url = account?.m3uConfig?.url ?? '';
 			fileContent = account?.m3uConfig?.fileContent ?? '';
 			fileName = '';
-			selectedCountries = account?.iptvOrgConfig?.countries ?? [];
 			autoRefresh = account?.m3uConfig?.autoRefresh ?? false;
+
+			// Cinephage IPTV fields
+			if (account?.providerType === 'cinephage-iptv') {
+				selectedCountries = account.cinephageIptvConfig?.countries ?? [];
+			} else {
+				selectedCountries = [];
+			}
 
 			// Reset UI state
 			testing = false;
@@ -159,10 +161,11 @@
 	);
 	const isM3uValid = $derived(() => {
 		if (name.trim().length === 0) return false;
-		if (inputMode === 'freeiptv') return selectedCountries.length > 0;
 		if (inputMode === 'url') return url.trim().length > 0;
 		return fileContent.length > 0;
 	});
+
+	const isCinephageIptvValid = $derived(name.trim().length > 0 && selectedCountries.length > 0);
 
 	const canSubmit = $derived(() => {
 		switch (selectedProvider) {
@@ -172,6 +175,8 @@
 				return isXstreamValid;
 			case 'm3u':
 				return isM3uValid();
+			case 'cinephage-iptv':
+				return isCinephageIptvValid;
 			default:
 				return false;
 		}
@@ -199,13 +204,14 @@
 				}
 				break;
 			case 'm3u':
-				if (inputMode === 'freeiptv') {
-					data.selectedCountries = selectedCountries;
-				} else if (inputMode === 'url') {
+				if (inputMode === 'url') {
 					data.url = url.trim();
 				} else {
 					data.fileContent = fileContent;
 				}
+				break;
+			case 'cinephage-iptv':
+				data.cinephageIptvConfig = { countries: selectedCountries };
 				break;
 		}
 
@@ -234,13 +240,14 @@
 				if (epgUrl.trim()) {
 					config.epgUrl = epgUrl.trim();
 				}
-				if (inputMode === 'freeiptv') {
-					config.countries = selectedCountries;
-				} else if (inputMode === 'url') {
+				if (inputMode === 'url') {
 					config.url = url.trim();
 				} else {
 					config.fileContent = fileContent;
 				}
+				break;
+			case 'cinephage-iptv':
+				config.cinephageIptvConfig = { countries: selectedCountries };
 				break;
 		}
 
@@ -349,6 +356,8 @@
 							<Radio class="h-5 w-5 text-primary" />
 						{:else if selectedProvider === 'm3u'}
 							<List class="h-5 w-5 text-primary" />
+						{:else if selectedProvider === 'cinephage-iptv'}
+							<Globe class="h-5 w-5 text-primary" />
 						{/if}
 					</div>
 					<div>
@@ -407,7 +416,6 @@
 				{url}
 				{fileContent}
 				{fileName}
-				{selectedCountries}
 				{epgUrl}
 				{autoRefresh}
 				{enabled}
@@ -422,9 +430,18 @@
 					fileContent = content;
 					fileName = name;
 				}}
-				onCountriesChange={(v) => (selectedCountries = v)}
 				onEpgUrlChange={(v) => (epgUrl = v)}
 				onAutoRefreshChange={(v) => (autoRefresh = v)}
+				onEnabledChange={(v) => (enabled = v)}
+			/>
+		{:else if selectedProvider === 'cinephage-iptv'}
+			<CinephageIptvAccountForm
+				{name}
+				{selectedCountries}
+				{enabled}
+				{mode}
+				onNameChange={(v) => (name = v)}
+				onCountriesChange={(v) => (selectedCountries = v)}
 				onEnabledChange={(v) => (enabled = v)}
 			/>
 		{/if}

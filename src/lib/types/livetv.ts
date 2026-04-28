@@ -5,10 +5,9 @@
  * - Stalker Portal
  * - XStream Codes
  * - M3U Playlists
- * - IPTV-Org
  */
 
-export type LiveTvProviderType = 'stalker' | 'xstream' | 'm3u' | 'iptvorg';
+export type LiveTvProviderType = 'stalker' | 'xstream' | 'm3u' | 'cinephage-iptv';
 
 // ============================================================================
 // PROVIDER INTERFACE TYPES (for provider implementations)
@@ -157,24 +156,6 @@ export interface M3uConfig {
 	userAgent?: string;
 }
 
-/**
- * IPTV-Org configuration
- */
-export interface IptvOrgConfig {
-	/** Countries to filter by (ISO 3166-1 alpha-2 codes, e.g., 'US', 'GB', 'CA') */
-	countries?: string[];
-	/** Categories to filter by (e.g., 'news', 'sports', 'entertainment') */
-	categories?: string[];
-	/** Languages to filter by (ISO 639-3 codes, e.g., 'eng', 'spa', 'fra') */
-	languages?: string[];
-	/** Last sync timestamp */
-	lastSyncAt?: string;
-	/** Auto-sync interval in hours (default: 24) */
-	autoSyncIntervalHours?: number;
-	/** Selected stream quality preference (default: null = all) */
-	preferredQuality?: string | null;
-}
-
 // ============================================================================
 // UNIFIED ACCOUNT TYPES
 // ============================================================================
@@ -192,7 +173,7 @@ export interface LiveTvAccount {
 	stalkerConfig?: StalkerConfig;
 	xstreamConfig?: XstreamConfig;
 	m3uConfig?: M3uConfig;
-	iptvOrgConfig?: IptvOrgConfig;
+	cinephageIptvConfig?: CinephageIptvConfig;
 
 	// Common metadata
 	playbackLimit: number | null;
@@ -233,7 +214,7 @@ export interface LiveTvAccountInput {
 	stalkerConfig?: StalkerConfig;
 	xstreamConfig?: XstreamConfig;
 	m3uConfig?: M3uConfig;
-	iptvOrgConfig?: IptvOrgConfig;
+	cinephageIptvConfig?: CinephageIptvConfig;
 }
 
 /**
@@ -247,7 +228,7 @@ export interface LiveTvAccountUpdate {
 	stalkerConfig?: Partial<StalkerConfig>;
 	xstreamConfig?: Partial<XstreamConfig>;
 	m3uConfig?: Partial<M3uConfig>;
-	iptvOrgConfig?: Partial<IptvOrgConfig>;
+	cinephageIptvConfig?: Partial<CinephageIptvConfig>;
 }
 
 /**
@@ -296,6 +277,16 @@ export interface XstreamChannelData {
 	containerExtension?: string;
 }
 
+/** Cinephage IPTV configuration */
+export interface CinephageIptvConfig {
+	countries?: string[];
+	categories?: string[];
+	languages?: string[];
+	lastSyncAt?: string;
+	autoSyncIntervalHours?: number;
+	preferredQuality?: string | null;
+}
+
 /**
  * M3U-specific channel data
  */
@@ -306,6 +297,8 @@ export interface M3uChannelData {
 	url: string;
 	tvgLogo?: string;
 	attributes?: Record<string, string>;
+	/** Backup stream URLs for automatic failover */
+	backupUrls?: string[];
 }
 
 // ============================================================================
@@ -817,21 +810,6 @@ export interface StalkerAccount extends Omit<LiveTvAccount, 'providerType' | 'st
 	hasPassword: boolean;
 }
 
-/** @deprecated Use LiveTvAccountInput with providerType='stalker' */
-export interface StalkerAccountInput {
-	name: string;
-	portalUrl: string;
-	macAddress: string;
-	enabled?: boolean;
-	serialNumber?: string;
-	deviceId?: string;
-	deviceId2?: string;
-	model?: string;
-	timezone?: string;
-	username?: string;
-	password?: string;
-}
-
 /** @deprecated Use LiveTvAccountUpdate instead */
 export interface StalkerAccountUpdate {
 	name?: string;
@@ -849,19 +827,6 @@ export interface StalkerAccountUpdate {
 
 /** @deprecated Use LiveTvAccountTestResult instead */
 export type StalkerAccountTestResult = LiveTvAccountTestResult;
-
-/** @deprecated Use LiveTvAccountInput with providerType='stalker' for testing */
-export interface StalkerAccountTestConfig {
-	portalUrl: string;
-	macAddress: string;
-	serialNumber?: string;
-	deviceId?: string;
-	deviceId2?: string;
-	model?: string;
-	timezone?: string;
-	username?: string;
-	password?: string;
-}
 
 /** @deprecated Use LiveTvCategory instead */
 export interface StalkerCategory {
@@ -891,24 +856,6 @@ export interface StalkerChannelData {
 	archiveDuration: number;
 }
 
-/** @deprecated Use ChannelSyncResult instead */
-export type StalkerChannelSyncResult = ChannelSyncResult;
-
-/** @deprecated Use XstreamChannelData instead */
-export type XstreamChannelInfo = XstreamChannelData;
-
-/** @deprecated Use M3uChannelData instead */
-export type M3uChannelInfo = M3uChannelData;
-
-/** @deprecated Use CachedChannel['externalId'] instead of stalkerId */
-export type StalkerId = string;
-
-/** @deprecated Use LiveTvProviderType instead */
-export type ProviderType = LiveTvProviderType;
-
-/** @deprecated Use LiveTvCategory instead */
-export type CachedCategory = LiveTvCategory;
-
 // ============================================================================
 // STALKER RAW PROFILE (for internal portal API responses)
 // ============================================================================
@@ -930,6 +877,3 @@ export interface StalkerRawProfile {
 	default_timezone: string;
 	[key: string]: unknown;
 }
-
-/** @deprecated Use ChannelSyncResult instead */
-export type StalkerChannelSyncResultDuplicate = ChannelSyncResult;

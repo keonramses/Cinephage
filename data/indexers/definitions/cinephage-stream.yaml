@@ -15,7 +15,7 @@ language: en-US
 encoding: UTF-8
 
 links:
-  - http://localhost
+  - https://api.cinephage.net
 
 settings:
   - name: useHttps

@@ -853,6 +853,57 @@
 			</div>
 		</div>
 	</div>
+
+	{#if data.collectionMovies && data.collectionMovies.length > 0}
+		<div class="mt-2 rounded-xl bg-base-200 p-4 md:p-6">
+			<h2 class="mb-4 text-lg font-semibold">Other movies in this collection</h2>
+			<div class="flex gap-3 overflow-x-auto pb-2">
+				{#each data.collectionMovies as collMovie (collMovie.id)}
+					<a
+						href={resolvePath(`/library/movie/${collMovie.id}`)}
+						class="flex w-28 shrink-0 flex-col items-center gap-1.5 rounded-lg p-2 transition-colors hover:bg-base-300"
+					>
+						<div class="relative aspect-[2/3] w-full overflow-hidden rounded bg-base-300">
+							{#if collMovie.posterPath}
+								<img
+									src="https://image.tmdb.org/t/p/w185{collMovie.posterPath}"
+									alt={collMovie.title}
+									class="h-full w-full object-cover"
+									loading="lazy"
+								/>
+							{:else}
+								<div class="flex h-full w-full items-center justify-center text-base-content/30">
+									<span class="text-2xl">🎬</span>
+								</div>
+							{/if}
+							{#if collMovie.hasFile}
+								<span
+									class="absolute right-0.5 bottom-0.5 rounded-full bg-success/80 p-0.5 text-success-content"
+								>
+									<svg
+										xmlns="http://www.w3.org/2000/svg"
+										class="h-2.5 w-2.5"
+										fill="none"
+										viewBox="0 0 24 24"
+										stroke="currentColor"
+										stroke-width="3"
+									>
+										<path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7" />
+									</svg>
+								</span>
+							{/if}
+						</div>
+						<span class="line-clamp-2 text-center text-xs leading-tight font-medium">
+							{collMovie.title}
+						</span>
+						{#if collMovie.year}
+							<span class="text-[10px] text-base-content/50">{collMovie.year}</span>
+						{/if}
+					</a>
+				{/each}
+			</div>
+		</div>
+	{/if}
 </div>
 
 <!-- Edit Modal -->

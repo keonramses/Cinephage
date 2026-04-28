@@ -15,7 +15,7 @@ import { ValidationError, isAppError } from '$lib/errors';
 // Validation schema for creating Live TV accounts (supports all provider types)
 const liveTvAccountCreateSchema = z.object({
 	name: z.string().min(1).max(100),
-	providerType: z.enum(['stalker', 'xstream', 'm3u', 'iptvorg']),
+	providerType: z.enum(['stalker', 'xstream', 'm3u', 'cinephage-iptv']),
 	enabled: z.boolean().optional(),
 	// Stalker-specific config
 	stalkerConfig: z
@@ -50,8 +50,8 @@ const liveTvAccountCreateSchema = z.object({
 			autoRefresh: z.boolean().optional()
 		})
 		.optional(),
-	// IPTV-Org-specific config
-	iptvOrgConfig: z
+	// Cinephage IPTV config
+	cinephageIptvConfig: z
 		.object({
 			countries: z.array(z.string()).optional(),
 			categories: z.array(z.string()).optional(),
