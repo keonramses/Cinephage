@@ -792,6 +792,10 @@ export class MonitoringScheduler extends EventEmitter implements BackgroundServi
 				const { executeHistoryCleanupTask } = await import('./tasks/HistoryCleanupTask.js');
 				return await executeHistoryCleanupTask(ctx);
 			}
+			case 'metadataRefresh': {
+				const { executeMetadataRefreshTask } = await import('./tasks/MetadataRefreshTask.js');
+				return await executeMetadataRefreshTask(ctx);
+			}
 			default:
 				throw new Error(`Unknown task type: ${taskType}`);
 		}
@@ -834,6 +838,10 @@ export class MonitoringScheduler extends EventEmitter implements BackgroundServi
 
 	async runHistoryCleanup(): Promise<TaskResult> {
 		return await this.executeTaskManually('historyCleanup');
+	}
+
+	async runMetadataRefresh(): Promise<TaskResult> {
+		return await this.executeTaskManually('metadataRefresh');
 	}
 
 	private async executeTaskManually(taskType: string): Promise<TaskResult> {

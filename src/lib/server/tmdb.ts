@@ -78,12 +78,11 @@ export const tmdb = {
 	},
 
 	async fetch(endpoint: string, options: RequestInit = {}, skipFilters = false) {
-		// Ensure endpoint starts with /
 		const path = endpoint.startsWith('/') ? endpoint : `/${endpoint}`;
-
-		// Check cache first (only for GET requests which is the default)
 		const isGetRequest = !options.method || options.method === 'GET';
-		const cacheKey = getCacheKey(path, skipFilters);
+
+		const { apiKey, filters } = await loadTmdbSettings();
+		const cacheKey = getCacheKey(path, skipFilters, filters?.language);
 
 		if (isGetRequest) {
 			const cached = tmdbCache.get(cacheKey);
@@ -91,7 +90,6 @@ export const tmdb = {
 				return cached;
 			}
 
-			// Check if there's already an in-flight request for this endpoint
 			const inFlight = inFlightRequests.get(cacheKey);
 			if (inFlight) {
 				logger.debug({ path }, 'Deduplicating in-flight TMDB request');
@@ -99,11 +97,8 @@ export const tmdb = {
 			}
 		}
 
-		// Create the actual request as a promise
 		const requestPromise = (async () => {
 			try {
-				const { apiKey, filters } = await loadTmdbSettings();
-
 				const url = new URL(TMDB.BASE_URL + path);
 
 				// Add API key
