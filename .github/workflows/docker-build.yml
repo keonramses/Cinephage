@@ -27,7 +27,7 @@ on:
         type: string
         default: ''
   push:
-    branches: [dev]
+    branches: [dev, 'test/**']
   pull_request:
     branches: [main, dev]
 
