@@ -945,6 +945,12 @@ export class UnifiedIndexer implements IIndexer {
 			return 'Authentication failed: invalid API key';
 		}
 
+		// Check cloudflare before generic network errors — "All URLs failed: ...: Cloudflare ..."
+		// would otherwise match "all urls failed" first and hide the real cause.
+		if (lower.includes('cloudflare')) {
+			return 'Cloudflare protection blocked the request';
+		}
+
 		if (
 			lower.includes('fetch failed') ||
 			lower.includes('all urls failed') ||
@@ -957,10 +963,6 @@ export class UnifiedIndexer implements IIndexer {
 			lower.includes('unable to reach')
 		) {
 			return 'Unable to reach indexer server';
-		}
-
-		if (lower.includes('cloudflare')) {
-			return 'Cloudflare protection blocked the request';
 		}
 
 		if (

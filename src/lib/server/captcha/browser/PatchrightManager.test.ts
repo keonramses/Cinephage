@@ -1,15 +1,24 @@
 /**
- * CamoufoxManager Tests
+ * PatchrightManager Tests
  *
- * Tests for browser lifecycle management with mocked camoufox-js.
+ * Tests for browser lifecycle management with mocked patchright.
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import type { Browser, BrowserContext, Page, Cookie } from 'playwright-core';
 
-// Mock camoufox-js before importing the module
-vi.mock('camoufox-js', () => ({
-	Camoufox: vi.fn()
+// Mock fs before importing the module
+vi.mock('fs', () => ({
+	existsSync: vi.fn().mockReturnValue(true)
+}));
+
+// Mock patchright before importing the module
+const mockChromium = {
+	executablePath: vi.fn().mockReturnValue('/app/browsers/chromium/chrome'),
+	launch: vi.fn()
+};
+vi.mock('patchright', () => ({
+	chromium: mockChromium
 }));
 
 // Mock logger to prevent console output
@@ -27,32 +36,9 @@ vi.mock('$lib/logging', () => ({
 }));
 
 // Import after mocking
-const { Camoufox } = await import('camoufox-js');
-const { CamoufoxManager, getCamoufoxManager, shutdownCamoufoxManager } =
-	await import('./CamoufoxManager');
-
-/**
- * Create a mock Browser
- */
-function createMockBrowser(contexts: BrowserContext[] = []): Browser {
-	return {
-		close: vi.fn().mockResolvedValue(undefined),
-		contexts: vi.fn().mockReturnValue(contexts),
-		newContext: vi.fn(),
-		on: vi.fn() // For browser disconnect event handler
-	} as unknown as Browser;
-}
-
-/**
- * Create a mock BrowserContext
- */
-function createMockContext(): BrowserContext {
-	return {
-		cookies: vi.fn().mockResolvedValue([]),
-		addCookies: vi.fn().mockResolvedValue(undefined),
-		newPage: vi.fn()
-	} as unknown as BrowserContext;
-}
+const { existsSync } = await import('fs');
+const { PatchrightManager, getPatchrightManager, shutdownPatchrightManager } =
+	await import('./PatchrightManager');
 
 /**
  * Create a mock Page
@@ -66,33 +52,52 @@ function createMockPage(): Page {
 	} as unknown as Page;
 }
 
-describe('CamoufoxManager', () => {
+/**
+ * Create a mock BrowserContext
+ */
+function createMockContext(): BrowserContext {
+	const mockPage = createMockPage();
+	return {
+		cookies: vi.fn().mockResolvedValue([]),
+		addCookies: vi.fn().mockResolvedValue(undefined),
+		newPage: vi.fn().mockResolvedValue(mockPage)
+	} as unknown as BrowserContext;
+}
+
+/**
+ * Create a mock Browser
+ */
+function createMockBrowser(context?: BrowserContext): Browser {
+	const ctx = context ?? createMockContext();
+	return {
+		close: vi.fn().mockResolvedValue(undefined),
+		newContext: vi.fn().mockResolvedValue(ctx),
+		on: vi.fn()
+	} as unknown as Browser;
+}
+
+describe('PatchrightManager', () => {
 	let mockBrowser: Browser;
 	let mockContext: BrowserContext;
-	let mockPage: Page;
 
 	beforeEach(() => {
 		vi.clearAllMocks();
 
-		// Setup mock chain
-		mockPage = createMockPage();
 		mockContext = createMockContext();
-		(mockContext.newPage as ReturnType<typeof vi.fn>).mockResolvedValue(mockPage);
+		mockBrowser = createMockBrowser(mockContext);
 
-		mockBrowser = createMockBrowser([mockContext]);
-
-		// Default: Camoufox launches successfully
-		(Camoufox as ReturnType<typeof vi.fn>).mockResolvedValue(mockBrowser);
+		mockChromium.executablePath.mockReturnValue('/app/browsers/chromium/chrome');
+		mockChromium.launch.mockResolvedValue(mockBrowser);
+		(existsSync as ReturnType<typeof vi.fn>).mockReturnValue(true);
 	});
 
 	afterEach(async () => {
-		// Clean up any managers
-		await shutdownCamoufoxManager();
+		await shutdownPatchrightManager();
 	});
 
 	describe('Availability check', () => {
-		it('should mark browser as available when Camoufox launches successfully', async () => {
-			const manager = new CamoufoxManager();
+		it('should mark browser as available when Chromium executable exists', async () => {
+			const manager = new PatchrightManager();
 			await manager.waitForAvailabilityCheck();
 
 			expect(manager.browserAvailable()).toBe(true);
@@ -100,61 +105,58 @@ describe('CamoufoxManager', () => {
 			expect(manager.getAvailabilityError()).toBeUndefined();
 		});
 
-		it('should mark browser as unavailable when Camoufox fails to launch', async () => {
-			(Camoufox as ReturnType<typeof vi.fn>).mockRejectedValue(new Error('Browser not found'));
+		it('should mark browser as unavailable when Chromium executable is missing', async () => {
+			(existsSync as ReturnType<typeof vi.fn>).mockReturnValue(false);
 
-			const manager = new CamoufoxManager();
+			const manager = new PatchrightManager();
+			await manager.waitForAvailabilityCheck();
+
+			expect(manager.browserAvailable()).toBe(false);
+			expect(manager.getAvailabilityError()).toBeDefined();
+		});
+
+		it('should mark browser as unavailable when executablePath throws', async () => {
+			mockChromium.executablePath.mockImplementation(() => {
+				throw new Error('Browser not found');
+			});
+
+			const manager = new PatchrightManager();
 			await manager.waitForAvailabilityCheck();
 
 			expect(manager.browserAvailable()).toBe(false);
 			expect(manager.getAvailabilityError()).toBe('Browser not found');
 		});
-
-		it('should close test browser after availability check', async () => {
-			const manager = new CamoufoxManager();
-			await manager.waitForAvailabilityCheck();
-
-			expect(mockBrowser.close).toHaveBeenCalled();
-		});
 	});
 
 	describe('createBrowser', () => {
 		it('should throw when browser is not available', async () => {
-			(Camoufox as ReturnType<typeof vi.fn>).mockRejectedValueOnce(new Error('Not available'));
+			(existsSync as ReturnType<typeof vi.fn>).mockReturnValue(false);
 
-			const manager = new CamoufoxManager();
+			const manager = new PatchrightManager();
 			await manager.waitForAvailabilityCheck();
 
 			await expect(manager.createBrowser({ headless: true })).rejects.toThrow(
-				'Camoufox not available'
+				'PatchrightManager not available'
 			);
 		});
 
-		it('should create browser with correct options', async () => {
-			const manager = new CamoufoxManager();
+		it('should launch Chromium with required Docker args', async () => {
+			const manager = new PatchrightManager();
 			await manager.waitForAvailabilityCheck();
-
-			// Reset mock to track second call
-			(Camoufox as ReturnType<typeof vi.fn>).mockClear();
-			(Camoufox as ReturnType<typeof vi.fn>).mockResolvedValue(mockBrowser);
 
 			await manager.createBrowser({ headless: true });
 
-			expect(Camoufox).toHaveBeenCalledWith(
+			expect(mockChromium.launch).toHaveBeenCalledWith(
 				expect.objectContaining({
-					headless: 'virtual', // Uses virtual display mode in Docker
-					geoip: true,
-					humanize: true
+					headless: true,
+					args: expect.arrayContaining(['--no-sandbox', '--disable-dev-shm-usage'])
 				})
 			);
 		});
 
-		it('should create browser with proxy when provided', async () => {
-			const manager = new CamoufoxManager();
+		it('should set proxy at context level when provided', async () => {
+			const manager = new PatchrightManager();
 			await manager.waitForAvailabilityCheck();
-
-			(Camoufox as ReturnType<typeof vi.fn>).mockClear();
-			(Camoufox as ReturnType<typeof vi.fn>).mockResolvedValue(mockBrowser);
 
 			await manager.createBrowser({
 				headless: true,
@@ -165,7 +167,7 @@ describe('CamoufoxManager', () => {
 				}
 			});
 
-			expect(Camoufox).toHaveBeenCalledWith(
+			expect(mockBrowser.newContext).toHaveBeenCalledWith(
 				expect.objectContaining({
 					proxy: {
 						server: 'http://proxy.example.com:8080',
@@ -177,7 +179,7 @@ describe('CamoufoxManager', () => {
 		});
 
 		it('should return managed browser with page', async () => {
-			const manager = new CamoufoxManager();
+			const manager = new PatchrightManager();
 			await manager.waitForAvailabilityCheck();
 
 			const managed = await manager.createBrowser({ headless: true });
@@ -189,7 +191,7 @@ describe('CamoufoxManager', () => {
 		});
 
 		it('should track active browsers', async () => {
-			const manager = new CamoufoxManager();
+			const manager = new PatchrightManager();
 			await manager.waitForAvailabilityCheck();
 
 			expect(manager.getActiveBrowserCount()).toBe(0);
@@ -200,29 +202,11 @@ describe('CamoufoxManager', () => {
 			await manager.createBrowser({ headless: true });
 			expect(manager.getActiveBrowserCount()).toBe(2);
 		});
-
-		it('should create new context if none exists', async () => {
-			// Browser with no contexts
-			const browserNoContext = createMockBrowser([]);
-			const newContext = createMockContext();
-			(newContext.newPage as ReturnType<typeof vi.fn>).mockResolvedValue(mockPage);
-			(browserNoContext.newContext as ReturnType<typeof vi.fn>).mockResolvedValue(newContext);
-
-			(Camoufox as ReturnType<typeof vi.fn>).mockResolvedValue(browserNoContext);
-
-			const manager = new CamoufoxManager();
-			await manager.waitForAvailabilityCheck();
-
-			const managed = await manager.createBrowser({ headless: true });
-
-			expect(browserNoContext.newContext).toHaveBeenCalled();
-			expect(managed.context).toBe(newContext);
-		});
 	});
 
 	describe('createBrowserForDomain', () => {
 		it('should delegate to createBrowser', async () => {
-			const manager = new CamoufoxManager();
+			const manager = new PatchrightManager();
 			await manager.waitForAvailabilityCheck();
 
 			const managed = await manager.createBrowserForDomain('example.com', { headless: true });
@@ -234,7 +218,7 @@ describe('CamoufoxManager', () => {
 
 	describe('closeBrowser', () => {
 		it('should close browser and remove from active list', async () => {
-			const manager = new CamoufoxManager();
+			const manager = new PatchrightManager();
 			await manager.waitForAvailabilityCheck();
 
 			const managed = await manager.createBrowser({ headless: true });
@@ -247,7 +231,7 @@ describe('CamoufoxManager', () => {
 		});
 
 		it('should handle close errors gracefully', async () => {
-			const manager = new CamoufoxManager();
+			const manager = new PatchrightManager();
 			await manager.waitForAvailabilityCheck();
 
 			const managed = await manager.createBrowser({ headless: true });
@@ -255,14 +239,27 @@ describe('CamoufoxManager', () => {
 				new Error('Close failed')
 			);
 
-			// Should not throw
 			await expect(manager.closeBrowser(managed)).resolves.toBeUndefined();
+		});
+
+		it('should not close already-closed browser', async () => {
+			const manager = new PatchrightManager();
+			await manager.waitForAvailabilityCheck();
+
+			const managed = await manager.createBrowser({ headless: true });
+			await manager.closeBrowser(managed);
+			const closeCallCount = (managed.browser.close as ReturnType<typeof vi.fn>).mock.calls.length;
+
+			await manager.closeBrowser(managed);
+			expect((managed.browser.close as ReturnType<typeof vi.fn>).mock.calls.length).toBe(
+				closeCallCount
+			);
 		});
 	});
 
 	describe('closeAll', () => {
 		it('should close all active browsers', async () => {
-			const manager = new CamoufoxManager();
+			const manager = new PatchrightManager();
 			await manager.waitForAvailabilityCheck();
 
 			const managed1 = await manager.createBrowser({ headless: true });
@@ -276,7 +273,7 @@ describe('CamoufoxManager', () => {
 		});
 
 		it('should handle close errors during closeAll', async () => {
-			const manager = new CamoufoxManager();
+			const manager = new PatchrightManager();
 			await manager.waitForAvailabilityCheck();
 
 			const managed = await manager.createBrowser({ headless: true });
@@ -284,7 +281,6 @@ describe('CamoufoxManager', () => {
 				new Error('Close failed')
 			);
 
-			// Should not throw
 			await expect(manager.closeAll()).resolves.toBeUndefined();
 		});
 	});
@@ -306,7 +302,7 @@ describe('CamoufoxManager', () => {
 
 			(mockContext.cookies as ReturnType<typeof vi.fn>).mockResolvedValue(testCookies);
 
-			const manager = new CamoufoxManager();
+			const manager = new PatchrightManager();
 			await manager.waitForAvailabilityCheck();
 
 			const cookies = await manager.extractCookies(mockContext);
@@ -315,7 +311,7 @@ describe('CamoufoxManager', () => {
 		});
 
 		it('should extract cookies for specific URLs', async () => {
-			const manager = new CamoufoxManager();
+			const manager = new PatchrightManager();
 			await manager.waitForAvailabilityCheck();
 
 			await manager.extractCookies(mockContext, ['https://example.com']);
@@ -339,7 +335,7 @@ describe('CamoufoxManager', () => {
 				}
 			];
 
-			const manager = new CamoufoxManager();
+			const manager = new PatchrightManager();
 			await manager.waitForAvailabilityCheck();
 
 			await manager.addCookies(mockContext, testCookies);
@@ -349,24 +345,20 @@ describe('CamoufoxManager', () => {
 	});
 
 	describe('Singleton functions', () => {
-		it('getCamoufoxManager should return same instance', () => {
-			const instance1 = getCamoufoxManager();
-			const instance2 = getCamoufoxManager();
+		it('getPatchrightManager should return same instance', () => {
+			const instance1 = getPatchrightManager();
+			const instance2 = getPatchrightManager();
 
 			expect(instance1).toBe(instance2);
 		});
 
-		it('shutdownCamoufoxManager should close all and reset instance', async () => {
-			const instance = getCamoufoxManager();
+		it('shutdownPatchrightManager should close all and reset instance', async () => {
+			const instance = getPatchrightManager();
 			expect(instance).toBeDefined();
 			await instance.waitForAvailabilityCheck();
 
-			await shutdownCamoufoxManager();
-			// Shutdown completed successfully - verify it didn't throw
+			await shutdownPatchrightManager();
 			expect(true).toBe(true);
-
-			// Next call should create new instance
-			// (Note: Can't easily test this without resetting module state)
 		});
 	});
 });

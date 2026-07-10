@@ -79,10 +79,9 @@
 	},
 	"dependencies": {
 		"@better-auth/api-key": "^1.6.16",
-		"better-auth": "^1.6.10",
 		"adm-zip": "^0.5.16",
+		"better-auth": "^1.6.10",
 		"better-sqlite3": "^12.9.0",
-		"camoufox-js": "^0.11.0",
 		"cheerio": "^1.2.0",
 		"chokidar": "^5.0.0",
 		"date-format-parse": "^0.2.7",
@@ -93,6 +92,7 @@
 		"iconv-lite": "^0.7.2",
 		"js-yaml": "^4.2.0",
 		"parse-torrent": "^11.0.21",
+		"patchright": "^1.61.1",
 		"pino": "^10.3.1",
 		"playwright-core": "^1.53.0",
 		"zod": "^4.4.3"

@@ -28,8 +28,6 @@ const CLOUDFLARE_PATTERNS = {
 	],
 	bodyPatterns: [
 		/checking your browser/i,
-		/cloudflare/i,
-		/please wait/i,
 		/enable javascript and cookies/i,
 		/ray id/i,
 		/please turn javascript on/i,

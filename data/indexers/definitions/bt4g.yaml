@@ -1,0 +1,92 @@
+---
+id: bt4g
+name: BT4G
+description: 'BT4G is a public BitTorrent DHT search engine'
+language: en-US
+type: public
+encoding: UTF-8
+protocol: torrent
+requestdelay: 3
+
+links:
+  - https://bt4gprx.com/
+  - https://bt4g.com/
+
+caps:
+  categories:
+    '2000': Movies
+    '5000': TV
+    '3000': Audio
+    '8000': Other
+
+  categorymappings:
+    - id: movie
+      cat: '2000'
+      desc: Movies
+      default: true
+    - id: tv
+      cat: '5000'
+      desc: TV
+    - id: audio
+      cat: '3000'
+      desc: Audio
+    - id: doc
+      cat: '8000'
+      desc: Documents
+    - id: app
+      cat: '8000'
+      desc: Applications
+    - id: other
+      cat: '8000'
+      desc: Other
+
+  modes:
+    search: [q]
+    movie-search: [q]
+    tv-search: [q, season, ep]
+
+search:
+  paths:
+    - path: 'search?q={{ .Keywords }}&orderby=seeders&category=movie&p=1&page=rss'
+      categories: ['2000', '5000']
+
+    - path: 'search?q={{ .Keywords }}&orderby=seeders&category=audio&p=1&page=rss'
+      categories: ['3000']
+
+    - path: 'search?q={{ .Keywords }}&orderby=seeders&category=all&p=1&page=rss'
+
+  rows:
+    selector: 'channel > item'
+    # BT4G is a raw DHT index; spammers inject domains like [mnsn.click] into
+    # torrent names. Exclude rows whose XML contains known spam domains.
+    filters:
+      - name: notcontains
+        args: 'mnsn.click'
+
+  fields:
+    title:
+      selector: title
+
+    details:
+      selector: guid
+
+    download:
+      selector: link
+
+    date:
+      selector: pubDate
+      filters:
+        - name: dateparse
+          args: 'ddd, DD MMM YYYY HH:mm:ss ZZ'
+
+    size:
+      selector: description
+      filters:
+        - name: regexp
+          args: '(?i)(\d+(?:\.\d+)?\s*(?:B|KB|MB|GB|TB|PB))'
+
+    downloadvolumefactor:
+      text: '0'
+
+    uploadvolumefactor:
+      text: '1'

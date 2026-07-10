@@ -45,13 +45,7 @@ EXTERNAL_LISTS_CUSTOM_PRESETS_PATH="${EXTERNAL_LISTS_CUSTOM_PRESETS_PATH:-${EXTE
 export DATA_DIR INDEXER_DEFINITIONS_PATH EXTERNAL_LISTS_PRESETS_PATH \
   INDEXER_CUSTOM_DEFINITIONS_PATH EXTERNAL_LISTS_CUSTOM_PRESETS_PATH
 
-# camoufox-js resolves install path from os.homedir(), so force HOME into /config/cache
-HOME="${CONFIG_ROOT}/cache/home"
-export HOME
-CAMOUFOX_CACHE_DIR="${HOME}/.cache/camoufox"
-CAMOUFOX_NOTICE_FILE="${CONFIG_ROOT}/README-DO-NOT-DELETE-CAMOUFOX-CACHE.txt"
 OWNERSHIP_STAMP_FILE="${CONFIG_ROOT}/.cinephage-ownership-stamp"
-export CAMOUFOX_PATH="$CAMOUFOX_CACHE_DIR"
 
 has_contents() {
   [ -d "$1" ] && [ -n "$(ls -A "$1" 2>/dev/null)" ]
@@ -79,28 +73,6 @@ migrate_dir() {
     else
       echo "Skipping ${label} migration; destination already has data."
     fi
-  fi
-}
-
-write_camoufox_notice() {
-  if ! cat > "$CAMOUFOX_NOTICE_FILE" <<EOF
-Cinephage Camoufox Cache (Do Not Delete)
-=========================================
-
-This instance uses Camoufox browser files for captcha solving.
-Deleting the "cache" folder will force a full Camoufox redownload and may break captcha solving until it finishes.
-
-Active paths:
-- ${CAMOUFOX_CACHE_DIR}
-
-
-If cleanup is required:
-1. Stop Cinephage
-2. Remove the cache folder
-3. Start Cinephage and wait for Camoufox download to complete in logs
-EOF
-  then
-    echo "Warning: Failed to write Camoufox cache notice at ${CAMOUFOX_NOTICE_FILE}"
   fi
 }
 
@@ -152,8 +124,7 @@ if [ "$(id -u)" = "0" ] && [ -z "${CINEPHAGE_REEXEC:-}" ]; then
     "$INDEXER_DEFINITIONS_PATH" \
     "$EXTERNAL_LISTS_PRESETS_PATH" \
     "$INDEXER_CUSTOM_DEFINITIONS_PATH" \
-    "$EXTERNAL_LISTS_CUSTOM_PRESETS_PATH" \
-    "$CAMOUFOX_CACHE_DIR"
+    "$EXTERNAL_LISTS_CUSTOM_PRESETS_PATH"
 
   if [ "$CONFIG_MOUNTED" = "1" ]; then
     migrate_dir "$LEGACY_DATA_DIR" "$DATA_DIR" "data"
@@ -165,9 +136,9 @@ if [ "$(id -u)" = "0" ] && [ -z "${CINEPHAGE_REEXEC:-}" ]; then
   if should_run_recursive_ownership_fix "$TARGET_UID" "$TARGET_GID"; then
     echo "Setting ownership on application directories..."
     chown -R "$TARGET_UID:$TARGET_GID" "$CONFIG_ROOT" 2>/dev/null || true
-    # Exclude node_modules — owned by root, never written to at runtime,
-    # and walking it on every boot adds meaningful startup latency
-    find /app -mindepth 1 -maxdepth 1 -not -name 'node_modules' \
+    # Exclude node_modules and browsers — owned by root, never written to at runtime,
+    # and walking them on every boot adds meaningful startup latency
+    find /app -mindepth 1 -maxdepth 1 \( -name 'node_modules' -o -name 'browsers' \) -prune -o \
       -exec chown -R "$TARGET_UID:$TARGET_GID" {} +
     mark_recursive_ownership_fix_complete "$TARGET_UID" "$TARGET_GID"
   else
@@ -179,8 +150,6 @@ if [ "$(id -u)" = "0" ] && [ -z "${CINEPHAGE_REEXEC:-}" ]; then
       "$EXTERNAL_LISTS_PRESETS_PATH" \
       "$INDEXER_CUSTOM_DEFINITIONS_PATH" \
       "$EXTERNAL_LISTS_CUSTOM_PRESETS_PATH" \
-      "$HOME" \
-      "$CAMOUFOX_CACHE_DIR" \
       "$OWNERSHIP_STAMP_FILE" 2>/dev/null || true
   fi
 
@@ -233,8 +202,6 @@ check_permissions "$INDEXER_DEFINITIONS_PATH" "indexer definitions"
 check_permissions "$EXTERNAL_LISTS_PRESETS_PATH" "external list presets"
 echo "Directory permissions OK"
 
-write_camoufox_notice
-
 sync_bundled_data() {
   local src="$1"
   local dest="$2"
@@ -258,20 +225,6 @@ sync_bundled_data "$BUNDLED_DATA_DIR/indexers" "$DATA_DIR/indexers" "indexers"
 sync_bundled_data "$BUNDLED_DATA_DIR/external-lists" "$DATA_DIR/external-lists" "external lists"
 
 mkdir -p "$INDEXER_CUSTOM_DEFINITIONS_PATH" "$EXTERNAL_LISTS_CUSTOM_PRESETS_PATH"
-
-# Download Camoufox into HOME-backed cache under /config so it persists across container recreates
-CAMOUFOX_MARKER="$CAMOUFOX_CACHE_DIR/version.json"
-
-if [ ! -f "$CAMOUFOX_MARKER" ]; then
-  echo "Downloading Camoufox (first run only, ~80MB)..."
-  mkdir -p "$CAMOUFOX_CACHE_DIR"
-
-  if ! HOME="$HOME" ./node_modules/.bin/camoufox-js fetch; then
-    echo "Warning: Failed to download Camoufox browser. Captcha solving will be unavailable."
-  fi
-else
-  echo "Camoufox already installed at $CAMOUFOX_CACHE_DIR"
-fi
 
 echo "Starting Cinephage..."
 if [ -n "${APP_VERSION:-}" ]; then

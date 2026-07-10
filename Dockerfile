@@ -52,6 +52,12 @@ RUN npm ci --omit=dev --no-audit --no-fund \
 	&& find node_modules -type d \( -name test -o -name tests -o -name __tests__ -o -name docs -o -name doc -o -name examples -o -name example \) -prune -exec rm -rf '{}' + \
 	&& find node_modules -type d -empty -delete
 
+# Download patched Chromium into a fixed path inside the image so no
+# runtime download is needed. PLAYWRIGHT_BROWSERS_PATH tells Patchright
+# where to install and where to find the binary at runtime.
+ENV PLAYWRIGHT_BROWSERS_PATH=/app/browsers
+RUN ./node_modules/.bin/patchright install chromium
+
 # ==========================================
 # Runtime Stage
 # ==========================================
@@ -73,15 +79,16 @@ LABEL org.opencontainers.image.title='Cinephage' \
 	org.opencontainers.image.created="${BUILD_CREATED}" \
 	org.opencontainers.image.version="${APP_VERSION}"
 
+# Copy node_modules early so we can use the patchright CLI to install exactly
+# the Chrome system dependencies for this OS + Chromium version — no manual list.
+COPY --from=prod-deps /app/node_modules ./node_modules
+
 RUN apt-get update && apt-get install -y --no-install-recommends \
 	ffmpeg \
 	gosu \
-	libgtk-3-0 \
-	libx11-xcb1 \
-	libasound2 \
-	xvfb \
 	curl \
 	ca-certificates \
+	&& ./node_modules/.bin/patchright install-deps chromium \
 	&& rm -rf /var/lib/apt/lists/*
 
 # Install alass (Automatic Language-Agnostic Subtitle Synchronization)
@@ -96,7 +103,8 @@ RUN rm -rf /usr/local/lib/node_modules/npm \
 # Pre-create config directories; ownership is fixed at runtime by entrypoint
 RUN mkdir -p /config/data /config/cache
 
-COPY --from=prod-deps /app/node_modules ./node_modules
+COPY --from=prod-deps /app/browsers ./browsers
+ENV PLAYWRIGHT_BROWSERS_PATH=/app/browsers
 COPY --from=builder /app/build ./build
 COPY --from=builder /app/package.json ./package.json
 COPY --from=builder /app/server.js ./server.js

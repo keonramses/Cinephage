@@ -1,0 +1,331 @@
+---
+id: 1337x
+name: 1337x
+description: "1337x is a public torrent site that offers verified torrent downloads"
+language: en-US
+type: public
+encoding: UTF-8
+protocol: torrent
+requestdelay: 2
+
+links:
+  - https://1337x.to/
+  - https://1337x.st/
+  - https://x1337x.ws/
+  - https://x1337x.eu/
+  - https://x1337x.cc/
+
+settings:
+  - name: info_cloudflare
+    type: info_cloudflare
+    label: Cloudflare Protection
+    default: "1337x may use Cloudflare. Enable Cinephage's browser/captcha handling if requests are challenged."
+
+caps:
+  categories:
+    "2000": Movies
+    "5000": TV
+    "3000": Audio
+    "8000": Other
+
+  categorymappings:
+    # Movies
+    - id: 1
+      cat: "2000"
+      desc: "Movies/DVD"
+    - id: 2
+      cat: "2000"
+      desc: "Movies/DivX/Xvid"
+    - id: 3
+      cat: "2000"
+      desc: "Movies/SVCD/VCD"
+    - id: 4
+      cat: "2000"
+      desc: "Movies/Dual Audio"
+    - id: 42
+      cat: "2000"
+      desc: "Movies/HD"
+    - id: 54
+      cat: "2000"
+      desc: "Movies/x264"
+    - id: 55
+      cat: "2000"
+      desc: "Movies/MP4"
+    - id: 66
+      cat: "2000"
+      desc: "Movies/3D"
+    - id: 70
+      cat: "2000"
+      desc: "Movies/x265"
+    - id: 73
+      cat: "2000"
+      desc: "Movies/Bollywood"
+    - id: 76
+      cat: "2000"
+      desc: "Movies/UHD"
+
+    # TV and Anime
+    - id: 5
+      cat: "5000"
+      desc: "TV/DVD"
+    - id: 6
+      cat: "5000"
+      desc: "TV/DivX/Xvid"
+    - id: 7
+      cat: "5000"
+      desc: "TV/SVCD/VCD"
+    - id: 9
+      cat: "5000"
+      desc: "TV/Documentary"
+    - id: 28
+      cat: "5000"
+      desc: "Anime"
+    - id: 41
+      cat: "5000"
+      desc: "TV/HD"
+    - id: 71
+      cat: "5000"
+      desc: "TV/x265"
+    - id: 74
+      cat: "5000"
+      desc: "TV/Cartoons"
+    - id: 75
+      cat: "5000"
+      desc: "TV/SD"
+    - id: 78
+      cat: "5000"
+      desc: "Anime/Dual Audio"
+    - id: 79
+      cat: "5000"
+      desc: "Anime/Dubbed"
+    - id: 80
+      cat: "5000"
+      desc: "Anime/Subbed"
+    - id: 81
+      cat: "5000"
+      desc: "Anime/Raw"
+
+    # Audio
+    - id: 22
+      cat: "3000"
+      desc: "Music/MP3"
+    - id: 23
+      cat: "3000"
+      desc: "Music/Lossless"
+    - id: 24
+      cat: "3000"
+      desc: "Music/DVD"
+    - id: 25
+      cat: "3000"
+      desc: "Music/Video"
+    - id: 26
+      cat: "3000"
+      desc: "Music/Radio"
+    - id: 27
+      cat: "3000"
+      desc: "Music/Other"
+    - id: 52
+      cat: "3000"
+      desc: "Audiobook"
+    - id: 53
+      cat: "3000"
+      desc: "Music/Album"
+    - id: 58
+      cat: "3000"
+      desc: "Music/Box Set"
+    - id: 59
+      cat: "3000"
+      desc: "Music/Discography"
+    - id: 60
+      cat: "3000"
+      desc: "Music/Single"
+    - id: 68
+      cat: "3000"
+      desc: "Music/Concerts"
+    - id: 69
+      cat: "3000"
+      desc: "Music/AAC"
+
+    # Apps, games, books, and miscellaneous
+    - id: 10
+      cat: "8000"
+      desc: "Games/PC"
+    - id: 18
+      cat: "8000"
+      desc: "Apps/PC"
+    - id: 19
+      cat: "8000"
+      desc: "Apps/Mac"
+    - id: 20
+      cat: "8000"
+      desc: "Apps/Linux"
+    - id: 21
+      cat: "8000"
+      desc: "Apps/Other"
+    - id: 33
+      cat: "8000"
+      desc: "Emulation"
+    - id: 34
+      cat: "8000"
+      desc: "Tutorials"
+    - id: 36
+      cat: "8000"
+      desc: "E-books"
+    - id: 39
+      cat: "8000"
+      desc: "Comics"
+    - id: 40
+      cat: "8000"
+      desc: "Other"
+    - id: 43
+      cat: "8000"
+      desc: "Games/PS3"
+    - id: 44
+      cat: "8000"
+      desc: "Games/Wii"
+    - id: 45
+      cat: "8000"
+      desc: "Games/NDS"
+    - id: 46
+      cat: "8000"
+      desc: "Games/GameCube"
+    - id: 56
+      cat: "8000"
+      desc: "Apps/Android"
+    - id: 57
+      cat: "8000"
+      desc: "Apps/iOS"
+    - id: 72
+      cat: "8000"
+      desc: "Games/3DS"
+    - id: 77
+      cat: "8000"
+      desc: "Games/PS4"
+    - id: 82
+      cat: "8000"
+      desc: "Games/Switch"
+
+  modes:
+    search: [q]
+    movie-search: [q]
+    tv-search: [q, season, ep]
+    music-search: [q]
+    book-search: [q]
+
+download:
+  selectors:
+    - selector: 'a[href^="magnet:?xt=urn:btih:"]'
+      attribute: href
+
+search:
+  paths:
+    - path: "search/{{ .Keywords }}/1/"
+
+  keywordsfilters:
+    - name: re_replace
+      args: ["\\bS(20\\d{2})\\b", "$1"]
+
+  rows:
+    selector: 'tr:has(a[href^="/torrent/"])'
+
+  fields:
+    title_default:
+      selector: 'td[class^="coll-1"] a[href^="/torrent/"]'
+
+    title_from_url:
+      optional: true
+      selector: 'td[class^="coll-1"] a[href^="/torrent/"]:contains("...")'
+      attribute: href
+      filters:
+        - name: urldecode
+        - name: split
+          args: ["/", 3]
+
+    title:
+      text: "{{ if .Result.title_from_url }}{{ .Result.title_from_url }}{{ else }}{{ .Result.title_default }}{{ end }}"
+      filters:
+        - name: re_replace
+          args: ["-([\\w]+(?:[\\[\\]\\(\\)\\w]+)?)$", "~$1"]
+        - name: replace
+          args: ["-", " "]
+        - name: re_replace
+          args: ["~([\\w]+(?:[\\[\\]\\(\\)\\w]+)?)$", "-$1"]
+        - name: replace
+          args: ["\u000f", ""]
+        - name: re_replace
+          args: ["(?i)\\sEP\\s(\\d{1,2})\\s(E?\\s?\\d{1,2})\\s", " E$1-$2 "]
+        - name: re_replace
+          args: ["(?i)\\sS(\\d{1,2})\\s?E\\s?(\\d{1,2})\\s(E?\\s?\\d{1,2})\\s", " S$1E$2-$3 "]
+        - name: re_replace
+          args: ["(?i)WEB\\sDL", "WEB-DL"]
+        - name: re_replace
+          args: ["(?i)HDTVRIP", "HDTV"]
+
+    category_optional:
+      optional: true
+      selector: 'td[class^="coll-1"] a[href^="/sub/"]'
+      attribute: href
+      filters:
+        - name: split
+          args: ["/", 2]
+
+    category:
+      text: "{{ if .Result.category_optional }}{{ .Result.category_optional }}{{ else }}40{{ end }}"
+
+    details:
+      selector: 'td[class^="coll-1"] a[href^="/torrent/"]'
+      attribute: href
+
+    download:
+      selector: 'td[class^="coll-1"] a[href^="/torrent/"]'
+      attribute: href
+
+    date_year:
+      optional: true
+      selector: "td[class^=\"coll-date\"]:not(:contains(\":\")):not(:contains(\"'\"))"
+      filters:
+        - name: re_replace
+          args: ["st|nd|rd|th", ""]
+        - name: dateparse
+          args: "htt MMM. d"
+
+    date_years:
+      optional: true
+      selector: "td[class^=\"coll-date\"]:contains(\"'\")"
+      filters:
+        - name: replace
+          args: ["'", ""]
+        - name: re_replace
+          args: ["st|nd|rd|th", ""]
+        - name: dateparse
+          args: "MMM. d yy"
+
+    date_today:
+      optional: true
+      selector: "td[class^=\"coll-date\"]:contains(\":\")"
+      filters:
+        - name: fuzzytime
+
+    date:
+      text: "{{ if or .Result.date_year .Result.date_years .Result.date_today }}{{ or .Result.date_year .Result.date_years .Result.date_today }}{{ else }}now{{ end }}"
+
+    size:
+      selector: 'td[class^="coll-4"]'
+
+    seeders:
+      selector: 'td[class^="coll-2"]'
+
+    leechers:
+      selector: 'td[class^="coll-3"]'
+
+    uploader:
+      selector: 'td[class^="coll-5"]'
+
+    description:
+      text: "Uploader: {{ .Result.uploader }}"
+
+    downloadvolumefactor:
+      text: "0"
+
+    uploadvolumefactor:
+      text: "1"
