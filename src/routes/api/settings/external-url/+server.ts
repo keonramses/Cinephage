@@ -12,7 +12,7 @@ const externalUrlSchema = z.object({
 	url: z.string().url().nullable().or(z.literal(''))
 });
 
-export const POST: RequestHandler = async (event) => {
+export const PUT: RequestHandler = async (event) => {
 	// Require admin authentication
 	const authError = requireAdmin(event);
 	if (authError) return authError;
