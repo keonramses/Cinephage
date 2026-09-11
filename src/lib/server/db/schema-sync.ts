@@ -140,8 +140,10 @@ import {
  * Version 133: Add import_failed and backfill canonical info hashes on download queue rows
  * Version 134: Store canonical info hashes on download history rows
  * Version 135: Deduplicate active download queue rows by client and info hash
+ * Version 136: Add storage_items indexes on episode_file_id and movie_file_id
+ * Version 137: Add allow_movies and allow_tv columns to download_clients for debrid content-type restriction
  */
-export const CURRENT_SCHEMA_VERSION = 135;
+export const CURRENT_SCHEMA_VERSION = 137;
 
 export const SYSTEM_LIBRARY_SEEDS = [
 	{

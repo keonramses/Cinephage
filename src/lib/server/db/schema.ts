@@ -494,6 +494,11 @@ export const downloadClients = sqliteTable('download_clients', {
 	apiToken: text('api_token'),
 	// Whether to remove the torrent from the debrid provider after import
 	removeAfterImport: integer('remove_after_import', { mode: 'boolean' }).default(false),
+	// Content-type restriction for debrid clients: which media types this client
+	// may be selected for (e.g. Real-Debrid for movies, TorBox for TV). Ignored
+	// by non-debrid clients, which use movieCategory/tvCategory instead.
+	allowMovies: integer('allow_movies', { mode: 'boolean' }).default(true),
+	allowTv: integer('allow_tv', { mode: 'boolean' }).default(true),
 
 	// Category settings (separate for movie/tv)
 	movieCategory: text('movie_category').default('movies'),

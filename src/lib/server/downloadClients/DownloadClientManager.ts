@@ -290,6 +290,8 @@ export class DownloadClientManager {
 			password: isDebrid ? null : input.password,
 			apiToken,
 			removeAfterImport: isDebrid ? (input.removeAfterImport ?? false) : false,
+			allowMovies: isDebrid ? (input.allowMovies ?? true) : true,
+			allowTv: isDebrid ? (input.allowTv ?? true) : true,
 			movieCategory: isDebrid ? 'movies' : (input.movieCategory ?? 'movies'),
 			tvCategory: isDebrid ? 'tv' : (input.tvCategory ?? 'tv'),
 			recentPriority: isDebrid ? 'normal' : (input.recentPriority ?? 'normal'),
@@ -327,6 +329,15 @@ export class DownloadClientManager {
 			throw new Error(`Download client not found: ${id}`);
 		}
 
+		// Resolve against the stored values too, not just this request's payload -
+		// a request that only turns off allowTv while allowMovies is already false
+		// in the DB would otherwise slip past the schema's same-request check.
+		const nextAllowMovies = updates.allowMovies ?? existing.allowMovies;
+		const nextAllowTv = updates.allowTv ?? existing.allowTv;
+		if (nextAllowMovies === false && nextAllowTv === false) {
+			throw new Error('At least one content type (Movies or TV Shows) must be enabled');
+		}
+
 		const updateData: Record<string, unknown> = {
 			updatedAt: new Date().toISOString()
 		};
@@ -358,6 +369,8 @@ export class DownloadClientManager {
 		if (updates.removeAfterImport !== undefined) {
 			updateData.removeAfterImport = updates.removeAfterImport;
 		}
+		if (updates.allowMovies !== undefined) updateData.allowMovies = updates.allowMovies;
+		if (updates.allowTv !== undefined) updateData.allowTv = updates.allowTv;
 		if (updates.movieCategory !== undefined) updateData.movieCategory = updates.movieCategory;
 		if (updates.tvCategory !== undefined) updateData.tvCategory = updates.tvCategory;
 		if (updates.recentPriority !== undefined) updateData.recentPriority = updates.recentPriority;
@@ -677,17 +690,21 @@ export class DownloadClientManager {
 	 *
 	 * Debrid adapters intentionally do not implement IDownloadClient, so they
 	 * cannot use getClientForProtocol(). The optional ID is used by retry paths
-	 * that must stay on the queue row's original provider.
+	 * that must stay on the queue row's original provider. `mediaType`, when
+	 * given, excludes clients that have been restricted away from that content
+	 * type (e.g. a client set to movies-only is skipped for a TV acquisition).
 	 */
 	async getDebridClientForAcquisition(
-		preferredClientId?: string
+		preferredClientId?: string,
+		mediaType?: 'movie' | 'tv'
 	): Promise<{ client: DownloadClient; adapter: DebridAdapter } | undefined> {
 		const clients = (await this.getClients())
 			.filter(
 				(client) =>
 					client.enabled &&
 					DEBRID_IMPLEMENTATIONS.has(client.implementation) &&
-					(!preferredClientId || client.id === preferredClientId)
+					(!preferredClientId || client.id === preferredClientId) &&
+					(!mediaType || (mediaType === 'movie' ? client.allowMovies : client.allowTv) !== false)
 			)
 			.sort((a, b) => a.priority - b.priority || a.id.localeCompare(b.id));
 
@@ -936,6 +953,8 @@ export class DownloadClientManager {
 			hasPassword: !!row.password,
 			hasApiToken: !!row.apiToken,
 			removeAfterImport: !!row.removeAfterImport,
+			allowMovies: row.allowMovies ?? true,
+			allowTv: row.allowTv ?? true,
 			movieCategory: row.movieCategory ?? 'movies',
 			tvCategory: row.tvCategory ?? 'tv',
 			recentPriority: (row.recentPriority as 'normal' | 'high' | 'force') ?? 'normal',

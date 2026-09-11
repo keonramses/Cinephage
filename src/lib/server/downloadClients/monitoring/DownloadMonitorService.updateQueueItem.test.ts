@@ -60,6 +60,8 @@ function makeClient(): DownloadClient {
 		hasPassword: false,
 		hasApiToken: false,
 		removeAfterImport: false,
+		allowMovies: true,
+		allowTv: true,
 		movieCategory: 'movies',
 		tvCategory: 'tv',
 		recentPriority: 'normal',

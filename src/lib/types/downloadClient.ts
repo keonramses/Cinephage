@@ -59,6 +59,9 @@ export interface DownloadClient {
 	// Note: apiToken not returned to frontend for security
 	hasApiToken: boolean;
 	removeAfterImport: boolean;
+	/** Content-type restriction: which media types this debrid client may be selected for. */
+	allowMovies: boolean;
+	allowTv: boolean;
 
 	// Categories
 	movieCategory: string;
@@ -108,6 +111,8 @@ export interface DownloadClientInput {
 	priority?: number;
 	apiToken?: string | null;
 	removeAfterImport?: boolean;
+	allowMovies?: boolean;
+	allowTv?: boolean;
 	// Non-debrid fields
 	host?: string;
 	port?: number;
@@ -159,6 +164,8 @@ export interface DownloadClientFormData {
 	priority: number;
 	apiToken?: string;
 	removeAfterImport?: boolean;
+	allowMovies?: boolean;
+	allowTv?: boolean;
 }
 
 /**
@@ -327,6 +334,8 @@ export interface UnifiedClientItem {
 	// Download client fields
 	movieCategory?: string;
 	tvCategory?: string;
+	allowMovies?: boolean;
+	allowTv?: boolean;
 	recentPriority?: string;
 	olderPriority?: string;
 	initialState?: string;

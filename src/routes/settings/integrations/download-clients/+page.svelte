@@ -84,6 +84,16 @@
 		)
 	);
 
+	// If the last usable debrid client is removed/disabled, fall back to torrent
+	// rather than leaving an unreachable "debrid" preference in place with no
+	// control left in the UI to change it back.
+	$effect(() => {
+		if (!debridAvailable && defaultAcquisitionProtocol === 'debrid') {
+			defaultAcquisitionProtocol = 'torrent';
+			void saveDefaultAcquisitionProtocol();
+		}
+	});
+
 	async function saveDefaultAcquisitionProtocol() {
 		const response = await fetch('/api/settings/acquisition', {
 			method: 'PUT',
@@ -645,23 +655,22 @@
 		</div>
 	</div>
 
-	<div class="mb-4 rounded-lg border border-base-300 bg-base-100 p-4">
-		<label class="label py-1" for="defaultAcquisitionProtocol">
-			<span class="label-text font-medium">{m.acquisition_defaultPreference()}</span>
-		</label>
-		<select
-			id="defaultAcquisitionProtocol"
-			class="select-bordered select select-sm"
-			bind:value={defaultAcquisitionProtocol}
-			onchange={saveDefaultAcquisitionProtocol}
-		>
-			<option value="torrent">{m.acquisition_torrent()}</option>
-			<option value="debrid" disabled={!debridAvailable}>{m.acquisition_debrid()}</option>
-		</select>
-		{#if !debridAvailable}<p class="mt-2 text-xs text-base-content/60">
-				{m.acquisition_debridUnavailableReason()}
-			</p>{/if}
-	</div>
+	{#if debridAvailable}
+		<div class="mb-4 rounded-lg border border-base-300 bg-base-100 p-4">
+			<label class="label py-1" for="defaultAcquisitionProtocol">
+				<span class="label-text font-medium">{m.acquisition_defaultPreference()}</span>
+			</label>
+			<select
+				id="defaultAcquisitionProtocol"
+				class="select-bordered select select-sm"
+				bind:value={defaultAcquisitionProtocol}
+				onchange={saveDefaultAcquisitionProtocol}
+			>
+				<option value="torrent">{m.acquisition_torrentClient()}</option>
+				<option value="debrid">{m.acquisition_debrid()}</option>
+			</select>
+		</div>
+	{/if}
 
 	{#if selectedIds.size > 0}
 		<DownloadClientBulkActions
@@ -725,6 +734,10 @@
 	onDelete={handleDelete}
 	onTest={handleTest}
 	allowNntp={false}
+	existingClients={data.downloadClients.map((c) => ({
+		id: c.id,
+		implementation: c.implementation
+	}))}
 />
 
 <ConfirmationModal

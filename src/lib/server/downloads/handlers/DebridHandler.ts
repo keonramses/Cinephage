@@ -54,7 +54,15 @@ export class DebridHandler {
 
 		const prepared = await this.prepareSubmission(request.release);
 		if (!prepared.success) return prepared.result;
-		const initiallySelected = await getDownloadClientManager().getDebridClientForAcquisition();
+		const mediaType: 'movie' | 'tv' | undefined = resolved.movieId
+			? 'movie'
+			: resolved.seriesId
+				? 'tv'
+				: undefined;
+		const initiallySelected = await getDownloadClientManager().getDebridClientForAcquisition(
+			undefined,
+			mediaType
+		);
 		if (!initiallySelected) return this.noUsableClient();
 
 		return withSubmissionLock(prepared.value.infoHash.toLowerCase(), async () => {

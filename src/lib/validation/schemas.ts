@@ -492,9 +492,20 @@ const debridDownloadClientCreateSchema = z
 		...downloadClientBaseFields,
 		implementation: z.enum(DEBRID_IMPLEMENTATIONS),
 		apiToken: z.string().optional().nullable(),
-		removeAfterImport: z.boolean().default(false)
+		removeAfterImport: z.boolean().default(false),
+		allowMovies: z.boolean().default(true),
+		allowTv: z.boolean().default(true)
 	})
-	.strict();
+	.strict()
+	.superRefine((data, context) => {
+		if (!data.allowMovies && !data.allowTv) {
+			context.addIssue({
+				code: 'custom',
+				path: ['allowMovies'],
+				message: 'At least one content type (Movies or TV Shows) must be enabled'
+			});
+		}
+	});
 
 const nonDebridDownloadClientCreateSchema = z
 	.object({
@@ -502,7 +513,9 @@ const nonDebridDownloadClientCreateSchema = z
 		implementation: z.enum(NON_DEBRID_IMPLEMENTATIONS),
 		...nonDebridDownloadClientFields,
 		apiToken: z.never().optional(),
-		removeAfterImport: z.never().optional()
+		removeAfterImport: z.never().optional(),
+		allowMovies: z.never().optional(),
+		allowTv: z.never().optional()
 	})
 	.strict()
 	.superRefine((data, context) => {
@@ -541,9 +554,20 @@ const debridDownloadClientUpdateSchema = z
 		priority: z.number().int().min(1).max(100).optional(),
 		implementation: z.enum(DEBRID_IMPLEMENTATIONS).optional(),
 		apiToken: z.string().optional().nullable(),
-		removeAfterImport: z.boolean().optional()
+		removeAfterImport: z.boolean().optional(),
+		allowMovies: z.boolean().optional(),
+		allowTv: z.boolean().optional()
 	})
-	.strict();
+	.strict()
+	.superRefine((data, context) => {
+		if (data.allowMovies === false && data.allowTv === false) {
+			context.addIssue({
+				code: 'custom',
+				path: ['allowMovies'],
+				message: 'At least one content type (Movies or TV Shows) must be enabled'
+			});
+		}
+	});
 const nonDebridDownloadClientUpdateSchema = z
 	.object({
 		name: z
@@ -583,7 +607,9 @@ const nonDebridDownloadClientUpdateSchema = z
 		tempPathLocal: z.string().optional().nullable(),
 		tempPathRemote: z.string().optional().nullable(),
 		apiToken: z.never().optional(),
-		removeAfterImport: z.never().optional()
+		removeAfterImport: z.never().optional(),
+		allowMovies: z.never().optional(),
+		allowTv: z.never().optional()
 	})
 	.strict();
 export const downloadClientUpdateSchema = z.union([
@@ -591,7 +617,12 @@ export const downloadClientUpdateSchema = z.union([
 	nonDebridDownloadClientUpdateSchema
 ]);
 
-const DEBRID_ONLY_UPDATE_FIELDS = ['apiToken', 'removeAfterImport'] as const;
+const DEBRID_ONLY_UPDATE_FIELDS = [
+	'apiToken',
+	'removeAfterImport',
+	'allowMovies',
+	'allowTv'
+] as const;
 const NON_DEBRID_ONLY_UPDATE_FIELDS = [
 	'host',
 	'port',
