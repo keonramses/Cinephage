@@ -3,6 +3,7 @@ import type { RequestHandler } from './$types';
 import { requireAdmin } from '$lib/server/auth/authorization.js';
 import { requireArrCompatEnabled } from '$lib/server/arr/requireArrCompatEnabled.js';
 import { buildMovieByArrId } from '$lib/server/arr/movies.js';
+import { updateMovieFromArr, deleteMovieFromArr } from '$lib/server/arr/libraryWrite.js';
 
 /** GET /api/radarr/api/v3/movie/{id} */
 export const GET: RequestHandler = async (event) => {
@@ -19,4 +20,36 @@ export const GET: RequestHandler = async (event) => {
 	if (!movie) error(404, 'Movie not found');
 
 	return json(movie);
+};
+
+/** PUT /api/radarr/api/v3/movie/{id} - update monitored/quality profile/availability. */
+export const PUT: RequestHandler = async (event) => {
+	const disabledError = requireArrCompatEnabled();
+	if (disabledError) return disabledError;
+
+	const authError = requireAdmin(event);
+	if (authError) return authError;
+
+	const id = Number.parseInt(event.params.id, 10);
+	if (Number.isNaN(id)) error(400, 'Invalid movie id');
+
+	const body = await event.request.json().catch(() => ({}));
+	const result = await updateMovieFromArr(event.fetch, id, body);
+	return json(result.body, { status: result.status });
+};
+
+/** DELETE /api/radarr/api/v3/movie/{id}?deleteFiles=true - remove from library. */
+export const DELETE: RequestHandler = async (event) => {
+	const disabledError = requireArrCompatEnabled();
+	if (disabledError) return disabledError;
+
+	const authError = requireAdmin(event);
+	if (authError) return authError;
+
+	const id = Number.parseInt(event.params.id, 10);
+	if (Number.isNaN(id)) error(400, 'Invalid movie id');
+
+	const deleteFiles = event.url.searchParams.get('deleteFiles') === 'true';
+	const result = await deleteMovieFromArr(event.fetch, id, { deleteFiles });
+	return json(result.body, { status: result.status });
 };
