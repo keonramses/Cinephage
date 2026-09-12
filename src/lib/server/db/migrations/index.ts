@@ -134,6 +134,7 @@ import { migration_v134 } from './134-add-download-history-info-hash.js';
 import { migration_v135 } from './135-dedupe-active-download-queue.js';
 import { migration_v136 } from './136-add-storage-items-file-id-indexes.js';
 import { migration_v137 } from './137-add-debrid-content-type-columns.js';
+import { migration_v138 } from './138-add-arr-id-mappings.js';
 
 export const MIGRATIONS: MigrationDefinition[] = [
 	migration_v002,
@@ -270,5 +271,6 @@ export const MIGRATIONS: MigrationDefinition[] = [
 	migration_v134,
 	migration_v135,
 	migration_v136,
-	migration_v137
+	migration_v137,
+	migration_v138
 ];

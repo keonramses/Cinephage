@@ -2,13 +2,20 @@
 	import * as m from '$lib/paraglide/messages.js';
 	import { Key, Copy, Eye, EyeOff, RefreshCw, Server, Check, AlertCircle } from 'lucide-svelte';
 	import type { LayoutData } from '../$types';
+	import { untrack } from 'svelte';
 	import { copyToClipboard as copyTextToClipboard } from '$lib/utils/clipboard.js';
 	import { toasts } from '$lib/stores/toast.svelte';
 	import { invalidateAll } from '$app/navigation';
+	import { page } from '$app/state';
 	import { ConfirmationModal } from '$lib/components/ui/modal';
 	import { formatDisplayDate } from '$lib/utils/format.js';
 	import { SettingsPage, SettingsSection } from '$lib/components/ui/settings';
-	import { createApiKeys, regenerateApiKey, updateExternalUrl } from '$lib/api/settings.js';
+	import {
+		createApiKeys,
+		regenerateApiKey,
+		updateExternalUrl,
+		updateArrCompatEnabled
+	} from '$lib/api/settings.js';
 
 	let { data }: { data: LayoutData } = $props();
 
@@ -108,14 +115,17 @@
 	// =====================
 	// External URL State
 	// =====================
-	let externalUrl = $state('');
+	// Seeded directly from `data` (not via $effect) so SSR and the first
+	// client paint already show the real value - $effect doesn't run during
+	// SSR, so a `$state('')` + effect-only sync would render the empty
+	// default first and only flip to the real value after hydration.
+	// untrack() marks this as a deliberate one-time read: this is local,
+	// user-editable draft state, not a mirror of `data` - it shouldn't
+	// reactively overwrite what the user typed if `data` updates later.
+	let externalUrl = $state(untrack(() => data.externalUrl || ''));
 	let isSavingUrl = $state(false);
 	let saveUrlSuccess = $state(false);
 	let saveUrlError = $state('');
-
-	$effect(() => {
-		externalUrl = data.externalUrl || '';
-	});
 
 	async function saveExternalUrl() {
 		isSavingUrl = true;
@@ -146,6 +156,58 @@
 			return url.startsWith('http://') || url.startsWith('https://');
 		} catch {
 			return false;
+		}
+	}
+
+	// =====================
+	// Radarr/Sonarr Compatibility
+	// =====================
+	// Prefer the (unsaved, live) External URL field above so this updates as
+	// the user types; fall back to the URL this settings page was loaded
+	// from, if an external URL is not set.
+	const arrCompatBaseUrl = $derived((externalUrl || page.url.origin).replace(/\/+$/, ''));
+	const radarrConnectionUrl = $derived(`${arrCompatBaseUrl}/api/radarr`);
+	const sonarrConnectionUrl = $derived(`${arrCompatBaseUrl}/api/sonarr`);
+	let copiedRadarrUrl = $state(false);
+	let copiedSonarrUrl = $state(false);
+	// Seeded directly from `data` (not via $effect) - see externalUrl above
+	// for why: $effect doesn't run during SSR, so this would otherwise
+	// render "disabled" on first paint and flash to the real value once
+	// hydration runs the effect on the client. untrack() marks the one-time
+	// read as deliberate - toggleArrCompatEnabled owns updates from here on.
+	let arrCompatEnabled = $state(untrack(() => data.arrCompatEnabled ?? false));
+	let savingArrCompatEnabled = $state(false);
+
+	async function toggleArrCompatEnabled(event: Event) {
+		const next = (event.currentTarget as HTMLInputElement).checked;
+		savingArrCompatEnabled = true;
+
+		try {
+			await updateArrCompatEnabled(next);
+			arrCompatEnabled = next;
+			toasts.success(
+				next ? m.settings_system_arrCompatEnabled() : m.settings_system_arrCompatDisabled()
+			);
+		} catch (err) {
+			toasts.error(err instanceof Error ? err.message : m.common_failedToSave());
+		} finally {
+			savingArrCompatEnabled = false;
+		}
+	}
+
+	async function copyArrUrl(url: string, type: 'radarr' | 'sonarr') {
+		const copied = await copyTextToClipboard(url);
+		if (!copied) {
+			toasts.error(m.settings_system_failedToCopyApiKey());
+			return;
+		}
+
+		if (type === 'radarr') {
+			copiedRadarrUrl = true;
+			setTimeout(() => (copiedRadarrUrl = false), 2000);
+		} else {
+			copiedSonarrUrl = true;
+			setTimeout(() => (copiedSonarrUrl = false), 2000);
 		}
 	}
 </script>
@@ -419,6 +481,89 @@
 						{m.settings_system_saveExternalUrl()}
 					{/if}
 				</button>
+			</div>
+		</div>
+	</SettingsSection>
+
+	<!-- Radarr/Sonarr Compatibility Section -->
+	<SettingsSection
+		title={m.settings_system_arrCompat()}
+		titleBadge={m.common_wip()}
+		description={m.settings_system_arrCompatDescription()}
+	>
+		{#snippet actions()}
+			<input
+				type="checkbox"
+				class="toggle toggle-lg"
+				checked={arrCompatEnabled}
+				disabled={savingArrCompatEnabled}
+				onchange={toggleArrCompatEnabled}
+				aria-label={m.settings_system_arrCompat()}
+			/>
+		{/snippet}
+
+		<div class="rounded-lg bg-base-100 p-4">
+			<p class="text-sm text-base-content/70">
+				{m.settings_system_arrCompatHint()}
+			</p>
+
+			{#if !arrCompatEnabled}
+				<div class="mt-3 flex items-center gap-2 text-sm text-warning">
+					<AlertCircle class="h-4 w-4" />
+					<span>{m.settings_system_arrCompatDisabledHint()}</span>
+				</div>
+			{/if}
+
+			<div class="mt-4">
+				<label class="label" for="radarr-compat-url">
+					<span class="label-text">{m.settings_system_radarrUrl()}</span>
+				</label>
+				<div class="join w-full">
+					<input
+						id="radarr-compat-url"
+						type="text"
+						class="input-bordered input join-item w-full font-mono"
+						value={radarrConnectionUrl}
+						readonly
+					/>
+					<button
+						class="btn join-item btn-ghost"
+						onclick={() => copyArrUrl(radarrConnectionUrl, 'radarr')}
+						title={m.settings_system_copyToClipboard()}
+					>
+						{#if copiedRadarrUrl}
+							<Check class="h-4 w-4 text-success" />
+						{:else}
+							<Copy class="h-4 w-4" />
+						{/if}
+					</button>
+				</div>
+			</div>
+
+			<div class="mt-4">
+				<label class="label" for="sonarr-compat-url">
+					<span class="label-text">{m.settings_system_sonarrUrl()}</span>
+				</label>
+				<div class="join w-full">
+					<input
+						id="sonarr-compat-url"
+						type="text"
+						class="input-bordered input join-item w-full font-mono"
+						value={sonarrConnectionUrl}
+						readonly
+					/>
+					<button
+						class="btn join-item btn-ghost"
+						onclick={() => copyArrUrl(sonarrConnectionUrl, 'sonarr')}
+						title={m.settings_system_copyToClipboard()}
+					>
+						{#if copiedSonarrUrl}
+							<Check class="h-4 w-4 text-success" />
+						{:else}
+							<Copy class="h-4 w-4" />
+						{/if}
+					</button>
+				</div>
 			</div>
 		</div>
 	</SettingsSection>

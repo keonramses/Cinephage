@@ -8,6 +8,7 @@ import { db } from '$lib/server/db';
 import { settings } from '$lib/server/db/schema';
 import { eq } from 'drizzle-orm';
 import { getMetadataProviderConfig } from '$lib/server/metadata/provider-settings.js';
+import { isArrCompatEnabled } from '$lib/server/arr/arrCompatSettings.js';
 
 const logger = createChildLogger({ module: 'SystemSettingsLayout', logDomain: 'system' });
 
@@ -35,6 +36,7 @@ export const load: LayoutServerLoad = async ({ request, locals }) => {
 			mainApiKey,
 			streamingApiKey,
 			externalUrl,
+			arrCompatEnabled: isArrCompatEnabled(),
 			tmdb: {
 				hasApiKey: !!apiKeySetting,
 				configured: !!apiKeySetting
@@ -49,6 +51,7 @@ export const load: LayoutServerLoad = async ({ request, locals }) => {
 			mainApiKey: null,
 			streamingApiKey: null,
 			externalUrl: null,
+			arrCompatEnabled: false,
 			tmdb: { hasApiKey: false, configured: false },
 			metadataProviders: {
 				animeEnrichmentEnabled: true

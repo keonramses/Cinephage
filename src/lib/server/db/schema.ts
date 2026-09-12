@@ -4013,3 +4013,32 @@ export type RenamingFailureRecord = typeof renamingFailures.$inferSelect;
 export type NewRenamingFailureRecord = typeof renamingFailures.$inferInsert;
 
 export type NewRenameHistoryRecord = typeof renameHistory.$inferInsert;
+
+/**
+ * Arr ID Mappings - surrogate integer IDs for the Radarr/Sonarr-compatible
+ * API layer. Cinephage's own entities (root folders, scoring profiles,
+ * movies, series, ...) use UUID text primary keys, but the Radarr/Sonarr v3
+ * contract types every ID as an integer - client libraries (autobrr,
+ * Overseerr, ArrAPI/Kometa) decode fields like `qualityProfileId` as ints.
+ * This table assigns a stable integer per (entityType, entityId) pair the
+ * first time it's exposed through the compat layer, so responses stay
+ * consistent across requests and restarts without renumbering Cinephage's
+ * own tables.
+ */
+export const arrIdMappings = sqliteTable(
+	'arr_id_mappings',
+	{
+		id: integer('id').primaryKey({ autoIncrement: true }),
+		// e.g. 'rootFolder', 'qualityProfile', 'movie', 'series', 'tag'
+		entityType: text('entity_type').notNull(),
+		// The Cinephage UUID this surrogate ID stands in for
+		entityId: text('entity_id').notNull(),
+		createdAt: text('created_at')
+			.notNull()
+			.$defaultFn(() => new Date().toISOString())
+	},
+	(table) => [uniqueIndex('idx_arr_id_mappings_entity').on(table.entityType, table.entityId)]
+);
+
+export type ArrIdMapping = typeof arrIdMappings.$inferSelect;
+export type NewArrIdMapping = typeof arrIdMappings.$inferInsert;

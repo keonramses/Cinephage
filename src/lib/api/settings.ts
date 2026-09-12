@@ -299,6 +299,14 @@ export async function updateExternalUrl(url: string) {
 	return apiPut('/api/settings/external-url', { url });
 }
 
+export async function getArrCompatEnabled() {
+	return apiGet('/api/settings/arr-compat');
+}
+
+export async function updateArrCompatEnabled(enabled: boolean) {
+	return apiPut('/api/settings/arr-compat', { enabled });
+}
+
 export async function getSystemStatus() {
 	return apiGet('/api/system/status');
 }

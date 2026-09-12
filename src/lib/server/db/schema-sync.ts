@@ -142,8 +142,9 @@ import {
  * Version 135: Deduplicate active download queue rows by client and info hash
  * Version 136: Add storage_items indexes on episode_file_id and movie_file_id
  * Version 137: Add allow_movies and allow_tv columns to download_clients for debrid content-type restriction
+ * Version 138: Add arr_id_mappings table for the Radarr/Sonarr-compatible API layer's surrogate integer IDs
  */
-export const CURRENT_SCHEMA_VERSION = 137;
+export const CURRENT_SCHEMA_VERSION = 138;
 
 export const SYSTEM_LIBRARY_SEEDS = [
 	{

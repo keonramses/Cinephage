@@ -153,6 +153,10 @@ const customHandler: Handle = async ({ event, resolve }) => {
 				if (path === '/api/ready' || path.startsWith('/api/ready/')) {
 					return true;
 				}
+				// Radarr/Sonarr's own /ping is unauthenticated.
+				if (path === '/api/radarr/ping' || path === '/api/sonarr/ping') {
+					return true;
+				}
 				return false;
 			}
 
