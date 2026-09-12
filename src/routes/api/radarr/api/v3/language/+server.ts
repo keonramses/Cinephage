@@ -15,5 +15,5 @@ export const GET: RequestHandler = async (event) => {
 	const authError = requireAdmin(event);
 	if (authError) return authError;
 
-	return json(buildLanguages());
+	return json(await buildLanguages());
 };

@@ -2,11 +2,12 @@ import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
 import { requireAdmin } from '$lib/server/auth/authorization.js';
 import { requireArrCompatEnabled } from '$lib/server/arr/requireArrCompatEnabled.js';
-import { buildLanguages } from '$lib/server/arr/languages.js';
+import { buildLanguageProfiles } from '$lib/server/arr/languageProfiles.js';
 
 /**
- * GET /api/sonarr/api/v3/language
- * See languages.ts for why this isn't an empty-array skeleton.
+ * GET /api/sonarr/api/v3/languageprofile
+ * Sonarr-only - see languageProfiles.ts for why this isn't an empty-array
+ * skeleton.
  */
 export const GET: RequestHandler = async (event) => {
 	const disabledError = requireArrCompatEnabled();
@@ -15,5 +16,5 @@ export const GET: RequestHandler = async (event) => {
 	const authError = requireAdmin(event);
 	if (authError) return authError;
 
-	return json(await buildLanguages());
+	return json(await buildLanguageProfiles());
 };

@@ -29,7 +29,9 @@ export type ArrEntityType =
 	| 'movieFile'
 	| 'episodeFile'
 	| 'release'
-	| 'rename';
+	| 'rename'
+	| 'language'
+	| 'languageProfile';
 
 /**
  * Get (or assign, on first use) the surrogate integer ID for a single entity.

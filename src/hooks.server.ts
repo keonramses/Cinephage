@@ -164,7 +164,15 @@ const customHandler: Handle = async ({ event, resolve }) => {
 			let apiKey = null;
 
 			if (!isStreamingApiRoute) {
-				const apiKeyHeader = event.request.headers.get('x-api-key');
+				// Real Radarr/Sonarr accept the API key as either the X-Api-Key
+				// header or an `apikey` query parameter (see the real openapi.json
+				// securitySchemes) - arr clients like Jellyseerr/Overseerr (Seerr) use the
+				// query parameter for their Radarr/Sonarr connections, so the
+				// arr-compat routes need it accepted here too, not just the header.
+				const apiKeyHeader =
+					event.request.headers.get('x-api-key') ||
+					event.url.searchParams.get('apikey') ||
+					event.url.searchParams.get('api_key');
 				if (apiKeyHeader) {
 					try {
 						session = await auth.api.getSession({
