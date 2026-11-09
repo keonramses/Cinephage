@@ -1,7 +1,7 @@
 # =============================================================================
 # Cinephage Docker Compose
 # =============================================================================
-# Official image: ghcr.io/moldytaint/cinephage:latest
+# Official image: ghcr.io/cinephage/cinephage:latest
 # Optional: set IMAGE_TAG to pin a specific image tag
 # To build from source instead of pulling the image:
 #   Uncomment "build: ." and comment out "image:" below
@@ -12,14 +12,14 @@
 
 services:
   cinephage:
-    image: ghcr.io/moldytaint/cinephage:${IMAGE_TAG:-latest}
+    image: ghcr.io/cinephage/cinephage:${IMAGE_TAG:-latest}
     # build: .  # Uncomment to build locally (requires cloning the repo)
     container_name: cinephage
     restart: unless-stopped
     init: true
     # Headless Firefox (captcha solving) uses /dev/shm; the container default of
     # 64MB causes crashes/instability. Proxmox LXC users may also need to raise the
-    # host's shm — see .env.example. Increase if you raise CAPTCHA_MAX_BROWSERS.
+    # host's shm - see .env.example. Increase if you raise CAPTCHA_MAX_BROWSERS.
     shm_size: 256m
     security_opt:
       - no-new-privileges:true

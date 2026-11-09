@@ -5,10 +5,10 @@
  * Uses robust error handling and timeouts to handle slow/unreliable servers.
  */
 
-import { db } from '$lib/server/db';
-import { livetvAccounts, livetvChannels, livetvCategories } from '$lib/server/db/schema';
+import { db } from '#lib/server/db/index.js';
+import { livetvAccounts, livetvChannels, livetvCategories } from '#lib/server/db/schema.js';
 import { and, eq, inArray, notInArray } from 'drizzle-orm';
-import { createChildLogger } from '$lib/logging';
+import { createChildLogger } from '#lib/logging/index.js';
 import { randomUUID } from 'node:crypto';
 import { XMLParser } from 'fast-xml-parser';
 
@@ -23,11 +23,13 @@ import type {
 	LiveTvCategory,
 	ChannelSyncResult,
 	EpgProgram,
+	EpgLocalizedText,
 	LiveTvAccountTestResult,
 	XstreamConfig,
 	XstreamChannelData
-} from '$lib/types/livetv';
+} from '#lib/types/livetv.js';
 import { recordToAccount } from '../LiveTvAccountManager.js';
+import { resolveHttpUrl } from '../urlGuards.js';
 import { buildXstreamPlayerApiUrl, normalizeXstreamBaseUrl } from './xstream-url.js';
 
 // XStream API Response Types
@@ -943,7 +945,17 @@ export class XstreamProvider implements LiveTvProvider {
 		startTime: Date,
 		endTime: Date
 	): Promise<EpgProgram[]> {
+		if (!resolveHttpUrl(epgUrl)) {
+			logger.warn(
+				{ accountId },
+				'[XstreamProvider] Configured EPG URL is not a valid http(s) URL; skipping EPG sync'
+			);
+			return [];
+		}
+
 		try {
+			// Log the URL through the redaction-aware logger: Xtream EPG URLs
+			// commonly embed portal credentials as query params.
 			logger.info({ accountId, epgUrl }, '[XstreamProvider] Fetching configured XMLTV EPG');
 
 			const response = await fetch(epgUrl, {
@@ -1086,6 +1098,12 @@ export class XstreamProvider implements LiveTvProvider {
 				const description = this.extractXmltvText(programme?.desc);
 				const category = this.extractXmltvText(programme?.category);
 
+				// Preserve every XMLTV @lang variant (parity with M3uProvider) so
+				// display-time language selection works for xstream EPG too.
+				const titleI18n = this.extractXmltvTexts(programme?.title);
+				const descriptionI18n = this.extractXmltvTexts(programme?.desc);
+				const categoryI18n = this.extractXmltvTexts(programme?.category);
+
 				for (const channelInfo of channelInfos.values()) {
 					programs.push({
 						id: randomUUID(),
@@ -1096,6 +1114,9 @@ export class XstreamProvider implements LiveTvProvider {
 						title,
 						description: description ?? null,
 						category: category ?? null,
+						titleI18n: titleI18n.length > 0 ? titleI18n : null,
+						descriptionI18n: descriptionI18n.length > 0 ? descriptionI18n : null,
+						categoryI18n: categoryI18n.length > 0 ? categoryI18n : null,
 						director: null,
 						actor: null,
 						startTime: programmeStart.toISOString(),
@@ -1177,13 +1198,41 @@ export class XstreamProvider implements LiveTvProvider {
 		return null;
 	}
 
+	private extractXmltvTexts(value: unknown): EpgLocalizedText[] {
+		if (!value) return [];
+		const elements = Array.isArray(value) ? value : [value];
+		const texts: EpgLocalizedText[] = [];
+		for (const element of elements) {
+			if (element == null) continue;
+			let text: string | null = null;
+			let lang: string | null = null;
+			if (typeof element === 'string') {
+				text = element;
+			} else if (typeof element === 'object') {
+				const record = element as Record<string, unknown>;
+				if (record['#text'] != null) {
+					text = String(record['#text']);
+				}
+				if (typeof record['@_lang'] === 'string' && record['@_lang'].trim() !== '') {
+					lang = record['@_lang'].trim().toLowerCase();
+				}
+			}
+			if (text == null) continue;
+			texts.push({ lang, text });
+		}
+		return texts;
+	}
+
 	private normalizeChannelLookupKey(value: string | undefined): string | null {
 		if (!value) return null;
+		// Unicode-aware (parity with M3uProvider): diacritics fold, non-Latin
+		// scripts (CJK/Cyrillic/Arabic) keep a stable key instead of collapsing
+		// to null and silently failing name-based XMLTV matching.
 		const normalized = value
 			.normalize('NFKD')
 			.replace(/[\u0300-\u036f]/g, '')
 			.toLowerCase()
-			.replace(/[^a-z0-9]+/g, '');
+			.replace(/[^\p{L}\p{N}]+/gu, '');
 		return normalized || null;
 	}
 

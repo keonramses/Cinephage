@@ -1,6 +1,6 @@
 import Database from 'better-sqlite3';
 import { createHash } from 'node:crypto';
-import { createChildLogger } from '$lib/logging';
+import { createChildLogger } from '#lib/logging/index.js';
 
 const logger = createChildLogger({ logDomain: 'system' as const });
 
@@ -24,13 +24,14 @@ export const BETTER_AUTH_TABLE_DEFINITIONS = [
 			"image" text,
 			"username" text UNIQUE,
 			"displayUsername" text,
-			"role" text DEFAULT 'admin' NOT NULL,
+			"role" text DEFAULT 'user' NOT NULL,
 			"language" text DEFAULT 'en',
 			"banned" integer DEFAULT 0,
 			"banReason" text,
 			"banExpires" date,
 			"createdAt" date NOT NULL,
-			"updatedAt" date NOT NULL
+			"updatedAt" date NOT NULL,
+			"lastActiveAt" date
 		)`
 	},
 	{
@@ -44,7 +45,8 @@ export const BETTER_AUTH_TABLE_DEFINITIONS = [
 			"userAgent" text,
 			"impersonatedBy" text,
 			"createdAt" date NOT NULL,
-			"updatedAt" date NOT NULL
+			"updatedAt" date NOT NULL,
+			"lastActiveAt" date
 		)`
 	},
 	{
@@ -84,7 +86,8 @@ export const BETTER_AUTH_TABLE_DEFINITIONS = [
 			"start" text,
 			"prefix" text,
 			"key" text NOT NULL,
-			"userId" text NOT NULL REFERENCES "user"("id") ON DELETE CASCADE,
+			"referenceId" text NOT NULL REFERENCES "user"("id") ON DELETE CASCADE,
+			"configId" text DEFAULT 'default',
 			"refillInterval" integer,
 			"refillAmount" integer,
 			"lastRefillAt" date,
@@ -313,6 +316,22 @@ export function createBetterAuthIndexes(sqlite: Database.Database): void {
 	}
 }
 
+/**
+ * Converge the apikey table to the v1.5+ shape (referenceId + configId).
+ * Runs at auth module init, before betterAuth() is constructed: better-auth
+ * >= 1.7 validates the schema on first access and latches a mismatch for the
+ * process lifetime, so a pre-1.5 database must be converged before the first
+ * auth request - it cannot wait for schema-sync migrations 065/066.
+ */
+export function convergeApikeySchemaToV15(sqlite: Database.Database): void {
+	if (!tableExists(sqlite, 'apikey')) {
+		return;
+	}
+
+	renameColumnIfExists(sqlite, 'apikey', 'userId', 'referenceId');
+	ensureColumn(sqlite, 'apikey', 'configId', `"configId" text DEFAULT 'default'`);
+}
+
 export function recreateBetterAuthSchema(sqlite: Database.Database): void {
 	const dropOrder = ['apikey', 'account', 'session', 'verification', 'rateLimit', 'user'];
 
@@ -451,10 +470,47 @@ export const CRITICAL_COLUMNS: Record<string, string[]> = {
 		'consecutive_failures'
 	],
 	root_folders: ['id', 'path', 'media_sub_type', 'read_only', 'preserve_symlinks'],
-	libraries: ['id', 'name', 'slug', 'media_type', 'media_sub_type', 'is_system'],
-	movies: ['id', 'tmdb_id', 'title', 'path', 'monitored', 'library_id'],
-	series: ['id', 'tmdb_id', 'title', 'path', 'monitored', 'library_id'],
-	episodes: ['id', 'series_id', 'season_number', 'episode_number'],
+	libraries: [
+		'id',
+		'name',
+		'slug',
+		'media_type',
+		'media_sub_type',
+		'is_system',
+		'language_profile_id'
+	],
+	movies: [
+		'id',
+		'tmdb_id',
+		'title',
+		'path',
+		'monitored',
+		'library_id',
+		'original_language',
+		'metadata_language_mode',
+		'metadata_language_value',
+		'subtitle_requirements_override'
+	],
+	series: [
+		'id',
+		'tmdb_id',
+		'title',
+		'path',
+		'monitored',
+		'library_id',
+		'original_language',
+		'metadata_language_mode',
+		'metadata_language_value',
+		'subtitle_requirements_override'
+	],
+	episodes: [
+		'id',
+		'series_id',
+		'season_number',
+		'episode_number',
+		'subtitle_requirements_override'
+	],
+	subtitles: ['id', 'relative_path', 'language', 'format', 'last_checked_at'],
 	indexers: ['id', 'name', 'definition_id', 'enabled'],
 	scoring_profiles: ['id', 'name', 'is_default']
 };
@@ -566,12 +622,108 @@ export const MIGRATION_COLUMN_MAP: Record<number, Array<{ table: string; column:
 		{ table: 'movies', column: 'library_id' },
 		{ table: 'series', column: 'library_id' }
 	],
+	81: [
+		{ table: 'scoring_profiles', column: 'is_built_in' },
+		{ table: 'scoring_profiles', column: 'min_resolution' },
+		{ table: 'scoring_profiles', column: 'max_resolution' },
+		{ table: 'scoring_profiles', column: 'allowed_sources' },
+		{ table: 'scoring_profiles', column: 'excluded_sources' }
+	],
+	83: [
+		{ table: 'movies', column: 'tmdb_collection_id' },
+		{ table: 'movies', column: 'collection_name' }
+	],
+	84: [
+		{ table: 'movies', column: 'release_date' },
+		{ table: 'series', column: 'first_air_date' }
+	],
+	// metadata_provider and pinned_external from v85/v86 are dropped by v95
+	85: [{ table: 'series', column: 'provider_refs' }],
+	86: [{ table: 'movies', column: 'provider_refs' }],
+	88: [
+		{ table: 'root_folders', column: 'skip_folder_patterns' },
+		{ table: 'root_folders', column: 'blocked_video_extensions' }
+	],
+	91: [
+		{ table: 'movies', column: 'download_release_date' },
+		{ table: 'movies', column: 'download_release_type' }
+	],
+	92: [
+		{ table: 'movies', column: 'digital_release_date' },
+		{ table: 'movies', column: 'physical_release_date' },
+		{ table: 'movies', column: 'availability_delay' }
+	],
+	93: [{ table: 'indexers', column: 'upstream_enabled' }],
+	94: [{ table: 'indexers', column: 'orphaned' }],
+	96: [
+		{ table: 'movies', column: 'adult' },
+		{ table: 'movies', column: 'adult_source' },
+		{ table: 'movies', column: 'adult_confidence' },
+		{ table: 'series', column: 'adult' },
+		{ table: 'series', column: 'adult_source' },
+		{ table: 'series', column: 'adult_confidence' }
+	],
+	97: [{ table: 'series', column: 'episode_group_id' }],
+	98: [
+		{ table: 'indexers', column: 'cached_categories' },
+		{ table: 'indexers', column: 'additional_categories' }
+	],
+	100: [{ table: 'scoring_profiles', column: 'prevent_downgrades' }],
+	102: [{ table: 'indexers', column: 'is_built_in' }],
+	105: [
+		{ table: 'pending_releases', column: 'publish_date' },
+		{ table: 'movies', column: 'delay_profile_id' },
+		{ table: 'series', column: 'delay_profile_id' }
+	],
+	106: [{ table: 'scoring_profiles', column: 'required_formats' }],
+	108: [{ table: 'download_queue', column: 'stalled_since' }],
 	125: [
 		{ table: 'download_clients', column: 'api_token' },
 		{ table: 'download_clients', column: 'remove_after_import' }
 	],
 	132: [{ table: 'download_clients', column: 'sequential_download' }],
-	133: [{ table: 'download_queue', column: 'import_failed' }]
+	133: [{ table: 'download_queue', column: 'import_failed' }],
+	137: [
+		{ table: 'download_clients', column: 'allow_movies' },
+		{ table: 'download_clients', column: 'allow_tv' }
+	],
+	140: [
+		{ table: 'movies', column: 'original_language' },
+		{ table: 'movies', column: 'metadata_language_mode' },
+		{ table: 'movies', column: 'metadata_language_value' },
+		{ table: 'series', column: 'original_language' },
+		{ table: 'series', column: 'metadata_language_mode' },
+		{ table: 'series', column: 'metadata_language_value' },
+		{ table: 'libraries', column: 'language_profile_id' }
+	],
+	141: [{ table: 'subtitles', column: 'last_checked_at' }],
+	143: [
+		{ table: 'media_server_synced_items', column: 'audio_languages_raw' },
+		{ table: 'media_server_synced_items', column: 'subtitle_languages_raw' },
+		{ table: 'epg_programs', column: 'title_i18n' },
+		{ table: 'epg_programs', column: 'description_i18n' },
+		{ table: 'epg_programs', column: 'category_i18n' }
+	],
+	144: [{ table: 'language_settings', column: 'prefer_original_title' }],
+	146: [
+		{ table: 'movies', column: 'subtitle_requirements_override' },
+		{ table: 'series', column: 'subtitle_requirements_override' },
+		{ table: 'episodes', column: 'subtitle_requirements_override' }
+	],
+	147: [
+		{ table: 'movies', column: 'language_shortfall' },
+		{ table: 'series', column: 'language_shortfall' }
+	],
+	151: [
+		{ table: 'episodes', column: 'wants_subtitles_override' },
+		{ table: 'movies', column: 'language_profile_id' },
+		{ table: 'series', column: 'language_profile_id' },
+		{ table: 'smart_lists', column: 'language_profile_id' }
+	],
+	154: [{ table: 'library_jobs', column: 'acknowledged_at' }],
+	155: [{ table: 'indexers', column: 'rate_limit_per_minute' }],
+	156: [{ table: 'indexer_status', column: 'disabled_reason' }],
+	166: [{ table: 'scoring_profiles', column: 'allowed_indexers' }]
 };
 
 /**
@@ -586,11 +738,14 @@ export function detectAndFixSchemaDrift(sqlite: Database.Database): void {
 
 		for (const { table, column } of columns) {
 			if (tableExists(sqlite, table) && !columnExists(sqlite, table, column)) {
-				// Column should exist but doesn't - mark migration as failed so it re-runs
+				// Column should exist but doesn't - mark this migration AND every
+				// migration after it as failed so they re-run in order. Re-running
+				// only the failed version can leave a later migration's columns
+				// dropped (e.g. a table-rebuild migration) with no repair path.
 				logger.warn(
 					`[SchemaSync] Schema drift detected: ${table}.${column} missing (migration v${version})`
 				);
-				sqlite.prepare(`UPDATE schema_migrations SET success = 0 WHERE version = ?`).run(version);
+				sqlite.prepare(`UPDATE schema_migrations SET success = 0 WHERE version >= ?`).run(version);
 				driftFound = true;
 			}
 		}
@@ -641,17 +796,25 @@ export function applyMigration(sqlite: Database.Database, migration: MigrationDe
 
 	logger.info(`[SchemaSync] Applying migration v${migration.version}: ${migration.name}`);
 
-	// Mark as in-progress (success=0)
-	sqlite
-		.prepare(
-			`
+	// Migrations perform schema surgery (table rebuilds, drops) that must not fire
+	// FK actions - e.g. dropping a parent table while children reference it would
+	// otherwise cascade-delete child rows. PRAGMA foreign_keys is a no-op inside a
+	// transaction, so it is toggled here, before the migration transaction opens,
+	// and restored afterwards.
+	const foreignKeysWereOn = sqlite.pragma('foreign_keys', { simple: true }) === 1;
+	if (foreignKeysWereOn) sqlite.pragma('foreign_keys = OFF');
+
+	try {
+		// Mark as in-progress (success=0)
+		sqlite
+			.prepare(
+				`
 		INSERT OR REPLACE INTO schema_migrations (version, name, checksum, applied_at, success)
 		VALUES (?, ?, ?, ?, 0)
 	`
-		)
-		.run(migration.version, migration.name, checksum, new Date().toISOString());
+			)
+			.run(migration.version, migration.name, checksum, new Date().toISOString());
 
-	try {
 		// Run migration in a transaction
 		sqlite.transaction(() => {
 			migration.apply(sqlite);
@@ -673,6 +836,8 @@ export function applyMigration(sqlite: Database.Database, migration: MigrationDe
 			`[SchemaSync] Migration v${migration.version} failed`
 		);
 		throw error;
+	} finally {
+		if (foreignKeysWereOn) sqlite.pragma('foreign_keys = ON');
 	}
 }
 

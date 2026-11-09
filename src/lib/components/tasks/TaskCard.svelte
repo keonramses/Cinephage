@@ -1,10 +1,10 @@
 <script lang="ts">
-	import type { UnifiedTask } from '$lib/server/tasks/UnifiedTaskRegistry';
-	import type { TaskHistoryEntry } from '$lib/types/task';
-	import * as m from '$lib/paraglide/messages.js';
-	import { toasts } from '$lib/stores/toast.svelte';
+	import type { UnifiedTask } from '#lib/server/tasks/UnifiedTaskRegistry.js';
+	import type { TaskHistoryEntry } from '#lib/types/task.js';
+	import * as m from '#lib/paraglide/messages.js';
+	import { toasts } from '#lib/stores/toast.svelte.js';
 	import TaskIntervalCell from './TaskIntervalCell.svelte';
-	import { formatDuration, formatDisplayDate } from '$lib/utils/format.js';
+	import { formatDuration, formatDisplayDate } from '#lib/utils/format.js';
 
 	interface Props {
 		task: UnifiedTask;
@@ -39,7 +39,7 @@
 	});
 
 	const liveTimeUntil = $derived.by(() => {
-		if (!task.nextRunTime) return '—';
+		if (!task.nextRunTime) return '-';
 		const date = new Date(task.nextRunTime).getTime();
 		const diffMs = date - now;
 		if (diffMs <= 0) return 'Overdue';
@@ -139,7 +139,7 @@
 						{liveTimeUntil}
 					</span>
 				{:else}
-					<span class="text-base-content/40">—</span>
+					<span class="text-base-content/40">-</span>
 				{/if}
 			</div>
 		{:else}

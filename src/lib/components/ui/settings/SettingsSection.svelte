@@ -4,6 +4,8 @@
 	interface Props {
 		/** Section heading */
 		title: string;
+		/** Optional small badge shown next to the heading (e.g. "WIP") */
+		titleBadge?: string;
 		/** Optional description below heading */
 		description?: string;
 		/** Optional action area rendered to the right of the heading */
@@ -18,6 +20,7 @@
 
 	let {
 		title,
+		titleBadge,
 		description,
 		actions,
 		children,
@@ -31,7 +34,12 @@
 		<div class="card-body gap-4">
 			<div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
 				<div class="min-w-0">
-					<h2 class="text-lg font-semibold">{title}</h2>
+					<div class="flex items-center gap-2">
+						<h2 class="text-lg font-semibold">{title}</h2>
+						{#if titleBadge}
+							<span class="badge badge-sm badge-warning">{titleBadge}</span>
+						{/if}
+					</div>
 					{#if description}
 						<p class="mt-1 text-sm text-base-content/70">{description}</p>
 					{/if}
@@ -49,7 +57,12 @@
 	<div class={className}>
 		<div class="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
 			<div class="min-w-0">
-				<h2 class="text-lg font-semibold">{title}</h2>
+				<div class="flex items-center gap-2">
+					<h2 class="text-lg font-semibold">{title}</h2>
+					{#if titleBadge}
+						<span class="badge badge-sm badge-warning">{titleBadge}</span>
+					{/if}
+				</div>
 				{#if description}
 					<p class="mt-1 text-sm text-base-content/70">{description}</p>
 				{/if}

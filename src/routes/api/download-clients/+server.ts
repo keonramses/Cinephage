@@ -1,13 +1,12 @@
-import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
-import { getDownloadClientManager } from '$lib/server/downloadClients/DownloadClientManager';
+import { getDownloadClientManager } from '#lib/server/downloadClients/DownloadClientManager.js';
 import {
 	downloadClientCreateSchema,
 	type DownloadClientCreateDiscriminated
-} from '$lib/validation/schemas';
-import { requireAdmin } from '$lib/server/auth/authorization.js';
-import { parseBody } from '$lib/server/api/validate.js';
-import type { DownloadClientInput } from '$lib/types/downloadClient';
+} from '#lib/validation/schemas.js';
+import { requireAdmin } from '#lib/server/auth/authorization.js';
+import { parseBody } from '#lib/server/api/validate.js';
+import type { DownloadClientInput } from '#lib/types/downloadClient.js';
 
 /**
  * GET /api/download-clients
@@ -19,7 +18,7 @@ export const GET: RequestHandler = async () => {
 	const clients = await manager.getClients();
 
 	// Password is already excluded from DownloadClient type (only hasPassword boolean is included)
-	return json(clients);
+	return Response.json(clients);
 };
 
 /**
@@ -44,7 +43,9 @@ export const POST: RequestHandler = async (event) => {
 		enabled: validated.enabled,
 		priority: validated.priority,
 		apiToken: validated.apiToken,
-		removeAfterImport: validated.removeAfterImport
+		removeAfterImport: validated.removeAfterImport,
+		allowMovies: validated.allowMovies,
+		allowTv: validated.allowTv
 	};
 
 	let input: DownloadClientInput;
@@ -77,5 +78,5 @@ export const POST: RequestHandler = async (event) => {
 
 	const created = await manager.createClient(input);
 
-	return json({ success: true, client: created });
+	return Response.json({ success: true, client: created });
 };

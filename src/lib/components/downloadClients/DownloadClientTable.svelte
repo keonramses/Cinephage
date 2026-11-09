@@ -9,10 +9,10 @@
 		Server,
 		FlaskConical,
 		Loader2
-	} from 'lucide-svelte';
-	import type { UnifiedClientItem } from '$lib/types/downloadClient';
+	} from '@lucide/svelte';
+	import type { UnifiedClientItem } from '#lib/types/downloadClient.js';
 	import DownloadClientStatusBadge from './DownloadClientStatusBadge.svelte';
-	import * as m from '$lib/paraglide/messages.js';
+	import * as m from '#lib/paraglide/messages.js';
 
 	interface Props {
 		clients: UnifiedClientItem[];
@@ -100,6 +100,11 @@
 		return client.implementation === 'realdebrid' || client.implementation === 'torbox';
 	}
 
+	/** Debrid clients have a fixed provider API host, no port/SSL/urlBase to compose. */
+	function getDebridHost(client: UnifiedClientItem): string {
+		return client.host;
+	}
+
 	const allSelected = $derived(clients.length > 0 && clients.every((c) => selectedIds.has(c.id)));
 	const someSelected = $derived(clients.some((c) => selectedIds.has(c.id)) && !allSelected);
 </script>
@@ -117,7 +122,7 @@
 				<label class="flex items-center gap-2 text-xs font-medium">
 					<input
 						type="checkbox"
-						class="checkbox checkbox-sm"
+						class="checkbox checkbox-sm checkbox-primary"
 						checked={allSelected}
 						indeterminate={someSelected}
 						onchange={(e) => onSelectAll(e.currentTarget.checked)}
@@ -141,7 +146,7 @@
 				<div class="mb-2 flex items-start gap-2.5">
 					<input
 						type="checkbox"
-						class="checkbox checkbox-sm"
+						class="checkbox checkbox-sm checkbox-primary"
 						checked={selectedIds.has(client.id)}
 						onchange={(e) => onSelect(client.id, e.currentTarget.checked)}
 					/>
@@ -173,7 +178,12 @@
 					<span class="badge badge-outline badge-sm">
 						{getProtocolLabel(client.implementation)}
 					</span>
-					{#if !isDebrid(client)}<span class="badge badge-ghost badge-sm"
+					{#if isDebrid(client)}<span class="badge badge-ghost badge-sm"
+							>{m.common_movies()}: {client.allowMovies === false ? '✗' : '✓'}</span
+						>
+						<span class="badge badge-ghost badge-sm"
+							>{m.common_tvShows()}: {client.allowTv === false ? '✗' : '✓'}</span
+						>{:else}<span class="badge badge-ghost badge-sm"
 							>{m.common_movies()}: {client.movieCategory ?? '-'}</span
 						>
 						<span class="badge badge-ghost badge-sm"
@@ -181,12 +191,12 @@
 						>{/if}
 				</div>
 
-				{#if !isDebrid(client)}<div
-						class="mb-3 min-w-0 truncate font-mono text-xs text-base-content/60"
-						title={getClientUrl(client)}
-					>
-						{getClientUrl(client)}
-					</div>{/if}
+				<div
+					class="mb-3 min-w-0 truncate font-mono text-xs text-base-content/60"
+					title={isDebrid(client) ? getDebridHost(client) : getClientUrl(client)}
+				>
+					{isDebrid(client) ? getDebridHost(client) : getClientUrl(client)}
+				</div>
 
 				<div class="grid gap-1.5 {onTest ? 'grid-cols-4' : 'grid-cols-3'}">
 					{#if onTest}
@@ -245,7 +255,7 @@
 					<th class="w-10">
 						<input
 							type="checkbox"
-							class="checkbox checkbox-sm"
+							class="checkbox checkbox-sm checkbox-primary"
 							checked={allSelected}
 							indeterminate={someSelected}
 							onchange={(e) => onSelectAll(e.currentTarget.checked)}
@@ -308,7 +318,7 @@
 						<td class="w-10">
 							<input
 								type="checkbox"
-								class="checkbox checkbox-sm"
+								class="checkbox checkbox-sm checkbox-primary"
 								checked={selectedIds.has(client.id)}
 								onchange={(e) => onSelect(client.id, e.currentTarget.checked)}
 							/>
@@ -332,19 +342,28 @@
 							>
 						</td>
 						<td>
-							{#if !isDebrid(client)}<div class="font-mono text-sm">
-									{getClientUrl(client)}
-								</div>{/if}
+							<div class="font-mono text-sm">
+								{isDebrid(client) ? getDebridHost(client) : getClientUrl(client)}
+							</div>
 						</td>
 						<td>
-							{#if !isDebrid(client)}<div class="flex flex-col gap-1">
+							<div class="flex flex-col gap-1">
+								{#if isDebrid(client)}
+									<span class="badge badge-ghost badge-sm"
+										>{m.common_movies()}: {client.allowMovies === false ? '✗' : '✓'}</span
+									>
+									<span class="badge badge-ghost badge-sm"
+										>{m.common_tvShows()}: {client.allowTv === false ? '✗' : '✓'}</span
+									>
+								{:else}
 									<span class="badge badge-ghost badge-sm"
 										>{m.common_movies()}: {client.movieCategory ?? '-'}</span
 									>
 									<span class="badge badge-ghost badge-sm"
 										>{m.common_tvShows()}: {client.tvCategory ?? '-'}</span
 									>
-								</div>{/if}
+								{/if}
+							</div>
 						</td>
 						<td class="pl-4!">
 							<div class="flex gap-0">

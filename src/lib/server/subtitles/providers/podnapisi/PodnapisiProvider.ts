@@ -5,14 +5,18 @@
  * Uses their public API for searching and downloading subtitles.
  */
 
-import { BaseSubtitleProvider } from '../BaseProvider';
+import {
+	BaseSubtitleProvider,
+	DEFAULT_CAPABILITIES,
+	type ProviderCapabilities
+} from '../BaseProvider';
 import type {
 	SubtitleSearchCriteria,
 	SubtitleSearchResult,
 	ProviderSearchOptions,
 	LanguageCode
 } from '../../types';
-import { createChildLogger } from '$lib/logging';
+import { createChildLogger } from '#lib/logging/index.js';
 
 const logger = createChildLogger({ logDomain: 'subtitles' as const });
 import { TooManyRequests, ServiceUnavailable } from '../../errors/ProviderErrors';
@@ -75,6 +79,11 @@ interface PodnapisiSearchResult {
 }
 
 export class PodnapisiProvider extends BaseSubtitleProvider {
+	// Parses hearing_impaired from the search response.
+	protected override _capabilities: ProviderCapabilities = {
+		...DEFAULT_CAPABILITIES,
+		hearingImpairedVerifiable: true
+	};
 	get implementation(): string {
 		return 'podnapisi';
 	}

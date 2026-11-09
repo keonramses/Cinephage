@@ -1,7 +1,8 @@
-import { tmdb } from '$lib/server/tmdb';
-import type { Movie, TVShow, PaginatedResponse } from '$lib/types/tmdb';
-import { GENRE_MAPPINGS, SEARCH } from '$lib/config/constants';
-import { hasActiveDiscoverFilters } from '$lib/utils/discoverParams';
+import { tmdb } from '#lib/server/tmdb.js';
+import type { Movie, TVShow, PaginatedResponse } from '#lib/types/tmdb.js';
+import { GENRE_MAPPINGS, SEARCH } from '#lib/config/constants.js';
+import { hasActiveDiscoverFilters } from '#lib/utils/discoverParams.js';
+import { normalizeTmdbLanguage } from '#lib/server/languages/normalize.js';
 
 /**
  * Maps movie genre IDs to TV genre IDs or vice versa.
@@ -39,6 +40,7 @@ export interface DiscoverParams {
 	trending?: string | null;
 	withWatchProviders: string;
 	watchRegion: string;
+	withNetworks: string;
 	withGenres: string;
 	withKeywords: string;
 	withoutKeywords: string;
@@ -50,6 +52,109 @@ export interface DiscoverParams {
 	skipKeywordBlocklist?: boolean;
 }
 
+/** Stored values that mean "no origin filter" rather than a language. */
+const NO_FILTER_MARKERS = new Set(['any', 'all']);
+
+/**
+ * Resolve the effective discover `with_original_language` content-origin filter.
+ *
+ * Order: explicit URL param (passed through unchanged) →
+ * `language_settings.discover_original_filter` validated down to a canonical
+ * base tag via `normalizeTmdbLanguage` → null.
+ *
+ * The response locale (`language_settings.metadata_locale` /
+ * `global_filters.language`) is deliberately never consulted: response
+ * localization and content-origin filtering are separate concerns
+ * (language-system spec §5).
+ */
+export function resolveWithOriginalLanguage(
+	urlParam: string | null | undefined,
+	storedFilter: string | null | undefined
+): string | null {
+	const fromUrl = typeof urlParam === 'string' ? urlParam.trim() : '';
+	if (fromUrl && !NO_FILTER_MARKERS.has(fromUrl.toLowerCase())) {
+		// Normalize at the boundary too: `en-US` → `en`; junk → null (fall
+		// through to the stored filter).
+		const normalizedUrl = normalizeTmdbLanguage(fromUrl);
+		if (normalizedUrl) return normalizedUrl;
+	}
+
+	const stored = typeof storedFilter === 'string' ? storedFilter.trim() : '';
+	if (!stored || NO_FILTER_MARKERS.has(stored.toLowerCase())) return null;
+	return normalizeTmdbLanguage(stored);
+}
+
+/**
+ * Build the TMDB discover query string for one endpoint.
+ *
+ * Media-type-specific params gate here: networks are TV-only, certification
+ * is movie-only, and dates/sort use each endpoint's own field names.
+ */
+export function buildDiscoverQuery(
+	endpoint: '/discover/movie' | '/discover/tv',
+	params: DiscoverParams,
+	page: string
+): string {
+	const isTv = endpoint.endsWith('/tv');
+	const queryParams = new URLSearchParams();
+	queryParams.set('page', page);
+
+	// Handle Sort Mapping for TV
+	let sort = params.sortBy;
+	if (isTv) {
+		if (sort === 'primary_release_date.desc') sort = 'first_air_date.desc';
+		if (sort === 'primary_release_date.asc') sort = 'first_air_date.asc';
+		if (sort === 'revenue.desc') sort = 'popularity.desc'; // TV doesn't have revenue sort
+	}
+	queryParams.set('sort_by', sort);
+
+	if (params.withWatchProviders) {
+		queryParams.set('with_watch_providers', params.withWatchProviders);
+		queryParams.set('watch_region', params.watchRegion);
+	}
+
+	if (params.withGenres) {
+		queryParams.set('with_genres', mapGenres(params.withGenres, isTv ? 'tv' : 'movie'));
+	}
+
+	if (params.withKeywords) {
+		queryParams.set('with_keywords', params.withKeywords);
+	}
+	if (params.withoutKeywords) {
+		queryParams.set('without_keywords', params.withoutKeywords);
+	}
+
+	if (params.withOriginalLanguage) {
+		queryParams.set('with_original_language', params.withOriginalLanguage);
+	}
+
+	// Networks are a TV concept. Pipe = OR on TMDB (shows airing on ANY
+	// selected network); the comma form would demand airing on all at once.
+	if (params.withNetworks && isTv) {
+		const ids = params.withNetworks.split(',').filter(Boolean);
+		if (ids.length > 0) queryParams.set('with_networks', ids.join('|'));
+	}
+
+	if (params.minDate) {
+		if (isTv) queryParams.set('first_air_date.gte', params.minDate);
+		else queryParams.set('primary_release_date.gte', params.minDate);
+	}
+	if (params.maxDate) {
+		if (isTv) queryParams.set('first_air_date.lte', params.maxDate);
+		else queryParams.set('primary_release_date.lte', params.maxDate);
+	}
+	if (params.minRating) {
+		queryParams.set('vote_average.gte', params.minRating);
+		queryParams.set('vote_count.gte', String(SEARCH.MIN_VOTE_COUNT));
+	}
+
+	if (params.certification && !isTv) {
+		queryParams.set('certification', params.certification);
+	}
+
+	return `${endpoint}?${queryParams.toString()}`;
+}
+
 export async function getDiscoverResults(params: DiscoverParams) {
 	const {
 		type,
@@ -57,7 +162,6 @@ export async function getDiscoverResults(params: DiscoverParams) {
 		sortBy,
 		trending = null,
 		withWatchProviders,
-		watchRegion,
 		withGenres,
 		withKeywords,
 		withoutKeywords,
@@ -66,71 +170,19 @@ export async function getDiscoverResults(params: DiscoverParams) {
 		maxDate,
 		minRating,
 		certification,
+		withNetworks,
 		skipKeywordBlocklist = false
 	} = params;
 
-	const fetchOptions = (endpoint: string, p: string = page) => {
-		const queryParams = new URLSearchParams();
-		queryParams.set('page', p);
-
-		// Handle Sort Mapping for TV
-		let sort = sortBy;
-		if (endpoint.includes('tv')) {
-			if (sort === 'primary_release_date.desc') sort = 'first_air_date.desc';
-			if (sort === 'primary_release_date.asc') sort = 'first_air_date.asc';
-			if (sort === 'revenue.desc') sort = 'popularity.desc'; // TV doesn't have revenue sort
-		}
-		queryParams.set('sort_by', sort);
-
-		if (withWatchProviders) {
-			queryParams.set('with_watch_providers', withWatchProviders);
-			queryParams.set('watch_region', watchRegion);
-		}
-
-		if (withGenres) {
-			if (endpoint.includes('movie')) {
-				queryParams.set('with_genres', mapGenres(withGenres, 'movie'));
-			} else if (endpoint.includes('tv')) {
-				queryParams.set('with_genres', mapGenres(withGenres, 'tv'));
-			} else {
-				queryParams.set('with_genres', withGenres);
-			}
-		}
-
-		if (withKeywords) {
-			queryParams.set('with_keywords', withKeywords);
-		}
-		if (withoutKeywords) {
-			queryParams.set('without_keywords', withoutKeywords);
-		}
-
-		if (withOriginalLanguage) {
-			queryParams.set('with_original_language', withOriginalLanguage);
-		}
-
-		if (minDate) {
-			if (endpoint.includes('movie')) queryParams.set('primary_release_date.gte', minDate);
-			if (endpoint.includes('tv')) queryParams.set('first_air_date.gte', minDate);
-		}
-		if (maxDate) {
-			if (endpoint.includes('movie')) queryParams.set('primary_release_date.lte', maxDate);
-			if (endpoint.includes('tv')) queryParams.set('first_air_date.lte', maxDate);
-		}
-		if (minRating) {
-			queryParams.set('vote_average.gte', minRating);
-			queryParams.set('vote_count.gte', String(SEARCH.MIN_VOTE_COUNT));
-		}
-
-		if (certification && endpoint.includes('movie')) {
-			queryParams.set('certification', certification);
-		}
-
-		return `${endpoint}?${queryParams.toString()}`;
-	};
-
 	const fetchMovies = () =>
-		tmdb.fetch(fetchOptions('/discover/movie'), {}, false, skipKeywordBlocklist);
-	const fetchTV = () => tmdb.fetch(fetchOptions('/discover/tv'), {}, false, skipKeywordBlocklist);
+		tmdb.fetch(
+			buildDiscoverQuery('/discover/movie', params, page),
+			{},
+			false,
+			skipKeywordBlocklist
+		);
+	const fetchTV = () =>
+		tmdb.fetch(buildDiscoverQuery('/discover/tv', params, page), {}, false, skipKeywordBlocklist);
 
 	let results: (Movie | TVShow)[];
 	let totalPages: number;
@@ -142,6 +194,7 @@ export async function getDiscoverResults(params: DiscoverParams) {
 			type,
 			sortBy,
 			withWatchProviders,
+			withNetworks,
 			withGenres,
 			withKeywords,
 			withoutKeywords,
@@ -162,7 +215,9 @@ export async function getDiscoverResults(params: DiscoverParams) {
 		results = [];
 		totalPages = 0;
 		totalResults = 0;
-	} else if (type === 'tv') {
+	} else if (type === 'tv' || withNetworks) {
+		// Networks are a TV-only filter: an active network filter narrows an
+		// 'all' or 'movie' view down to the TV endpoint.
 		const data = (await fetchTV()) as PaginatedResponse<TVShow>;
 		results = data.results.map((t) => ({ ...t, media_type: 'tv' }));
 		totalPages = data.total_pages;

@@ -11,10 +11,10 @@
  * - Pending release tracking and superseding
  */
 
-import { db } from '$lib/server/db/index.js';
-import { delayProfiles, pendingReleases, movies, series } from '$lib/server/db/schema.js';
+import { db } from '#lib/server/db/index.js';
+import { delayProfiles, pendingReleases, movies, series } from '#lib/server/db/schema.js';
 import { eq, and, lte, desc } from 'drizzle-orm';
-import { createChildLogger } from '$lib/logging/index.js';
+import { createChildLogger } from '#lib/logging/index.js';
 import type { ReleaseCandidate } from './types.js';
 
 const logger = createChildLogger({ module: 'DelaySpecification', logDomain: 'monitoring' });
@@ -173,7 +173,7 @@ class DelayProfileService {
 			if (profile) return profile;
 		}
 
-		// No media-specific profile — use the first enabled profile (global default)
+		// No media-specific profile - use the first enabled profile (global default)
 		const profiles = await db.query.delayProfiles.findMany({
 			where: eq(delayProfiles.enabled, true),
 			orderBy: [delayProfiles.sortOrder],

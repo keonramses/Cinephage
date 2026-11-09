@@ -6,12 +6,12 @@ import {
 	downloadQueue,
 	movieFiles,
 	movies
-} from '$lib/server/db/schema.js';
+} from '#lib/server/db/schema.js';
 import { eq } from 'drizzle-orm';
 
 const testDb: TestDatabase = createTestDb();
 
-vi.mock('$lib/server/db/index.js', () => ({
+vi.mock('#lib/server/db/index.js', () => ({
 	get db() {
 		return testDb.db;
 	},
@@ -23,7 +23,7 @@ vi.mock('$lib/server/db/index.js', () => ({
 
 // Scoring is not under test here; return an always-acceptable result whose
 // resolution is taken from the real ReleaseParser output ScoringStage passes in.
-vi.mock('$lib/server/quality/QualityFilter.js', () => ({
+vi.mock('#lib/server/quality/QualityFilter.js', () => ({
 	qualityFilter: {
 		getProfile: vi.fn().mockResolvedValue(null),
 		getDefaultScoringProfile: vi.fn().mockResolvedValue({
@@ -64,9 +64,9 @@ vi.mock('./handlers/TorrentHandler.js', () => ({
 			resolved: { movieId?: string }
 		) {
 			await new Promise((resolve) => setTimeout(resolve, 10));
-			const { db } = await import('$lib/server/db/index.js');
-			const { downloadQueue } = await import('$lib/server/db/schema.js');
-			const { ReleaseParser } = await import('$lib/server/indexers/parser/ReleaseParser.js');
+			const { db } = await import('#lib/server/db/index.js');
+			const { downloadQueue } = await import('#lib/server/db/schema.js');
+			const { ReleaseParser } = await import('#lib/server/indexers/parser/ReleaseParser.js');
 			const parser = new ReleaseParser();
 			const parsed = parser.parse(request.release.title);
 			const id = `queue-${resolved.movieId}-${parsed.resolution}`;
@@ -97,6 +97,8 @@ const { grabService } = await import('./GrabService.js');
 
 function resetDb() {
 	testDb.sqlite.exec(`
+		DELETE FROM acquisition_reservations;
+		DELETE FROM acquisition_intents;
 		DELETE FROM download_queue;
 		DELETE FROM download_history;
 		DELETE FROM movie_files;
@@ -315,7 +317,7 @@ describe('GrabService multi-quality two-bucket grab (integration)', () => {
 		expect(testDb.db.select().from(downloadQueue).all()).toHaveLength(0);
 	});
 
-	it('does not create a new queue row when a failed row matches the magnet hash', async () => {
+	it('allows a re-grab when only a failed row matches the magnet hash', async () => {
 		const infoHash = '0123456789abcdef0123456789abcdef01234567';
 		testDb.db
 			.insert(downloadQueue)
@@ -348,8 +350,13 @@ describe('GrabService multi-quality two-bucket grab (integration)', () => {
 			}
 		});
 
-		expect(result.success).toBe(false);
-		expect(result.decision.rejectionType).toBe('duplicate_hash');
-		expect(testDb.db.select().from(downloadQueue).all()).toHaveLength(1);
+		// A failed attempt is retryable: the duplicate-hash stage must not treat
+		// it as a live duplicate (addToQueue deliberately excludes failed rows
+		// so they can be resurrected).
+		expect(result.success).toBe(true);
+		const rows = testDb.db.select().from(downloadQueue).all();
+		expect(rows).toHaveLength(2);
+		expect(rows.some((row) => row.status === 'failed')).toBe(true);
+		expect(rows.some((row) => row.status === 'queued')).toBe(true);
 	});
 });

@@ -1,8 +1,8 @@
 <script lang="ts">
 	import { page } from '$app/state';
 	import { SvelteSet } from 'svelte/reactivity';
-	import * as m from '$lib/paraglide/messages.js';
-	import { executeRename, reorganizeFolderBatch } from '$lib/api/settings.js';
+	import * as m from '#lib/paraglide/messages.js';
+	import { executeRename, reorganizeFolderBatch } from '#lib/api/settings.js';
 	import {
 		RefreshCw,
 		CheckCircle,
@@ -19,13 +19,14 @@
 		RotateCcw,
 		FileEdit,
 		FolderSync
-	} from 'lucide-svelte';
+	} from '@lucide/svelte';
 	import type {
 		RenamePreviewResult,
 		RenameExecuteResult,
 		RenameStreamEvent
-	} from '$lib/library/naming/types.js';
-	import { chunkFileIds } from '$lib/library/naming/batch-rename';
+	} from '#lib/library/naming/types.js';
+	import { chunkFileIds } from '#lib/library/naming/batch-rename.js';
+	import { safeExternalUrl } from '#lib/shared/url-safety.js';
 
 	// State
 	let loading = $state(true);
@@ -47,7 +48,12 @@
 	let activeTab = $state<'willChange' | 'alreadyCorrect' | 'collisions' | 'errors'>('willChange');
 	let mediaTypeFilter = $state<'all' | 'movie' | 'tv'>('all');
 	const hasUnsavedDraft = $derived(page.url.searchParams.get('unsaved') === '1');
-	const returnTo = $derived(page.url.searchParams.get('returnTo') || '/settings/library/naming');
+	// returnTo comes from the URL and is bound straight into an href. Svelte
+	// does not filter schemes, so `?returnTo=javascript:...` would run script
+	// in this admin page when the back link is clicked.
+	const returnTo = $derived(
+		safeExternalUrl(page.url.searchParams.get('returnTo')) ?? '/settings/library/naming'
+	);
 
 	// Load preview on mount
 	let previousMediaTypeFilter = $state<'all' | 'movie' | 'tv' | null>(null);
@@ -239,14 +245,14 @@
 		} catch (e) {
 			const executeError = e instanceof Error ? e.message : 'Failed to execute renames';
 			error = executeError;
-			// Chunks before the failure already renamed files on disk — refresh so
+			// Chunks before the failure already renamed files on disk - refresh so
 			// the preview reflects reality instead of the pre-batch state.
 			try {
 				await loadPreview();
 			} catch {
 				// preview refresh is best-effort; the original error stands
 			}
-			// loadPreview's catch path assigns its own `error` — restore the mid-batch error
+			// loadPreview's catch path assigns its own `error` - restore the mid-batch error
 			error = executeError;
 		} finally {
 			executing = false;

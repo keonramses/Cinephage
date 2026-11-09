@@ -9,7 +9,7 @@
  *     at FFBrowserContext ... FFPage._onUncaughtError (playwright-core/coreBundle.js)
  *
  * Because that throw happens inside playwright's internals (not in our awaited
- * calls), a normal try/catch cannot intercept it — it surfaces as a Node
+ * calls), a normal try/catch cannot intercept it - it surfaces as a Node
  * `uncaughtException` and, with no global handler, terminates the whole server.
  *
  * This guard installs a single, idempotent process handler that swallows ONLY
@@ -18,7 +18,7 @@
  * everything else (log + non-zero exit).
  */
 
-import { createChildLogger } from '$lib/logging';
+import { createChildLogger } from '#lib/logging/index.js';
 
 const logger = createChildLogger({ logDomain: 'indexers' as const });
 
@@ -45,7 +45,15 @@ export function isBrowserOriginError(err: unknown): boolean {
 	return BROWSER_STACK_MARKERS.test(asString) || BROWSER_MESSAGE_MARKERS.test(asString);
 }
 
-let installed = false;
+// A module-scoped `let` guard resets on every Vite dev SSR HMR reload (the
+// module is re-evaluated from scratch), but process.on listeners stack onto
+// the real, HMR-independent process object regardless, so the guard alone
+// doesn't stop duplicate listeners from piling up across a long dev session.
+// globalThis survives reloads; it doesn't survive a real process restart,
+// which is fine since a fresh process has never installed these either.
+const installGuard = globalThis as typeof globalThis & {
+	__cinephageBrowserCrashGuardInstalled?: boolean;
+};
 
 /**
  * Install the crash guard exactly once. Safe to call repeatedly.
@@ -53,9 +61,9 @@ let installed = false;
  * Skipped under Vitest so unit tests keep their own uncaught-error semantics.
  */
 export function installBrowserCrashGuard(): void {
-	if (installed) return;
+	if (installGuard.__cinephageBrowserCrashGuardInstalled) return;
 	if (process.env.VITEST || process.env.NODE_ENV === 'test') return;
-	installed = true;
+	installGuard.__cinephageBrowserCrashGuardInstalled = true;
 
 	process.on('uncaughtException', (err, origin) => {
 		if (isBrowserOriginError(err)) {
@@ -65,7 +73,7 @@ export function installBrowserCrashGuard(): void {
 			);
 			return;
 		}
-		// Not ours — preserve Node's default crash semantics so real bugs surface.
+		// Not ours - preserve Node's default crash semantics so real bugs surface.
 		logger.error({ err, origin }, '[BrowserCrashGuard] Fatal uncaught exception; exiting');
 		process.exitCode = 1;
 		setTimeout(() => process.exit(1), 50).unref();
@@ -90,5 +98,5 @@ export function installBrowserCrashGuard(): void {
 
 /** Test-only: reset the install latch. */
 export function __resetBrowserCrashGuardForTests(): void {
-	installed = false;
+	installGuard.__cinephageBrowserCrashGuardInstalled = false;
 }

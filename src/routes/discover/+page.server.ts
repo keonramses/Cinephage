@@ -1,24 +1,27 @@
-import { tmdb } from '$lib/server/tmdb';
-import { getDiscoverResults } from '$lib/server/discover';
-import { contentFilterPipeline } from '$lib/server/filters/ContentFilterPipeline.js';
-import type { WatchProvider } from '$lib/types/tmdb';
-import type { TmdbCertificationsResponse } from '$lib/server/tmdb';
-import { createChildLogger } from '$lib/logging';
+import { tmdb } from '#lib/server/tmdb.js';
+import { getDiscoverResults, resolveWithOriginalLanguage } from '#lib/server/discover.js';
+import { contentFilterPipeline } from '#lib/server/filters/ContentFilterPipeline.js';
+import type { WatchProvider } from '#lib/types/tmdb.js';
+import type { TmdbCertificationsResponse } from '#lib/server/tmdb.js';
+import { createChildLogger } from '#lib/logging/index.js';
 
 import {
 	parseDiscoverParams,
 	isDefaultView as checkDefaultView,
 	hasActiveDiscoverFilters
-} from '$lib/utils/discoverParams';
-import { TMDB } from '$lib/config/constants.js';
-import { enrichWithReleaseDates } from '$lib/server/release-enrichment.js';
-import { db } from '$lib/server/db';
-import { settings } from '$lib/server/db/schema';
+} from '#lib/utils/discoverParams.js';
+import { TMDB } from '#lib/config/constants.js';
+import { enrichWithReleaseDates } from '#lib/server/release-enrichment.js';
+import { db } from '#lib/server/db/index.js';
+import { languageSettings } from '#lib/server/db/schema.js';
 import { eq } from 'drizzle-orm';
 
 import type { PageServerLoad } from './$types';
 
 const logger = createChildLogger({ module: 'DiscoverPage', logDomain: 'system' });
+
+// Row id of the language_settings singleton (see LanguageSettingsService).
+const LANGUAGE_SETTINGS_SINGLETON_ID = 'singleton';
 
 export const load: PageServerLoad = async ({ url }) => {
 	const params = parseDiscoverParams(url.searchParams);
@@ -30,6 +33,7 @@ export const load: PageServerLoad = async ({ url }) => {
 		topRated,
 		withWatchProviders,
 		watchRegion,
+		withNetworks,
 		withGenres,
 		withOriginalLanguage: urlOriginalLanguage,
 		minDate,
@@ -40,22 +44,28 @@ export const load: PageServerLoad = async ({ url }) => {
 	} = params;
 	const { nowPlaying } = params;
 
-	// Resolve effective original language — URL param takes precedence,
-	// falling back to the user's global TMDB language filter.
-	let withOriginalLanguage = urlOriginalLanguage;
-	if (!withOriginalLanguage) {
-		const filtersRow = await db.query.settings.findFirst({
-			where: eq(settings.key, 'global_filters')
+	// Resolve the content-origin filter. Order: explicit URL param →
+	// language_settings.discover_original_filter (canonical base tag) → none.
+	// The response locale is deliberately NOT used here - localization and
+	// content-origin filtering are separate concerns (language-system spec §5).
+	let storedOriginalFilter: string | null = null;
+	try {
+		const languageRow = await db.query.languageSettings.findFirst({
+			where: eq(languageSettings.id, LANGUAGE_SETTINGS_SINGLETON_ID)
 		});
-		if (filtersRow?.value) {
-			const globalFilters = JSON.parse(filtersRow.value);
-			const globalLanguage =
-				typeof globalFilters?.language === 'string' ? globalFilters.language.trim() : '';
-			if (globalLanguage && globalLanguage.toLowerCase() !== 'any') {
-				withOriginalLanguage = globalLanguage.toLowerCase().split('-')[0] || null;
-			}
-		}
+		storedOriginalFilter = languageRow?.discoverOriginalFilter ?? null;
+	} catch (e) {
+		logger.warn({ err: e }, 'Failed to read language_settings discover filter');
 	}
+	const withOriginalLanguage = resolveWithOriginalLanguage(
+		urlOriginalLanguage,
+		storedOriginalFilter
+	);
+	// A content-origin filter (URL or the stored instance filter) can only be
+	// applied by the /discover endpoints. The curated rows (trending,
+	// top-rated, now-playing, default dashboard) must yield to the grid when
+	// one is active, or the stored setting would silently do nothing.
+	const originFilterActive = Boolean(withOriginalLanguage);
 
 	const { withKeywords } = params;
 	const { withoutKeywords } = params;
@@ -69,6 +79,7 @@ export const load: PageServerLoad = async ({ url }) => {
 			viewType: 'not_configured' as const,
 			tmdbConfigured: false,
 			providers: [],
+			networks: [],
 			genres: [],
 			certifications: [],
 			languages: [],
@@ -90,18 +101,25 @@ export const load: PageServerLoad = async ({ url }) => {
 
 	try {
 		const systemRegion = await tmdb.getRegion();
-		const [providersData, movieGenresData, tvGenresData, movieCertifications, languagesData] =
-			await Promise.all([
-				tmdb.getWatchProviders('movie', watchRegion || systemRegion) as Promise<{
-					results: WatchProvider[];
-				} | null>,
-				tmdb.fetch('/genre/movie/list') as Promise<{
-					genres: { id: number; name: string }[];
-				} | null>,
-				tmdb.fetch('/genre/tv/list') as Promise<{ genres: { id: number; name: string }[] } | null>,
-				tmdb.getCertifications('movie') as Promise<TmdbCertificationsResponse>,
-				tmdb.getLanguages().catch(() => [] as { iso_639_1: string; english_name: string }[])
-			]);
+		const [
+			providersData,
+			movieGenresData,
+			tvGenresData,
+			movieCertifications,
+			languagesData,
+			networks
+		] = await Promise.all([
+			tmdb.getWatchProviders('movie', watchRegion || systemRegion) as Promise<{
+				results: WatchProvider[];
+			} | null>,
+			tmdb.fetch('/genre/movie/list') as Promise<{
+				genres: { id: number; name: string }[];
+			} | null>,
+			tmdb.fetch('/genre/tv/list') as Promise<{ genres: { id: number; name: string }[] } | null>,
+			tmdb.getCertifications('movie') as Promise<TmdbCertificationsResponse>,
+			tmdb.getLanguages().catch(() => [] as { iso_639_1: string; english_name: string }[]),
+			tmdb.getNetworks().catch(() => [])
+		]);
 
 		const languages = languagesData
 			? languagesData
@@ -166,6 +184,7 @@ export const load: PageServerLoad = async ({ url }) => {
 			type,
 			sortBy,
 			withWatchProviders,
+			withNetworks,
 			withGenres,
 			withKeywords,
 			withoutKeywords,
@@ -176,7 +195,11 @@ export const load: PageServerLoad = async ({ url }) => {
 			certification
 		});
 
-		if ((trending === 'day' || trending === 'week') && !trendingHasActiveFilters) {
+		if (
+			(trending === 'day' || trending === 'week') &&
+			!trendingHasActiveFilters &&
+			!originFilterActive
+		) {
 			const trendingResults = (await tmdb.fetch(
 				`/trending/all/${trending}?page=${page}`
 			)) as TmdbPaginatedResult;
@@ -197,6 +220,7 @@ export const load: PageServerLoad = async ({ url }) => {
 					total_results: trendingResults.total_results
 				},
 				providers,
+				networks,
 				genres,
 				certifications: usCertifications,
 				languages,
@@ -213,7 +237,9 @@ export const load: PageServerLoad = async ({ url }) => {
 			};
 		}
 
-		if (topRated === 'true' && !certification) {
+		// Curated rows cannot express filters, so top_rated yields to the grid
+		// whenever any discover filter is active (same rule as trending).
+		if (topRated === 'true' && !trendingHasActiveFilters && !originFilterActive) {
 			let endpoint: string;
 			if (type === 'movie') {
 				endpoint = `/movie/top_rated?page=${page}`;
@@ -289,6 +315,7 @@ export const load: PageServerLoad = async ({ url }) => {
 					total_results: topRatedResults.total_results
 				},
 				providers,
+				networks,
 				genres,
 				certifications: usCertifications,
 				languages,
@@ -305,7 +332,7 @@ export const load: PageServerLoad = async ({ url }) => {
 			};
 		}
 
-		if (nowPlaying === 'true' && !hasActiveDiscoverFilters(params)) {
+		if (nowPlaying === 'true' && !hasActiveDiscoverFilters(params) && !originFilterActive) {
 			const nowPlayingResults = (await tmdb.getNowPlaying(
 				Number(page) || 1
 			)) as unknown as TmdbPaginatedResult;
@@ -325,6 +352,7 @@ export const load: PageServerLoad = async ({ url }) => {
 					total_results: nowPlayingResults.total_results
 				},
 				providers,
+				networks,
 				genres,
 				certifications: usCertifications,
 				languages,
@@ -341,7 +369,7 @@ export const load: PageServerLoad = async ({ url }) => {
 			};
 		}
 
-		if (isDefaultViewCheck && page === '1') {
+		if (isDefaultViewCheck && page === '1' && !originFilterActive) {
 			// Fetch sections for the dashboard-style view.
 			// Popular/top-rated use /discover/ endpoints so the keyword blocklist
 			// injection in tmdb.fetch() fires. Trending and now-playing don't
@@ -356,7 +384,7 @@ export const load: PageServerLoad = async ({ url }) => {
 					tmdb.getNowPlaying()
 				])) as TmdbPaginatedResult[];
 
-			// Discover endpoints don't tag media_type — add it so downstream
+			// Discover endpoints don't tag media_type - add it so downstream
 			// code (library status, filters) can identify the media type.
 			popularMovies.results = popularMovies.results.map((r) => ({ ...r, media_type: 'movie' }));
 			popularTV.results = popularTV.results.map((r) => ({ ...r, media_type: 'tv' }));
@@ -409,6 +437,7 @@ export const load: PageServerLoad = async ({ url }) => {
 					nowPlaying: enrichedNowPlaying
 				},
 				providers,
+				networks,
 				genres,
 				certifications: usCertifications,
 				languages,
@@ -432,6 +461,7 @@ export const load: PageServerLoad = async ({ url }) => {
 				trending,
 				withWatchProviders,
 				watchRegion,
+				withNetworks,
 				withGenres,
 				withKeywords,
 				withoutKeywords,
@@ -456,6 +486,7 @@ export const load: PageServerLoad = async ({ url }) => {
 				results: enrichedResults,
 				pagination,
 				providers,
+				networks,
 				genres,
 				certifications: usCertifications,
 				languages,
@@ -478,6 +509,7 @@ export const load: PageServerLoad = async ({ url }) => {
 			tmdbConfigured: true,
 			error: 'Failed to load content',
 			providers: [],
+			networks: [],
 			genres: [],
 			certifications: [],
 			languages: [],

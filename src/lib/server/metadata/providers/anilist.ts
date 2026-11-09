@@ -2,8 +2,12 @@ import type {
 	MetadataDetails,
 	MetadataMediaType,
 	MetadataProvider,
-	MetadataSearchResult
+	MetadataSearchResult,
+	MetadataTitleVariant
 } from './types.js';
+import { createChildLogger } from '#lib/logging/index.js';
+
+const logger = createChildLogger({ module: 'AniListProvider', logDomain: 'system' });
 
 interface AniListTitle {
 	romaji?: string | null;
@@ -17,6 +21,7 @@ interface AniListMedia {
 	coverImage?: { large?: string | null } | null;
 	bannerImage?: string | null;
 	title?: AniListTitle | null;
+	countryOfOrigin?: string | null;
 	startDate?: { year?: number | null } | null;
 	genres?: string[] | null;
 	status?: string | null;
@@ -26,6 +31,37 @@ interface AniListMedia {
 
 function pickTitle(title?: AniListTitle | null): string {
 	return title?.english ?? title?.romaji ?? title?.native ?? 'Unknown';
+}
+
+/**
+ * Expose every title variant AniList reports instead of collapsing them into a
+ * single display title. AniList supplies no language codes (romaji/english/
+ * native are kind labels), so `language` stays null; `countryOfOrigin` is the
+ * only origin datum the API gives and is attached to the native title.
+ */
+function buildTitleVariants(media: AniListMedia): MetadataTitleVariant[] {
+	const variants: MetadataTitleVariant[] = [];
+	const seen = new Set<string>();
+	const entries: Array<[string, string | null | undefined]> = [
+		['romaji', media.title?.romaji],
+		['english', media.title?.english],
+		['native', media.title?.native]
+	];
+
+	for (const [kind, raw] of entries) {
+		const title = raw?.trim();
+		if (!title) continue;
+		const key = title.toLowerCase();
+		if (seen.has(key)) continue;
+		seen.add(key);
+		variants.push({
+			title,
+			language: null,
+			country: kind === 'native' ? (media.countryOfOrigin ?? null) : null
+		});
+	}
+
+	return variants;
 }
 
 function mediaTypeToAniListType(type: MetadataMediaType): 'ANIME' | 'MANGA' {
@@ -84,11 +120,36 @@ export class AniListProvider implements MetadataProvider {
           }
         `,
 				variables: { search: query.trim(), type: mediaTypeToAniListType(type) }
-			})
+			}),
+			// Without this, a stalled AniList response blocks the caller
+			// indefinitely, resolveAnimeProviderRef awaits this per query variant
+			// directly on the series page's SSR critical path (see
+			// resolveMissingAnimeProviderRefs), so an unresponsive upstream here
+			// previously meant an unbounded page-load stall.
+			signal: AbortSignal.timeout(5000)
+		}).catch((err) => {
+			logger.warn(
+				{ query, error: err instanceof Error ? err.message : String(err) },
+				'[AniList] Search request failed'
+			);
+			return null;
 		});
 
-		if (!res.ok) return [];
-		const data = (await res.json()) as { data?: { Page?: { media?: AniListMedia[] } } };
+		if (!res) return [];
+		if (!res.ok) {
+			logger.warn(
+				{ query, status: res.status, statusText: res.statusText },
+				res.status === 429 ? '[AniList] Search rate-limited' : '[AniList] Search request not ok'
+			);
+			return [];
+		}
+		const data = (await res.json().catch((err) => {
+			logger.warn(
+				{ query, error: err instanceof Error ? err.message : String(err) },
+				'[AniList] Failed to parse search response'
+			);
+			return { data: undefined };
+		})) as { data?: { Page?: { media?: AniListMedia[] } } };
 		const media = data.data?.Page?.media ?? [];
 
 		return media.map((item) => ({
@@ -117,6 +178,7 @@ export class AniListProvider implements MetadataProvider {
             Media(id: $id, type: ANIME) {
               id
               title { romaji english native }
+              countryOfOrigin
               description(asHtml: false)
               startDate { year }
               coverImage { large }
@@ -129,10 +191,11 @@ export class AniListProvider implements MetadataProvider {
           }
         `,
 				variables: { id: parsedId }
-			})
-		});
+			}),
+			signal: AbortSignal.timeout(5000)
+		}).catch(() => null);
 
-		if (!res.ok) return null;
+		if (!res?.ok) return null;
 		const data = (await res.json()) as { data?: { Media?: AniListMedia | null } };
 		const media = data.data?.Media;
 		if (!media) return null;
@@ -141,6 +204,7 @@ export class AniListProvider implements MetadataProvider {
 			id: String(media.id),
 			title: pickTitle(media.title),
 			originalTitle: media.title?.native ?? undefined,
+			alternateTitles: buildTitleVariants(media),
 			overview: media.description ?? undefined,
 			year: media.startDate?.year ?? null,
 			posterUrl: media.coverImage?.large ?? null,

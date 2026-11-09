@@ -7,7 +7,8 @@
  * - M3U Playlists
  */
 
-export type LiveTvProviderType = 'stalker' | 'xstream' | 'm3u' | 'cinephage-iptv';
+export type LiveTvProviderType =
+	'stalker' | 'xstream' | 'm3u' | 'cinephage-iptv' | 'cinephage-live';
 
 // ============================================================================
 // PROVIDER INTERFACE TYPES (for provider implementations)
@@ -117,6 +118,8 @@ export interface StalkerConfig {
 	deviceId2?: string;
 	model?: string;
 	timezone?: string;
+	/** Portal UI language (stb_lang / Accept-Language), 2-letter code. Defaults to 'en'. */
+	language?: string;
 	token?: string;
 	username?: string;
 	password?: string;
@@ -302,6 +305,16 @@ export interface M3uChannelData {
 	backupUrls?: string[];
 }
 
+/**
+ * Cinephage Live channel metadata from the Cinephage-owned taxonomy:
+ * the clean category bucket ("Soccer", "Sports", …) and the ISO 3166-1
+ * alpha-2 country code derived server-side by the Cinephage API.
+ */
+export interface CinephageLiveChannelData {
+	category?: string;
+	countryCode?: string;
+}
+
 // ============================================================================
 // UNIFIED CHANNEL TYPES
 // ============================================================================
@@ -341,6 +354,7 @@ export interface LiveTvChannel {
 	stalker?: StalkerChannelData;
 	xstream?: XstreamChannelData;
 	m3u?: M3uChannelData;
+	cinephageLive?: CinephageLiveChannelData;
 
 	epgId: string | null;
 	createdAt: string;
@@ -370,6 +384,7 @@ export interface CachedChannel {
 	stalker?: StalkerChannelData;
 	xstream?: XstreamChannelData;
 	m3u?: M3uChannelData;
+	cinephageLive?: CinephageLiveChannelData;
 
 	// Optional EPG ID (used when channel is from the database)
 	epgId?: string | null;
@@ -392,6 +407,8 @@ export interface ChannelQueryOptions {
 	accountIds?: string[];
 	categoryIds?: string[];
 	providerTypes?: LiveTvProviderType[];
+	/** ISO 3166-1 alpha-2 codes from Cinephage Live channel metadata. */
+	countryCodes?: string[];
 	search?: string;
 	hasArchive?: boolean;
 	page?: number;
@@ -651,6 +668,16 @@ export interface EpgProgramRaw {
 }
 
 /**
+ * A single localized text variant preserved from an XMLTV `@lang` attribute
+ * (migration 140). `lang` is the lower-cased `@_lang` value, or null when the
+ * source element carried no language.
+ */
+export interface EpgLocalizedText {
+	lang: string | null;
+	text: string;
+}
+
+/**
  * EPG program stored in database
  */
 export interface EpgProgram {
@@ -664,6 +691,14 @@ export interface EpgProgram {
 	category: string | null;
 	director: string | null;
 	actor: string | null;
+	/**
+	 * All localized variants seen for the title/description/category XMLTV
+	 * elements. Optional; providers without language information leave these
+	 * unset and display falls back to the plain columns.
+	 */
+	titleI18n?: EpgLocalizedText[] | null;
+	descriptionI18n?: EpgLocalizedText[] | null;
+	categoryI18n?: EpgLocalizedText[] | null;
 	startTime: string;
 	endTime: string;
 	duration: number;

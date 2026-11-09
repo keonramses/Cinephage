@@ -1,11 +1,11 @@
 <script lang="ts">
-	import { GripVertical, Pencil, Trash2, Tv, Loader2, Info } from 'lucide-svelte';
-	import * as m from '$lib/paraglide/messages.js';
+	import { GripVertical, Pencil, Trash2, Tv, Loader2, Info } from '@lucide/svelte';
+	import * as m from '#lib/paraglide/messages.js';
 	import type {
 		ChannelLineupItemWithDetails,
 		EpgProgram,
 		EpgProgramWithProgress
-	} from '$lib/types/livetv';
+	} from '#lib/types/livetv.js';
 
 	interface NowNextEntry {
 		now: EpgProgramWithProgress | null;
@@ -61,6 +61,24 @@
 	let editingField = $state<'number' | 'name' | null>(null);
 	let editValue = $state('');
 	let saving = $state(false);
+
+	// Logo broken-image fallback. onerror as a prop renders as a literal
+	// inline HTML attribute during SSR (Svelte replays the pre-hydration
+	// event that way), which a strict CSP blocks without 'unsafe-hashes'.
+	// Attaching imperatively avoids that path.
+	let logoFailed = $state(false);
+	let logoEl: HTMLImageElement | undefined = $state();
+	$effect(() => {
+		const el = logoEl;
+		if (!el) return;
+		const handleError = () => (logoFailed = true);
+		el.addEventListener('error', handleError);
+		return () => el.removeEventListener('error', handleError);
+	});
+	$effect(() => {
+		void item.displayLogo;
+		logoFailed = false;
+	});
 
 	function startEditNumber() {
 		editingField = 'number';
@@ -140,7 +158,7 @@
 	<td class="w-10">
 		<input
 			type="checkbox"
-			class="checkbox checkbox-sm"
+			class="checkbox checkbox-sm checkbox-primary"
 			checked={selected}
 			onchange={(e) => onSelect(e.currentTarget.checked)}
 		/>
@@ -184,16 +202,12 @@
 
 	<!-- Logo -->
 	<td class="w-12">
-		{#if item.displayLogo}
+		{#if item.displayLogo && !logoFailed}
 			<img
+				bind:this={logoEl}
 				src={item.displayLogo}
 				alt={item.displayName}
 				class="h-8 w-8 rounded bg-base-100 object-contain"
-				onerror={(e) => {
-					// Hide broken images
-					const target = e.currentTarget as HTMLImageElement;
-					target.style.display = 'none';
-				}}
 			/>
 		{:else}
 			<div class="flex h-8 w-8 items-center justify-center rounded bg-base-300">
@@ -244,7 +258,7 @@
 	</td>
 
 	<!-- Now Playing (EPG) -->
-	<td class="hidden max-w-[300px] lg:table-cell">
+	<td class="hidden max-w-75 lg:table-cell">
 		{#if epgNow?.now}
 			<button
 				type="button"

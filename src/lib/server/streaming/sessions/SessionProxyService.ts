@@ -1,9 +1,9 @@
-import { logger } from '$lib/logging';
+import { logger } from '#lib/logging/index.js';
 import {
 	resolveAndValidateUrl,
 	fetchWithTimeout,
 	MAX_REDIRECTS
-} from '$lib/server/http/ssrf-protection';
+} from '#lib/server/http/ssrf-protection.js';
 import { isHLSPlaylist, sanitizePlaylist, validatePlaylist } from '../hls';
 import { ensureVttFormat } from '../utils/srt-to-vtt';
 import { isPngWrappedSegment, stripPngWrapper } from '../utils/png-wrapper';
@@ -11,6 +11,7 @@ import type { PlaybackSession } from '../types';
 import { getPlaybackSessionStore } from './session-store';
 import { rewriteSessionPlaylist } from './playlist-rewriter';
 import { rewriteDashManifest } from './dash-rewriter';
+import { appendBasePath } from '../url.js';
 
 const streamLog = { logDomain: 'streams' as const };
 const DEFAULT_USER_AGENT =
@@ -39,19 +40,58 @@ function isRangeHeaderName(name: string): boolean {
 	);
 }
 
-function buildUpstreamHeaders(session: PlaybackSession, request?: Request): Record<string, string> {
-	const headers: Record<string, string> = {
-		...session.requestHeaders,
-		'User-Agent':
-			session.requestHeaders['User-Agent'] ||
-			session.requestHeaders['user-agent'] ||
-			DEFAULT_USER_AGENT,
-		Accept: session.requestHeaders.Accept || session.requestHeaders.accept || '*/*',
-		'Accept-Encoding': 'identity'
-	};
+/**
+ * A playable upstream URL must be absolute http(s).
+ *
+ * Provider error sentinels (`/video/error`) and other relative values cannot be
+ * fetched; treating one as a source produces a failed request at playback time.
+ */
+function isAbsoluteHttpUrl(value: string): boolean {
+	try {
+		const parsed = new URL(value);
+		return parsed.protocol === 'http:' || parsed.protocol === 'https:';
+	} catch {
+		return false;
+	}
+}
 
-	if (!headers.Referer && !headers.referer && session.requestHeaders.referer) {
-		headers.Referer = session.requestHeaders.referer;
+/** Header lookup that ignores case, without rewriting the stored key. */ function getHeaderValue(
+	headers: Record<string, string>,
+	name: string
+): string | undefined {
+	const lower = name.toLowerCase();
+	for (const [key, value] of Object.entries(headers)) {
+		if (key.toLowerCase() === lower) return value;
+	}
+	return undefined;
+}
+
+function hasHeader(headers: Record<string, string>, name: string): boolean {
+	return getHeaderValue(headers, name) !== undefined;
+}
+
+function buildUpstreamHeaders(session: PlaybackSession, request?: Request): Record<string, string> {
+	// The gateway's header object is authoritative and is copied verbatim, key
+	// casing included - including `Origin`, which some providers require
+	// (Cinemabz rejects a request without `Origin: https://cinema.army`).
+	// Defaults are only added for headers it did not supply; re-adding a
+	// canonical-cased duplicate would make fetch comma-join two values into a
+	// malformed header (seen with a lowercase `user-agent`).
+	//
+	// The one header that must never come from anywhere else is `Origin`: the
+	// loop below only copies range-conditional headers from the incoming
+	// request, so a browser's own Origin can never leak upstream. Providers
+	// that receive a foreign Origin reject the request (403 at the CDN).
+	const headers: Record<string, string> = { ...session.requestHeaders };
+
+	if (!hasHeader(headers, 'User-Agent')) {
+		headers['User-Agent'] = DEFAULT_USER_AGENT;
+	}
+	if (!hasHeader(headers, 'Accept')) {
+		headers.Accept = '*/*';
+	}
+	if (!hasHeader(headers, 'Accept-Encoding')) {
+		headers['Accept-Encoding'] = 'identity';
 	}
 
 	if (request) {
@@ -216,19 +256,23 @@ async function readBodyWithLimit(response: Response, maxBytes: number): Promise<
 	const chunks: Uint8Array[] = [];
 	let totalSize = 0;
 
-	while (true) {
-		const { done, value } = await reader.read();
-		if (done) {
-			break;
-		}
+	try {
+		while (true) {
+			const { done, value } = await reader.read();
+			if (done) {
+				break;
+			}
 
-		totalSize += value.byteLength;
-		if (totalSize > maxBytes) {
-			await reader.cancel();
-			throw new Error(`Response exceeded ${maxBytes} bytes`);
-		}
+			totalSize += value.byteLength;
+			if (totalSize > maxBytes) {
+				await reader.cancel();
+				throw new Error(`Response exceeded ${maxBytes} bytes`);
+			}
 
-		chunks.push(value);
+			chunks.push(value);
+		}
+	} finally {
+		reader.releaseLock();
 	}
 
 	return new TextDecoder().decode(Buffer.concat(chunks.map((chunk) => Buffer.from(chunk))));
@@ -269,6 +313,7 @@ async function fetchUpstream(
 			if (!location) {
 				return response;
 			}
+			await response.body?.cancel();
 
 			if (redirectCount >= MAX_REDIRECTS) {
 				throw new Error('Too many redirects');
@@ -302,6 +347,28 @@ export class SessionProxyService {
 		apiKey: string | undefined,
 		request: Request
 	): Promise<Response> {
+		// Last line of defence: a session must never be served from an entry URL
+		// the upstream fetch cannot parse or that SSRF policy rejects. Without
+		// this, a provider error sentinel (e.g. "/video/error") reached
+		// fetchUpstream and escaped as an unhandled error surfaced as HTTP 500.
+		// A rejected source is an unavailable source: report 502 so clients
+		// (and the ?refresh=1 retry path) see a normal upstream failure.
+		if (!isAbsoluteHttpUrl(session.entryUrl)) {
+			logger.warn(
+				{
+					sessionToken: session.token,
+					provider: session.provider,
+					entryUrl: session.entryUrl,
+					...streamLog
+				},
+				'Playback session has a non-absolute entry URL'
+			);
+			return new Response(JSON.stringify({ error: 'Source URL is not playable' }), {
+				status: 502,
+				headers: { 'Content-Type': 'application/json' }
+			});
+		}
+
 		if (session.sourceType === 'dash') {
 			return this.renderDashManifestResponse(session, baseUrl, apiKey);
 		}
@@ -316,7 +383,7 @@ export class SessionProxyService {
 	/**
 	 * Serve a DASH source's MPD, rewritten through the session so segments are
 	 * fetched via our proxy (which attaches the signed session headers, e.g.
-	 * CloudFront cookies). Served as application/dash+xml — the content type
+	 * CloudFront cookies). Served as application/dash+xml - the content type
 	 * identifies the manifest, no .m3u path involved.
 	 */
 	private async renderDashManifestResponse(
@@ -389,7 +456,14 @@ export class SessionProxyService {
 		}
 
 		if (resource.kind === 'playlist') {
-			return this.renderPlaylistResponse(session, resource.url, baseUrl, apiKey, false);
+			return this.renderPlaylistResponse(
+				session,
+				resource.url,
+				baseUrl,
+				apiKey,
+				false,
+				resource.segmentFallbackExtension
+			);
 		}
 
 		let resourceUrl = resource.url;
@@ -424,13 +498,35 @@ export class SessionProxyService {
 	 * Answer a HEAD probe from a media server without streaming the body.
 	 * Probes the upstream entry URL with a HEAD request and forwards its
 	 * status and the relevant headers (Content-Length, Content-Type, CORS).
+	 *
+	 * Some providers (Vidlove) answer a bare request with a small decoy and
+	 * only reveal the real object to a ranged request, so a progressive HEAD
+	 * that succeeds is verified with a 1 KB Range GET. The HEAD response still
+	 * supplies the reported headers: the ranged reply describes a slice and
+	 * would understate Content-Length.
 	 */
 	async renderHeadResponse(session: PlaybackSession, request: Request): Promise<Response> {
-		const response = await fetchUpstream(
-			session.entryUrl,
-			buildUpstreamHeaders(session, request),
-			'HEAD'
-		);
+		if (!isAbsoluteHttpUrl(session.entryUrl)) {
+			return new Response(JSON.stringify({ error: 'Source URL is not playable' }), {
+				status: 502,
+				headers: { 'Content-Type': 'application/json' }
+			});
+		}
+
+		const headers = buildUpstreamHeaders(session, request);
+		const response = await fetchUpstream(session.entryUrl, headers, 'HEAD');
+
+		const isProgressive = session.sourceType === 'mp4' || session.sourceType === 'file';
+		if (isProgressive && response.ok) {
+			const verdict = await this.probeRange(session.entryUrl, headers);
+			if (verdict === 'decoy') {
+				return new Response(JSON.stringify({ error: 'Upstream returned a decoy payload' }), {
+					status: 502,
+					headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' }
+				});
+			}
+		}
+
 		const contentType =
 			session.sourceType === 'dash'
 				? 'application/dash+xml'
@@ -453,6 +549,40 @@ export class SessionProxyService {
 		});
 	}
 
+	/**
+	 * Classify a progressive source with a 1 KB Range request.
+	 *
+	 * 'real'    - the source honours Range (206 with Content-Range, or an
+	 *             explicit Content-Range on a 200) or serves a whole object
+	 *             clearly larger than the ~31 KB decoy.
+	 * 'decoy'   - the source answered 200 with a body at or below the decoy
+	 *             size and no Content-Range.
+	 * 'unknown' - the probe failed or was inconclusive; callers must not treat
+	 *             a transient failure as proof the source is dead.
+	 */
+	private async probeRange(
+		url: string,
+		headers: Record<string, string>
+	): Promise<'real' | 'decoy' | 'unknown'> {
+		try {
+			const response = await fetchUpstream(url, { ...headers, Range: 'bytes=0-1023' });
+			await response.body?.cancel();
+
+			if (response.status === 206) {
+				return response.headers.get('content-range') ? 'real' : 'unknown';
+			}
+			if (response.status === 200) {
+				if (response.headers.get('content-range')) return 'real';
+				const contentLength = Number(response.headers.get('content-length') ?? '0');
+				if (!Number.isFinite(contentLength) || contentLength <= 0) return 'unknown';
+				return contentLength > 32 * 1024 ? 'real' : 'decoy';
+			}
+			return 'unknown';
+		} catch {
+			return 'unknown';
+		}
+	}
+
 	async renderSubtitlePlaylist(
 		session: PlaybackSession,
 		subtitleId: string,
@@ -468,8 +598,7 @@ export class SessionProxyService {
 		}
 
 		const fileUrl = new URL(
-			`/api/streaming/session/${session.token}/subtitle/${subtitle.id}.vtt`,
-			baseUrl
+			appendBasePath(baseUrl, `/api/streaming/session/${session.token}/subtitle/${subtitle.id}.vtt`)
 		);
 		if (apiKey) {
 			fileUrl.searchParams.set('api_key', apiKey);
@@ -490,7 +619,7 @@ ${fileUrl.toString()}
 				'Content-Type': 'application/vnd.apple.mpegurl',
 				'Access-Control-Allow-Origin': '*',
 				'Access-Control-Allow-Methods': 'GET, OPTIONS',
-				'Cache-Control': 'public, max-age=3600'
+				'Cache-Control': 'no-cache'
 			}
 		});
 	}
@@ -512,7 +641,18 @@ ${fileUrl.toString()}
 			});
 		}
 
-		const content = ensureVttFormat(await readBodyWithLimit(response, MAX_SUBTITLE_BYTES));
+		const converted = ensureVttFormat(await readBodyWithLimit(response, MAX_SUBTITLE_BYTES));
+		if (converted === null) {
+			// ASS/SSA or unknown binary content: never relabel as text/vtt.
+			return new Response(
+				JSON.stringify({ error: 'Subtitle format is not convertible to WebVTT' }),
+				{
+					status: 415,
+					headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' }
+				}
+			);
+		}
+		const content = converted;
 		return new Response(content, {
 			status: 200,
 			headers: {
@@ -529,7 +669,8 @@ ${fileUrl.toString()}
 		playlistUrl: string,
 		baseUrl: string,
 		apiKey: string | undefined,
-		injectSubtitles: boolean
+		injectSubtitles: boolean,
+		segmentFallbackExtension?: string
 	): Promise<Response> {
 		const response = await fetchUpstream(playlistUrl, buildUpstreamHeaders(session));
 		if (!response.ok) {
@@ -559,8 +700,15 @@ ${fileUrl.toString()}
 			session,
 			apiKey,
 			injectSubtitles,
-			registerResource: (url, kind, extension) => {
-				const resource = this.store.registerResource(session.token, url, kind, extension);
+			segmentFallbackExtension,
+			registerResource: (url, kind, extension, childSegmentFallbackExtension) => {
+				const resource = this.store.registerResource(
+					session.token,
+					url,
+					kind,
+					extension,
+					childSegmentFallbackExtension
+				);
 				if (!resource) {
 					throw new Error('Unable to register playback resource');
 				}
@@ -576,7 +724,7 @@ ${fileUrl.toString()}
 				'Access-Control-Allow-Methods': 'GET, HEAD, OPTIONS',
 				'Access-Control-Allow-Headers':
 					'Range, If-Range, If-None-Match, If-Modified-Since, Content-Type',
-				'Cache-Control': 'public, max-age=300'
+				'Cache-Control': 'no-cache'
 			}
 		});
 	}

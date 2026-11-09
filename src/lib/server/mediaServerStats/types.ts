@@ -1,4 +1,4 @@
-import type { MediaBrowserServerType } from '$lib/server/notifications/mediabrowser/types.js';
+import type { MediaBrowserServerType } from '#lib/server/notifications/mediabrowser/types.js';
 
 export interface MediaServerStatsProviderConfig {
 	host: string;
@@ -36,6 +36,9 @@ export interface SyncedMediaItem {
 	audioBitrate: number | null;
 	audioLanguages: string[];
 	subtitleLanguages: string[];
+	/** Untouched source language strings as reported by the media server. */
+	audioLanguagesRaw: string[];
+	subtitleLanguagesRaw: string[];
 	containerFormat: string | null;
 	fileSize: number | null;
 	bitrate: number | null;

@@ -6,7 +6,9 @@ import svelte from 'eslint-plugin-svelte';
 import { defineConfig } from 'eslint/config';
 import globals from 'globals';
 import ts from 'typescript-eslint';
-import svelteConfig from './svelte.config.js';
+import { loadConfig } from '@sveltejs/load-config';
+
+const svelteConfig = (await loadConfig('./', { traverse: false }))?.config;
 import noEmoji from './eslint-rules/no-emoji.js';
 
 const gitignorePath = fileURLToPath(new URL('./.gitignore', import.meta.url));
@@ -21,17 +23,16 @@ export default defineConfig(
 	includeIgnoreFile(gitignorePath),
 	{
 		ignores: [
-			// External/separate projects
-			'Flyx-main/**',
-			'Cinephage-Streamer/**',
 			// Browser extension asset shipped as-is (loaded by Camoufox, not app code)
 			'src/lib/server/captcha/browser/addon/**',
 			// Build artifacts
-			'.svelte-kit/**'
+			'.svelte-kit/**',
+			// Generated language data
+			'src/lib/server/languages/iso-data.generated.ts'
 		]
 	},
 	{
-		// Disable the built-in unused-disable reporting globally — it's too coarse
+		// Disable the built-in unused-disable reporting globally - it's too coarse
 		// (can't suppress per-file). We re-enable specific checks for source files below.
 		linterOptions: {
 			reportUnusedDisableDirectives: 0
@@ -47,7 +48,7 @@ export default defineConfig(
 		plugins: { local },
 		rules: {
 			// Disallow pictographic emoji in code/comments (see eslint-rules/no-emoji.js).
-			// Svelte template markup is naturally exempt — only JS/TS nodes are checked.
+			// Svelte template markup is naturally exempt - only JS/TS nodes are checked.
 			'local/no-emoji': 'error'
 		}
 	},

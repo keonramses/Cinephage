@@ -1,8 +1,7 @@
-import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types.js';
 import { stat } from 'node:fs/promises';
 import { join, resolve, normalize } from 'node:path';
-import { db } from '$lib/server/db/index.js';
+import { db } from '#lib/server/db/index.js';
 import {
 	series,
 	seasons,
@@ -12,37 +11,49 @@ import {
 	downloadQueue,
 	rootFolders,
 	subtitles
-} from '$lib/server/db/schema.js';
-import { eq, inArray, and } from 'drizzle-orm';
-import { deleteDirectoryWithinRoot } from '$lib/server/filesystem/delete-helpers.js';
-import { todayDateString } from '$lib/utils/format.js';
-import { getLanguageProfileService } from '$lib/server/subtitles/services/LanguageProfileService.js';
-import { searchSubtitlesForMediaBatch } from '$lib/server/subtitles/services/SubtitleImportService.js';
-import { searchOnAdd } from '$lib/server/library/searchOnAdd.js';
-import { monitoringScheduler } from '$lib/server/monitoring/MonitoringScheduler.js';
-import { monitoringSearchService } from '$lib/server/monitoring/search/MonitoringSearchService.js';
-import { deleteAllAlternateTitles } from '$lib/server/services/index.js';
-import { getDownloadClientManager } from '$lib/server/downloadClients/DownloadClientManager.js';
-import { libraryMediaEvents } from '$lib/server/library/LibraryMediaEvents';
+} from '#lib/server/db/schema.js';
+import { and, eq, inArray } from 'drizzle-orm';
+import {
+	deleteDirectoryWithinRoot,
+	deleteFilesWithinRoot,
+	namesRootItself
+} from '#lib/server/filesystem/delete-helpers.js';
+import { todayDateString } from '#lib/utils/format.js';
+import { getLanguageProfileService } from '#lib/server/subtitles/services/LanguageProfileService.js';
+import { searchSubtitlesForMediaBatch } from '#lib/server/subtitles/services/SubtitleImportService.js';
+import { searchOnAdd } from '#lib/server/library/searchOnAdd.js';
+import { monitoringScheduler } from '#lib/server/monitoring/MonitoringScheduler.js';
+import { monitoringSearchService } from '#lib/server/monitoring/search/MonitoringSearchService.js';
+import { deleteAllAlternateTitles } from '#lib/server/services/index.js';
+import { getDownloadClientManager } from '#lib/server/downloadClients/DownloadClientManager.js';
+import { libraryMediaEvents } from '#lib/server/library/LibraryMediaEvents.js';
 import {
 	validateRootFolder,
 	getAnimeSubtypeEnforcement
-} from '$lib/server/library/LibraryAddService.js';
+} from '#lib/server/library/LibraryAddService.js';
 import {
-	deleteAllSeasonsAndEpisodes,
-	buildSeasonsAndEpisodesFromGroup,
-	getEffectiveEpisodeGroup
-} from '$lib/server/metadata/EpisodeGroupService.js';
-import { mediaMoveService } from '$lib/server/library/MediaMoveService.js';
-import { getLibraryEntityService } from '$lib/server/library/LibraryEntityService.js';
-import { getLibraryScheduler } from '$lib/server/library/library-scheduler.js';
-import { isLikelyAnimeMedia } from '$lib/shared/anime-classification.js';
-import { seriesUpdateSchema } from '$lib/validation/schemas.js';
-import { tmdb } from '$lib/server/tmdb.js';
-import { getMetadataProviderConfig } from '$lib/server/metadata/provider-settings.js';
-import { resolveMissingAnimeProviderRefs } from '$lib/server/metadata/provider-ref-resolver.js';
-import { refreshSeriesMetadata } from '$lib/server/metadata/metadata-refresh.js';
-import { createChildLogger } from '$lib/logging';
+	buildDefaultOrderingPlan,
+	fetchValidatedGroupPlan,
+	persistEpisodePlanIn,
+	type SeriesEpisodePlan
+} from '#lib/server/metadata/series-episode-plan.js';
+import { error } from '@sveltejs/kit';
+import { mediaMoveService } from '#lib/server/library/MediaMoveService.js';
+import { getLibraryEntityService } from '#lib/server/library/LibraryEntityService.js';
+import { getLibraryScheduler } from '#lib/server/library/library-scheduler.js';
+import { isLikelyAnimeMedia } from '#lib/shared/anime-classification.js';
+import { seriesUpdateSchema } from '#lib/validation/schemas.js';
+import { acquisitionService } from '#lib/server/acquisition/AcquisitionService.js';
+import { tmdb } from '#lib/server/tmdb.js';
+import { getMetadataProviderConfig } from '#lib/server/metadata/provider-settings.js';
+import { resolveMissingAnimeProviderRefs } from '#lib/server/metadata/provider-ref-resolver.js';
+import { persistLinkedProviderTitleVariants } from '#lib/server/metadata/provider-resolution.js';
+import {
+	refreshSeriesMetadata,
+	metadataLanguageToLegacy,
+	warnLegacyMetadataLanguage
+} from '#lib/server/metadata/metadata-refresh.js';
+import { createChildLogger } from '#lib/logging/index.js';
 
 const logger = createChildLogger({ module: 'LibrarySeriesByIdApi', logDomain: 'scans' });
 
@@ -81,7 +92,8 @@ export const GET: RequestHandler = async ({ params }) => {
 				episodeFileCount: series.episodeFileCount,
 				wantsSubtitles: series.wantsSubtitles,
 				episodeGroupId: series.episodeGroupId,
-				metadataLanguage: series.metadataLanguage,
+				metadataLanguageMode: series.metadataLanguageMode,
+				metadataLanguageValue: series.metadataLanguageValue,
 				preferOriginalTitle: series.preferOriginalTitle
 			})
 			.from(series)
@@ -89,7 +101,7 @@ export const GET: RequestHandler = async ({ params }) => {
 			.where(eq(series.id, params.id));
 
 		if (!seriesItem) {
-			return json({ success: false, error: 'Series not found' }, { status: 404 });
+			return Response.json({ success: false, error: 'Series not found' }, { status: 404 });
 		}
 
 		// Get seasons
@@ -184,12 +196,22 @@ export const GET: RequestHandler = async ({ params }) => {
 
 		// Get overall series subtitle status (episodes missing subtitles)
 		const profileService = getLanguageProfileService();
-		const episodesMissingSubs = await profileService.getSeriesEpisodesMissingSubtitles(params.id);
+		const [episodesMissingSubs, effectiveLanguageProfile, effectiveSubtitleRequirements] =
+			await Promise.all([
+				profileService.getSeriesEpisodesMissingSubtitles(params.id),
+				profileService.getEffectiveProfileForSeries(params.id),
+				profileService.getEffectiveSubtitleRequirements({ seriesId: params.id })
+			]);
 
-		return json({
+		return Response.json({
 			success: true,
 			series: {
 				...seriesItem,
+				// Legacy view derived from the v2 pair (kept one release).
+				metadataLanguage: metadataLanguageToLegacy(
+					seriesItem.metadataLanguageMode,
+					seriesItem.metadataLanguageValue
+				),
 				providerRefs: enrichedProviderRefs,
 				percentComplete:
 					seriesItem.episodeCount && seriesItem.episodeCount > 0
@@ -200,12 +222,16 @@ export const GET: RequestHandler = async ({ params }) => {
 					episodesMissingSubtitles: episodesMissingSubs.length,
 					totalSubtitles: allSubtitles.length,
 					languages: [...new Set(allSubtitles.map((s) => s.language))]
-				}
+				},
+				// The profile governing this series plus where it was resolved
+				// from (series override > library default > instance default).
+				effectiveLanguageProfile: effectiveLanguageProfile ?? null,
+				effectiveSubtitleRequirements: effectiveSubtitleRequirements ?? null
 			}
 		});
 	} catch (error) {
 		logger.error('[API] Error fetching series', error instanceof Error ? error : undefined);
-		return json(
+		return Response.json(
 			{
 				success: false,
 				error: error instanceof Error ? error.message : 'Failed to fetch series'
@@ -224,7 +250,10 @@ export const PATCH: RequestHandler = async ({ params, request }) => {
 		const rawBody = await request.json();
 		const parsed = seriesUpdateSchema.safeParse(rawBody);
 		if (!parsed.success) {
-			return json({ success: false, error: parsed.error.issues[0].message }, { status: 400 });
+			return Response.json(
+				{ success: false, error: parsed.error.issues[0].message },
+				{ status: 400 }
+			);
 		}
 		const body = parsed.data;
 		const {
@@ -236,9 +265,12 @@ export const PATCH: RequestHandler = async ({ params, request }) => {
 			rootFolderId,
 			wantsSubtitles,
 			languageProfileId,
+			subtitleRequirementsOverride,
 			delayProfileId,
 			folderPath,
 			episodeGroupId,
+			metadataLanguageMode,
+			metadataLanguageValue,
 			metadataLanguage,
 			preferOriginalTitle
 		} = body;
@@ -257,9 +289,11 @@ export const PATCH: RequestHandler = async ({ params, request }) => {
 				scoringProfileId: series.scoringProfileId,
 				wantsSubtitles: series.wantsSubtitles,
 				languageProfileId: series.languageProfileId,
+				subtitleRequirementsOverride: series.subtitleRequirementsOverride,
 				episodeGroupId: series.episodeGroupId,
 				monitorSpecials: series.monitorSpecials,
-				metadataLanguage: series.metadataLanguage
+				metadataLanguageMode: series.metadataLanguageMode,
+				metadataLanguageValue: series.metadataLanguageValue
 			})
 			.from(series)
 			.where(eq(series.id, params.id));
@@ -270,6 +304,9 @@ export const PATCH: RequestHandler = async ({ params, request }) => {
 		const seriesHasFiles = (currentSeries?.episodeFileCount ?? 0) > 0;
 
 		const updateData: Record<string, unknown> = {};
+		// Track fields applied outside updateData (via service calls) so the
+		// "no valid fields" guard below stays accurate.
+		let appliedSideEffectFields = 0;
 		let moveRequest:
 			| {
 					mediaId: string;
@@ -302,7 +339,7 @@ export const PATCH: RequestHandler = async ({ params, request }) => {
 			const nextRootFolderId = rootFolderId.trim();
 			const currentRootFolderId = currentSeries?.rootFolderId ?? null;
 			if (!nextRootFolderId) {
-				return json(
+				return Response.json(
 					{
 						success: false,
 						error: 'Root folder is required and cannot be unset after adding media.'
@@ -316,7 +353,7 @@ export const PATCH: RequestHandler = async ({ params, request }) => {
 				const hasExistingFiles = (currentSeries?.episodeFileCount ?? 0) > 0;
 				const canMoveFromCurrentRoot = Boolean(currentRootFolderId);
 				if (hasExistingFiles && canMoveFromCurrentRoot && moveFilesOnRootChange !== true) {
-					return json(
+					return Response.json(
 						{
 							success: false,
 							error:
@@ -375,8 +412,28 @@ export const PATCH: RequestHandler = async ({ params, request }) => {
 		if (wantsSubtitles !== undefined) {
 			updateData.wantsSubtitles = wantsSubtitles;
 		}
+		// Per-item subtitle requirement override: validated list or null to
+		// clear (inherit from the profile chain). Replaces only the list.
+		if (subtitleRequirementsOverride !== undefined) {
+			updateData.subtitleRequirementsOverride = subtitleRequirementsOverride;
+			appliedSideEffectFields++;
+		}
+		// Language profile override: a string must reference an existing profile
+		// and is applied through the service; null clears the override so the
+		// series inherits (library default → instance default).
 		if (languageProfileId !== undefined) {
-			updateData.languageProfileId = languageProfileId;
+			const profileService = getLanguageProfileService();
+			if (languageProfileId !== null) {
+				const profile = await profileService.getProfile(languageProfileId);
+				if (!profile) {
+					return Response.json(
+						{ success: false, error: `Language profile not found: ${languageProfileId}` },
+						{ status: 400 }
+					);
+				}
+			}
+			await profileService.assignToSeries(params.id, languageProfileId);
+			appliedSideEffectFields++;
 		}
 		if (folderPath !== undefined) {
 			const trimmed = folderPath.trim();
@@ -388,11 +445,11 @@ export const PATCH: RequestHandler = async ({ params, request }) => {
 					.where(eq(rootFolders.id, currentSeries.rootFolderId))
 					.limit(1);
 				if (!rootFolder) {
-					return json({ success: false, error: 'Root folder not found' }, { status: 400 });
+					return Response.json({ success: false, error: 'Root folder not found' }, { status: 400 });
 				}
 				const resolved = normalize(join(rootFolder.path, trimmed));
 				if (!resolved.startsWith(normalize(rootFolder.path) + '/')) {
-					return json(
+					return Response.json(
 						{ success: false, error: 'Folder must be within the root folder' },
 						{ status: 400 }
 					);
@@ -400,7 +457,7 @@ export const PATCH: RequestHandler = async ({ params, request }) => {
 				try {
 					await stat(resolved);
 				} catch {
-					return json(
+					return Response.json(
 						{ success: false, error: `Folder does not exist on disk: ${resolve(resolved)}` },
 						{ status: 400 }
 					);
@@ -409,25 +466,58 @@ export const PATCH: RequestHandler = async ({ params, request }) => {
 			updateData.path = trimmed;
 		}
 
-		if (metadataLanguage !== undefined) {
-			updateData.metadataLanguage = metadataLanguage;
+		// Metadata language override (v2 pair). The update schema maps the
+		// deprecated single-string form onto metadataLanguageMode/Value.
+		const metadataLanguageProvided =
+			metadataLanguageMode !== undefined ||
+			metadataLanguageValue !== undefined ||
+			metadataLanguage !== undefined;
+		const nextMetadataLanguageMode = metadataLanguageProvided
+			? (metadataLanguageMode ?? 'inherit')
+			: null;
+		const nextMetadataLanguageValue =
+			nextMetadataLanguageMode === 'explicit' ? (metadataLanguageValue ?? null) : null;
+		if (metadataLanguageProvided) {
+			if (metadataLanguage !== undefined) {
+				warnLegacyMetadataLanguage('PATCH /api/library/series/[id]');
+			}
+			updateData.metadataLanguageMode = nextMetadataLanguageMode;
+			updateData.metadataLanguageValue = nextMetadataLanguageValue;
 		}
-		if (typeof preferOriginalTitle === 'boolean') {
+		if (preferOriginalTitle === null || typeof preferOriginalTitle === 'boolean') {
 			updateData.preferOriginalTitle = preferOriginalTitle;
 		}
 
-		if (Object.keys(updateData).length === 0 && !moveRequest && episodeGroupId === undefined) {
-			return json({ success: false, error: 'No valid fields to update' }, { status: 400 });
+		if (
+			Object.keys(updateData).length === 0 &&
+			!moveRequest &&
+			episodeGroupId === undefined &&
+			appliedSideEffectFields === 0
+		) {
+			return Response.json({ success: false, error: 'No valid fields to update' }, { status: 400 });
 		}
 
 		if (Object.keys(updateData).length > 0) {
 			await db.update(series).set(updateData).where(eq(series.id, params.id));
 		}
 
+		// Manual anime provider link: fetch the linked AniList/MAL entries and
+		// persist their title variants as alternate titles (idempotent). Runs in
+		// the background - external provider latency must not stall the PATCH.
+		if (providerRefs?.anilist || providerRefs?.mal) {
+			persistLinkedProviderTitleVariants('series', params.id, providerRefs).catch((err) => {
+				logger.warn(
+					{ seriesId: params.id, err },
+					'[API] Failed to persist linked provider title variants'
+				);
+			});
+		}
+
 		// Refresh metadata from TMDB when language override changes
 		const languageChanged =
-			metadataLanguage !== undefined &&
-			metadataLanguage !== (currentSeries?.metadataLanguage ?? null);
+			metadataLanguageProvided &&
+			(nextMetadataLanguageMode !== (currentSeries?.metadataLanguageMode ?? null) ||
+				nextMetadataLanguageValue !== (currentSeries?.metadataLanguageValue ?? null));
 		if (languageChanged) {
 			refreshSeriesMetadata(params.id).catch((err) => {
 				logger.error(
@@ -438,6 +528,7 @@ export const PATCH: RequestHandler = async ({ params, request }) => {
 		}
 
 		// Handle episode group change - requires full season/episode rebuild
+		let rebuildWarning: string | undefined;
 		if (episodeGroupId !== undefined) {
 			const currentGroupId = currentSeries?.episodeGroupId ?? null;
 			const newGroupId = episodeGroupId || null;
@@ -452,110 +543,77 @@ export const PATCH: RequestHandler = async ({ params, request }) => {
 					'Episode group changed, rebuilding seasons and episodes'
 				);
 
-				await db.update(series).set({ episodeGroupId: newGroupId }).where(eq(series.id, params.id));
+				// Resolve the new scheme BEFORE anything destructive. An explicit
+				// group choice fetches exactly that group: if TMDB cannot serve it,
+				// nothing is changed; if its data is unusable, the rebuild falls
+				// back to default TMDB ordering with a warning instead of writing
+				// a plan that would crash or come out empty.
+				const buildDefaultPlan = async (): Promise<SeriesEpisodePlan> => {
+					const tvDetails = await tmdb.getTVShow(currentSeries.tmdbId);
+					const monitorSpecials = currentSeries.monitorSpecials ?? false;
+					const built = await buildDefaultOrderingPlan({
+						seriesId: params.id,
+						seasonsSummary: tvDetails.seasons ?? [],
+						fetchSeason: (seasonNumber) => tmdb.getSeason(currentSeries.tmdbId, seasonNumber),
+						assignSeasonMonitored: (_seasonNumber, isSpecials) => !isSpecials || monitorSpecials,
+						assignEpisodeMonitored: ({ seasonMonitored }) => seasonMonitored,
+						paceMs: 50
+					});
+					if (built.failedSeasonNumbers.length > 0) {
+						logger.warn(
+							{ seriesId: params.id, failedSeasonNumbers: built.failedSeasonNumbers },
+							'[API] Some seasons had no fetchable episode list during episode group change'
+						);
+					}
+					return built.plan;
+				};
 
-				await deleteAllSeasonsAndEpisodes(params.id);
-
-				let episodeGroup = null;
+				let rebuildPlan: SeriesEpisodePlan;
+				let finalGroupId: string | null = newGroupId;
 				if (newGroupId) {
-					({ group: episodeGroup } = await getEffectiveEpisodeGroup(
-						currentSeries.tmdbId,
-						newGroupId
-					));
-				}
-
-				if (episodeGroup) {
-					const { seasonValues, episodeValues: groupEpisodeValues } =
-						buildSeasonsAndEpisodesFromGroup(params.id, episodeGroup);
-
-					if (seasonValues.length > 0) {
-						const monitorSpecials = currentSeries?.monitorSpecials ?? false;
-
-						if (monitorSpecials) {
-							for (const sv of seasonValues) {
-								if (sv.seasonNumber === 0) {
-									sv.monitored = true;
-								}
-							}
-							for (const ev of groupEpisodeValues) {
-								if (ev.seasonNumber === 0) {
-									ev.monitored = true;
-								}
-							}
-						}
-
-						const insertedSeasons = await db.insert(seasons).values(seasonValues).returning();
-						const seasonIdByNumber = new Map(insertedSeasons.map((s) => [s.seasonNumber, s.id]));
-
-						const enrichedEpisodes = groupEpisodeValues.map((ep) => ({
-							...ep,
-							seasonId: seasonIdByNumber.get(ep.seasonNumber!) ?? null
-						}));
-
-						if (enrichedEpisodes.length > 0) {
-							await db.insert(episodes).values(enrichedEpisodes);
-						}
+					const result = await fetchValidatedGroupPlan(params.id, newGroupId);
+					if (!result.ok && result.reason === 'fetch-failed') {
+						error(
+							502,
+							'The chosen episode group could not be fetched from TMDB; nothing was changed. Try again later.'
+						);
+					}
+					if (result.ok) {
+						rebuildPlan = result.plan;
+					} else {
+						logger.warn(
+							{ seriesId: params.id, groupId: newGroupId, reason: result.reason },
+							'[API] Chosen episode group is unusable; rebuilding with default TMDB ordering'
+						);
+						rebuildWarning =
+							'The chosen episode group was unusable, so seasons were rebuilt with default TMDB ordering instead.';
+						finalGroupId = null;
+						rebuildPlan = await buildDefaultPlan();
 					}
 				} else {
-					// Reverted to default TMDB ordering - trigger a full refresh via rescan
-					// The getEffectiveEpisodeGroup with null groupId fetches from raw TMDB
-					const tvDetails = await tmdb.getTVShow(currentSeries.tmdbId);
+					finalGroupId = null;
+					rebuildPlan = await buildDefaultPlan();
+				}
 
-					if (tvDetails.seasons) {
-						const monitorSpecials = currentSeries?.monitorSpecials ?? false;
-
-						for (const s of tvDetails.seasons) {
-							try {
-								const tmdbSeason = await tmdb.getSeason(currentSeries.tmdbId, s.season_number);
-
-								const isSpecials = s.season_number === 0;
-								const seasonMonitored = !isSpecials || monitorSpecials;
-
-								const [newSeason] = await db
-									.insert(seasons)
-									.values({
-										seriesId: params.id,
-										seasonNumber: s.season_number,
-										name: tmdbSeason.name || s.name,
-										overview: tmdbSeason.overview || s.overview,
-										posterPath: tmdbSeason.poster_path || s.poster_path,
-										airDate: tmdbSeason.air_date || s.air_date,
-										episodeCount: tmdbSeason.episodes?.length ?? s.episode_count ?? 0,
-										episodeFileCount: 0,
-										monitored: seasonMonitored
-									})
-									.returning();
-
-								if (tmdbSeason.episodes) {
-									const episodeValues = tmdbSeason.episodes.map((ep) => ({
-										seriesId: params.id,
-										seasonId: newSeason.id,
-										tmdbId: ep.id,
-										seasonNumber: ep.season_number,
-										episodeNumber: ep.episode_number,
-										title: ep.name,
-										overview: ep.overview,
-										airDate: ep.air_date,
-										runtime: ep.runtime,
-										monitored: seasonMonitored,
-										hasFile: false
-									}));
-
-									if (episodeValues.length > 0) {
-										await db.insert(episodes).values(episodeValues);
-									}
-								}
-
-								await new Promise((resolve) => setTimeout(resolve, 50));
-							} catch {
-								logger.warn(
-									{ seasonNumber: s.season_number },
-									'[API] Failed to fetch season during episode group revert'
-								);
-							}
-						}
+				// Respect monitorSpecials for season 0 rows (both plan flavors).
+				if (currentSeries.monitorSpecials) {
+					for (const sv of rebuildPlan.seasons) {
+						if (sv.seasonNumber === 0) sv.monitored = true;
+					}
+					for (const ev of rebuildPlan.episodes) {
+						if (ev.seasonNumber === 0) ev.monitored = true;
 					}
 				}
+
+				// Scheme switch and rebuild commit atomically: a failed rebuild
+				// no longer leaves the series wiped or half-populated.
+				db.transaction((tx) => {
+					tx.update(series)
+						.set({ episodeGroupId: finalGroupId })
+						.where(eq(series.id, params.id))
+						.run();
+					persistEpisodePlanIn(tx, params.id, rebuildPlan, { wipe: true });
+				});
 
 				// Update series stats after rebuild
 				const allEpisodes = await db
@@ -650,16 +708,21 @@ export const PATCH: RequestHandler = async ({ params, request }) => {
 			);
 		}
 
-		// Check if subtitle monitoring was just enabled
+		// Check if subtitle monitoring was just enabled, or the requirement
+		// override changed while the gate is on. Requirements may come from the
+		// profile chain (library/instance default), so the gate alone enables.
 		if (currentSeries) {
-			const wasSubtitlesEnabled =
-				currentSeries.wantsSubtitles === true && currentSeries.languageProfileId;
+			const wasSubtitlesEnabled = currentSeries.wantsSubtitles === true;
 			const newWantsSubtitles = wantsSubtitles ?? currentSeries.wantsSubtitles;
-			const newProfileId = languageProfileId ?? currentSeries.languageProfileId;
-			const isNowSubtitlesEnabled = newWantsSubtitles === true && newProfileId;
+			const isNowSubtitlesEnabled = newWantsSubtitles === true;
+			const overrideChanged =
+				subtitleRequirementsOverride !== undefined &&
+				JSON.stringify(subtitleRequirementsOverride) !==
+					JSON.stringify(currentSeries.subtitleRequirementsOverride ?? null);
 
-			// Trigger subtitle search for all episodes with files if just enabled
-			if (!wasSubtitlesEnabled && isNowSubtitlesEnabled) {
+			// Trigger subtitle search for all episodes with files if just
+			// enabled or the requirements changed while enabled.
+			if (isNowSubtitlesEnabled && (!wasSubtitlesEnabled || overrideChanged)) {
 				const settings = await monitoringScheduler.getSettings();
 
 				if (settings.subtitleSearchOnImportEnabled) {
@@ -704,15 +767,16 @@ export const PATCH: RequestHandler = async ({ params, request }) => {
 			getLibraryScheduler().queueFolderScan(currentSeries.rootFolderId);
 		}
 
-		return json({
+		return Response.json({
 			success: true,
 			moveQueued: Boolean(moveTask),
 			moveTaskId: moveTask?.taskId,
-			moveTaskHistoryId: moveTask?.historyId
+			moveTaskHistoryId: moveTask?.historyId,
+			rebuildWarning
 		});
 	} catch (error) {
 		logger.error('[API] Error updating series', error instanceof Error ? error : undefined);
-		return json(
+		return Response.json(
 			{
 				success: false,
 				error: error instanceof Error ? error.message : 'Failed to update series'
@@ -748,32 +812,63 @@ export const DELETE: RequestHandler = async ({ params, url }) => {
 			.where(eq(series.id, params.id));
 
 		if (!seriesItem) {
-			return json({ success: false, error: 'Series not found' }, { status: 404 });
+			return Response.json({ success: false, error: 'Series not found' }, { status: 404 });
 		}
 
 		// Get all episode files for this series
 		const files = await db.select().from(episodeFiles).where(eq(episodeFiles.seriesId, params.id));
 
-		// Only require files if not removing from library entirely
-		if (files.length === 0 && !removeFromLibrary) {
-			return json({ success: false, error: 'Series has no files to delete' }, { status: 400 });
+		// Unmatch also releases client-side tracking from the Unmatched-tab
+		// track/enroll flow so the torrent resurfaces in Unmatched. Real
+		// grabs (including arr_push-pushed ones) and the client itself are
+		// never touched - only rows explicitly stamped with `origin` qualify.
+		const unmatchedRelease = acquisitionService.releaseUnmatchedQueueItems(
+			{ seriesId: params.id },
+			'files unmatched from library'
+		);
+
+		// Only require files if not removing from library entirely and there
+		// is no client tracking to release back to Unmatched.
+		if (
+			files.length === 0 &&
+			!removeFromLibrary &&
+			unmatchedRelease.released === 0 &&
+			unmatchedRelease.heldBack === 0
+		) {
+			return Response.json(
+				{ success: false, error: 'Series has no files to delete' },
+				{ status: 400 }
+			);
 		}
 
 		// Block file deletion from read-only folders
 		if (deleteFiles && seriesItem.rootFolderReadOnly) {
-			return json(
+			return Response.json(
 				{ success: false, error: 'Cannot delete files from read-only folder' },
 				{ status: 400 }
 			);
 		}
 
-		// Delete files from disk if requested
+		// Delete files from disk if requested. A series tracked at the root itself
+		// only removes its own files; deleting the directory would take the whole
+		// library with it.
 		if (deleteFiles && seriesItem.rootFolderPath && seriesItem.path) {
-			const seriesFolder = await deleteDirectoryWithinRoot(
-				seriesItem.rootFolderPath,
-				seriesItem.path
-			);
-			logger.debug({ seriesFolder }, '[API] Removed series folder and all contents');
+			if (namesRootItself(seriesItem.rootFolderPath, seriesItem.path)) {
+				await deleteFilesWithinRoot(
+					seriesItem.rootFolderPath,
+					files.map((file) => join(seriesItem.path!, file.relativePath))
+				);
+				logger.debug(
+					{ count: files.length },
+					'[API] Removed root-level series files without deleting the library root'
+				);
+			} else {
+				const seriesFolder = await deleteDirectoryWithinRoot(
+					seriesItem.rootFolderPath,
+					seriesItem.path
+				);
+				logger.debug({ seriesFolder }, '[API] Removed series folder and all contents');
+			}
 		}
 
 		// Delete all episode file records from database
@@ -814,6 +909,7 @@ export const DELETE: RequestHandler = async ({ params, url }) => {
 					}
 				}
 				// Delete queue record
+				acquisitionService.cancelByQueueId(queueItem.id, 'media removed from library');
 				await db.delete(downloadQueue).where(eq(downloadQueue.id, queueItem.id));
 			}
 
@@ -832,7 +928,7 @@ export const DELETE: RequestHandler = async ({ params, url }) => {
 			libraryMediaEvents.emitSeriesUpdated(params.id);
 
 			logger.info({ seriesId: params.id }, '[API] Removed series from library');
-			return json({ success: true, removed: true });
+			return Response.json({ success: true, removed: true });
 		} else {
 			// Update all episodes in this series to hasFile=false
 			await db
@@ -845,14 +941,16 @@ export const DELETE: RequestHandler = async ({ params, url }) => {
 
 			// Update series episode file count
 			await db.update(series).set({ episodeFileCount: 0 }).where(eq(series.id, params.id));
+
+			// Unmatched-flow queue rows were already released above.
 			libraryMediaEvents.emitSeriesUpdated(params.id);
 
 			// Note: Series, season, and episode metadata is kept - episodes will show as "missing"
-			return json({ success: true });
+			return Response.json({ success: true });
 		}
 	} catch (error) {
 		logger.error('[API] Error deleting series files', error instanceof Error ? error : undefined);
-		return json(
+		return Response.json(
 			{
 				success: false,
 				error: error instanceof Error ? error.message : 'Failed to delete series files'

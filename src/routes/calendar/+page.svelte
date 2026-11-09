@@ -1,5 +1,5 @@
 <script lang="ts">
-	import * as m from '$lib/paraglide/messages.js';
+	import * as m from '#lib/paraglide/messages.js';
 	import {
 		Calendar,
 		ChevronLeft,
@@ -13,18 +13,20 @@
 		List,
 		Plus,
 		Info
-	} from 'lucide-svelte';
+	} from '@lucide/svelte';
 	import { SvelteMap } from 'svelte/reactivity';
-	import { getLocale } from '$lib/paraglide/runtime.js';
-	import TmdbImage from '$lib/components/tmdb/TmdbImage.svelte';
-	import AddToLibraryModal from '$lib/components/library/AddToLibraryModal.svelte';
-	import type { CalendarDay, CalendarMovieItem } from '$lib/server/calendar/queries.js';
-	import type { CalendarPreferences } from '$lib/validation/schemas.js';
-	import { getCalendar } from '$lib/api';
-	import { apiPut } from '$lib/api/client.js';
-	import { toasts } from '$lib/stores/toast.svelte';
+	import { getLocale } from '#lib/paraglide/runtime.js';
+	import TmdbImage from '#lib/components/tmdb/TmdbImage.svelte';
+	import AddToLibraryModal from '#lib/components/library/AddToLibraryModal.svelte';
+	import type { CalendarDay, CalendarMovieItem } from '#lib/server/calendar/queries.js';
+	import type { CalendarPreferences } from '#lib/validation/schemas.js';
+	import { getCalendar } from '#lib/api/index.js';
+	import { apiPut } from '#lib/api/client.js';
+	import { toasts } from '#lib/stores/toast.svelte.js';
 
 	let { data } = $props();
+
+	// Preferences are per-account; every signed-in user owns their own.
 
 	let currentMonth = $state('');
 	let days = $state<CalendarDay[]>([]);
@@ -210,16 +212,16 @@
 	async function toggleViewMode() {
 		prefs.viewMode = prefs.viewMode === 'grid' ? 'list' : 'grid';
 		try {
-			await apiPut('/api/settings/calendar-preferences', { ...prefs });
+			await apiPut('/api/user/preferences/calendar', { value: { ...prefs } });
 		} catch {
-			// non-critical — view still works locally
+			// non-critical - view still works locally
 		}
 	}
 
 	async function savePreferences() {
 		savingPrefs = true;
 		try {
-			await apiPut('/api/settings/calendar-preferences', { ...prefs });
+			await apiPut('/api/user/preferences/calendar', { value: { ...prefs } });
 			fetchCalendar(currentMonth);
 			toasts.success('Calendar preferences saved');
 		} catch {
@@ -575,7 +577,7 @@
 									onclick={() => openDay(cell)}
 									disabled={!hasItems}
 								>
-									<!-- Day number — separate elements avoids class conflicts -->
+									<!-- Day number - separate elements avoids class conflicts -->
 									{#if cell.isToday}
 										<div
 											class="mb-1.5 flex h-6 w-6 items-center justify-center rounded-full bg-primary text-xs font-bold text-primary-content"
@@ -591,7 +593,7 @@
 										</div>
 									{/if}
 
-									<!-- Mobile: colored dots — solid = in library, faded = not in library -->
+									<!-- Mobile: colored dots - solid = in library, faded = not in library -->
 									<div class="flex flex-wrap gap-0.5 sm:hidden">
 										{#each (cell.items?.movies ?? []).slice(0, 3) as movie (movie.tmdbId)}
 											<span
@@ -608,7 +610,7 @@
 										{/if}
 									</div>
 
-									<!-- Desktop: text chips — filled = in library, outline = not in library -->
+									<!-- Desktop: text chips - filled = in library, outline = not in library -->
 									<div class="hidden space-y-0.5 sm:block">
 										{#each (cell.items?.movies ?? []).slice(0, 2) as movie (movie.tmdbId)}
 											<div
@@ -729,7 +731,7 @@
 												<span class="text-xs text-secondary/60">
 													S{String(ep.seasonNumber).padStart(2, '0')}E{String(
 														ep.episodeNumber
-													).padStart(2, '0')}{ep.title ? ` — ${ep.title}` : ''}
+													).padStart(2, '0')}{ep.title ? ` - ${ep.title}` : ''}
 												</span>
 											</div>
 										</div>

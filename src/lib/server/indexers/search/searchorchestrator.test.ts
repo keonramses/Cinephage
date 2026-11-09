@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { SearchOrchestrator } from './SearchOrchestrator';
 import {
 	Category,
@@ -98,11 +98,6 @@ type OrchestratorPrivateApi = {
 	): ReleaseResult[];
 	isSeasonOnlyTvSearch(criteria: SearchCriteria): boolean;
 	filterByIdOrTitleMatch(releases: ReleaseResult[], criteria: SearchCriteria): ReleaseResult[];
-	executeSeasonPackSupplementalSearch(
-		indexer: IIndexer,
-		criteria: SearchCriteria,
-		seenReleases: ReleaseResult[]
-	): Promise<ReleaseResult[]>;
 	filterOutNonVideoArtifacts(releases: ReleaseResult[], criteria: SearchCriteria): ReleaseResult[];
 	filterIndexers(
 		indexers: IIndexer[],
@@ -115,8 +110,21 @@ type OrchestratorPrivateApi = {
 			useCache: boolean;
 			searchSource?: 'interactive' | 'automatic';
 			protocolFilter?: string[];
+			allowedIndexerIds?: string[] | null;
 		}
 	): { eligible: IIndexer[]; rejected: RejectedIndexer[] };
+	searchIndexer(
+		indexer: IIndexer,
+		criteria: SearchCriteria,
+		timeout: number,
+		useTieredSearch: boolean
+	): Promise<{ error?: string }>;
+	statusTracker: {
+		recordSuccess: (...args: unknown[]) => Promise<void>;
+		recordFailure: (...args: unknown[]) => Promise<void>;
+		recordQuotaExceeded: (...args: unknown[]) => Promise<void>;
+		getStatusSync: (...args: unknown[]) => { priority: number };
+	};
 };
 
 function privateApi(orchestrator: SearchOrchestrator): OrchestratorPrivateApi {
@@ -260,6 +268,68 @@ describe('SearchOrchestrator.executeMultiTitleTextSearch', () => {
 
 		releaseSlowVariant();
 		await searchPromise;
+	});
+
+	it('keeps searching later titles when earlier titles only return unrelated releases', async () => {
+		const orchestrator = new SearchOrchestrator();
+		const captured: SearchCriteria[] = [];
+
+		const fakeIndexer = buildIndexer({
+			search: async (criteria) => {
+				captured.push(criteria);
+				if (criteria.query === 'The Hangover') {
+					return [
+						createRelease({ guid: 'hangover', title: 'The.Hangover.2009.1080p.BluRay.x264-GRP' })
+					];
+				}
+				// A generic localized title matches unrelated content.
+				return [
+					createRelease({
+						guid: `junk-${captured.length}`,
+						title: 'Leoni.Della.Savana.2015.1080p.WEB-DL.x264-GRP'
+					})
+				];
+			}
+		});
+
+		const criteria = createMovieCriteria({
+			query: 'Una notte da leoni',
+			searchTitles: ['Una notte da leoni', 'Leoni', 'The Hangover'],
+			year: 2009
+		});
+
+		const releases = await privateApi(orchestrator).executeMultiTitleTextSearch(
+			fakeIndexer,
+			criteria
+		);
+
+		// 'The Hangover' only appears in the second batch of variants.
+		expect(captured.some((c) => c.query === 'The Hangover')).toBe(true);
+		expect(releases.map((release) => release.guid)).toContain('hangover');
+	});
+
+	it('stops after the first title when it returns a matching release', async () => {
+		const orchestrator = new SearchOrchestrator();
+		const captured: SearchCriteria[] = [];
+
+		const fakeIndexer = buildIndexer({
+			search: async (criteria) => {
+				captured.push(criteria);
+				return [
+					createRelease({ guid: 'hangover', title: 'The.Hangover.2009.1080p.BluRay.x264-GRP' })
+				];
+			}
+		});
+
+		const criteria = createMovieCriteria({
+			query: 'The Hangover',
+			searchTitles: ['The Hangover', 'Una notte da leoni', 'Very Bad Trip'],
+			year: 2009
+		});
+
+		await privateApi(orchestrator).executeMultiTitleTextSearch(fakeIndexer, criteria);
+
+		expect(captured.some((c) => c.query === 'Very Bad Trip')).toBe(false);
 	});
 
 	it('keeps waiting for all TV episode-format variants before merging', async () => {
@@ -547,6 +617,62 @@ describe('SearchOrchestrator.executeWithTiering', () => {
 		expect(cap0.tvdbId).toBe(123456);
 	});
 
+	it('falls back to text search when ID results do not match the title', async () => {
+		const orchestrator = new SearchOrchestrator();
+		const captured: SearchCriteria[] = [];
+
+		const fakeIndexer = buildIndexer({
+			capabilities: {
+				...mockCapabilities,
+				tvSearch: {
+					available: true,
+					supportedParams: ['q', 'imdbId', 'tvdbId', 'season', 'ep']
+				},
+				searchFormats: {
+					episode: ['standard']
+				}
+			},
+			search: async (criteria) => {
+				captured.push(criteria);
+
+				if (isTvSearch(criteria) && (criteria.imdbId || criteria.tvdbId)) {
+					return [
+						createRelease({
+							guid: 'unrelated-id-result',
+							title: 'Another Show S01E05 1080p WEB-DL',
+							categories: [Category.TV]
+						})
+					];
+				}
+
+				return [
+					createRelease({
+						guid: 'fallback-result',
+						title: 'My Show S01E05 1080p WEB-DL',
+						categories: [Category.TV]
+					})
+				];
+			}
+		});
+
+		const criteria = createTvCriteria({
+			query: 'My Show',
+			imdbId: 'tt1234567',
+			tvdbId: 123456,
+			season: 1,
+			episode: 5
+		});
+
+		const result = await privateApi(orchestrator).executeWithTiering(fakeIndexer, criteria);
+
+		expect(result.searchMethod).toBe('text');
+		expect(result.releases.map((release) => release.guid)).toEqual([
+			'unrelated-id-result',
+			'fallback-result'
+		]);
+		expect(captured).toHaveLength(2);
+	});
+
 	it('retries movie ID search without q/year before falling back to text', async () => {
 		const orchestrator = new SearchOrchestrator();
 		const captured: SearchCriteria[] = [];
@@ -583,6 +709,9 @@ describe('SearchOrchestrator.executeWithTiering', () => {
 
 		const criteria = createMovieCriteria({
 			query: "Now You See Me: Now You Don't",
+			// The ID result is named after this alternate title; without it the
+			// result would not count as a match and text fallback would run.
+			searchTitles: ["Now You See Me: Now You Don't", 'Now You See Me 3'],
 			year: 2025,
 			imdbId: 'tt4712810'
 		});
@@ -886,6 +1015,29 @@ describe('SearchOrchestrator.filterBySeasonEpisode', () => {
 describe('SearchOrchestrator.filterByIdOrTitleMatch', () => {
 	const orchestrator = new SearchOrchestrator();
 
+	// The 2026-09-17 wrong-target incident: substring containment matched
+	// "Halloween" (1978) to "Detective Conan: The Bride of Halloween" (2022).
+	it('removes Detective Conan: The Bride of Halloween from automatic Halloween searches', () => {
+		const releases = [
+			createRelease({
+				title: 'Detective.Conan.The.Bride.of.Halloween.2022.1080p.BDRip.x264',
+				indexerName: 'FakeIndexer'
+			}),
+			createRelease({ title: 'Halloween.1978.1080p.BluRay.x264', indexerName: 'FakeIndexer' })
+		];
+
+		const criteria = createMovieCriteria({
+			query: 'Halloween',
+			searchTitles: ['Halloween'],
+			tmdbId: 1104,
+			year: 1978
+		});
+
+		const filtered = privateApi(orchestrator).filterByIdOrTitleMatch(releases, criteria);
+		expect(filtered).toHaveLength(1);
+		expect(filtered[0].title).toBe('Halloween.1978.1080p.BluRay.x264');
+	});
+
 	it('keeps season packs whose title year is the season air year, not the series first-air year', () => {
 		const releases = [createRelease({ title: 'Mr.Robot.S03.2017.1080p.WEB-DL.DDP5.1.H.264' })];
 
@@ -938,7 +1090,7 @@ describe('SearchOrchestrator.filterByIdOrTitleMatch', () => {
 		expect(titles).toEqual(['Now.You.See.Me.Now.You.Dont.2025.1080p.WEB-DL.DDP5.1.H.265']);
 	});
 
-	it('keeps movie releases with unknown year when IDs are absent', () => {
+	it('removes year-less movie releases from automatic searches when IDs are absent', () => {
 		const releases = [
 			createRelease({
 				title: 'Now.You.See.Me.Now.You.Dont.1080p.WEB-DL.REPACK',
@@ -954,8 +1106,29 @@ describe('SearchOrchestrator.filterByIdOrTitleMatch', () => {
 		});
 
 		const filtered = privateApi(orchestrator).filterByIdOrTitleMatch(releases, criteria);
+		// A year-less title cannot prove which same-titled movie it is; automatic
+		// search treats missing year evidence as uncertainty, not proof.
+		expect(filtered).toHaveLength(0);
+	});
+
+	it('keeps year-less movie releases visible for interactive searches', () => {
+		const releases = [
+			createRelease({
+				title: 'Now.You.See.Me.Now.You.Dont.1080p.WEB-DL.REPACK',
+				indexerName: 'FakeIndexer'
+			})
+		];
+
+		const criteria = createMovieCriteria({
+			searchSource: 'interactive',
+			query: "Now You See Me: Now You Don't",
+			imdbId: 'tt4712810',
+			tmdbId: 425274,
+			year: 2025
+		});
+
+		const filtered = privateApi(orchestrator).filterByIdOrTitleMatch(releases, criteria);
 		expect(filtered).toHaveLength(1);
-		expect(filtered[0].title).toBe('Now.You.See.Me.Now.You.Dont.1080p.WEB-DL.REPACK');
 	});
 
 	it('keeps interactive movie results when title is localized and year is missing on localized trackers', () => {
@@ -1108,48 +1281,44 @@ describe('SearchOrchestrator.filterByIdOrTitleMatch', () => {
 	});
 });
 
-describe('SearchOrchestrator.executeSeasonPackSupplementalSearch', () => {
-	const orchestrator = new SearchOrchestrator();
+describe('SearchOrchestrator.executeWithTiering - season-only searches make exactly one request', () => {
+	it('does not fire a supplemental search even when the ID search finds no season pack', async () => {
+		const orchestrator = new SearchOrchestrator();
+		const searchCalls: SearchCriteria[] = [];
 
-	it('does not duplicate the season token when the query already contains it', async () => {
-		const capturedQueries: string[] = [];
-		const indexer = buildIndexer({
-			search: async (criteria: { query?: string }) => {
-				capturedQueries.push(criteria.query ?? '');
-				return [];
+		const fakeIndexer = buildIndexer({
+			capabilities: {
+				...mockCapabilities,
+				tvSearch: {
+					available: true,
+					supportedParams: ['q', 'imdbId', 'tvdbId', 'season']
+				},
+				searchFormats: { episode: ['standard'] }
+			},
+			search: async (criteria) => {
+				searchCalls.push(criteria as SearchCriteria);
+				return [
+					createRelease({
+						guid: 'episode-1',
+						title: 'My Show S01E01 1080p WEB-DL',
+						size: 1024,
+						categories: [Category.TV]
+					})
+				];
 			}
 		});
 
 		const criteria = createTvCriteria({
-			query: 'Mr. Robot S03',
-			season: 3
+			query: 'My Show',
+			imdbId: 'tt1234567',
+			tvdbId: 123456,
+			season: 1
 		});
 
-		await privateApi(orchestrator).executeSeasonPackSupplementalSearch(indexer, criteria, []);
+		const result = await privateApi(orchestrator).executeWithTiering(fakeIndexer, criteria);
 
-		expect(capturedQueries.length).toBeGreaterThan(0);
-		for (const q of capturedQueries) {
-			expect(q.match(/S03/gi)?.length ?? 0).toBe(1);
-		}
-	});
-
-	it('appends the season token when the query lacks one', async () => {
-		const capturedQueries: string[] = [];
-		const indexer = buildIndexer({
-			search: async (criteria: { query?: string }) => {
-				capturedQueries.push(criteria.query ?? '');
-				return [];
-			}
-		});
-
-		const criteria = createTvCriteria({ query: 'Mr. Robot', season: 3 });
-
-		await privateApi(orchestrator).executeSeasonPackSupplementalSearch(indexer, criteria, []);
-
-		expect(capturedQueries.length).toBeGreaterThan(0);
-		for (const q of capturedQueries) {
-			expect(q).toContain('Mr. Robot S03');
-		}
+		expect(searchCalls).toHaveLength(1);
+		expect(result.releases).toHaveLength(1);
 	});
 });
 
@@ -1215,14 +1384,17 @@ describe('SearchOrchestrator.filterByTitleRelevance', () => {
 		const releases = [
 			createRelease({
 				title:
-					'War Machine (Patrick Hughes) [2026, UK, Australia, New Zealand, USA, sci-fi, action, WEB-DLRip] Dub + Sub (Rus, Eng)'
+					'War Machine (Patrick Hughes) [2026, UK, Australia, New Zealand, USA, sci-fi, action, WEB-DLRip] Dub + Sub (Rus, Eng)',
+				indexerName: 'FakeIndexer'
 			}),
 			createRelease({
-				title: 'Completely Different Movie [2026, USA, WEB-DLRip]'
+				title: 'Completely Different Movie [2026, USA, WEB-DLRip]',
+				indexerName: 'FakeIndexer'
 			})
 		];
 
 		const criteria = createMovieCriteria({
+			searchSource: 'interactive',
 			query: 'War Machine',
 			searchTitles: ['War Machine', 'Máquina de Guerra']
 		});
@@ -1235,16 +1407,19 @@ describe('SearchOrchestrator.filterByTitleRelevance', () => {
 	it('matches localized unicode movie titles when expected title is localized', () => {
 		const releases = [
 			createRelease({
-				title: 'Особенности национальной охоты [1995, комедия, DVDRip]'
+				title: 'Особенности национальной охоты [1995, комедия, DVDRip]',
+				indexerName: 'RuTracker.org'
 			}),
 			createRelease({
-				title: 'Другой фильм [1995, драма, DVDRip]'
+				title: 'Другой фильм [1997, драма, DVDRip]',
+				indexerName: 'RuTracker.org'
 			})
 		];
 
 		const criteria = createMovieCriteria({
 			query: 'Особенности национальной охоты',
-			searchTitles: ['Особенности национальной охоты']
+			searchTitles: ['Особенности национальной охоты'],
+			year: 1995
 		});
 
 		const filtered = privateApi(orchestrator).filterByIdOrTitleMatch(releases, criteria);
@@ -1270,16 +1445,19 @@ describe('SearchOrchestrator.filterByTitleRelevance', () => {
 	it('keeps TV releases with long tracker metadata when series title matches', () => {
 		const releases = [
 			createRelease({
-				title: 'The Night Agent / Ночной агент S03E10 [2026, WEB-DL 1080p, Dub, Sub Rus, Eng]'
+				title: 'The Night Agent / Ночной агент S03E10 [2026, WEB-DL 1080p, Dub, Sub Rus, Eng]',
+				indexerName: 'RuTracker.org'
 			}),
 			createRelease({
-				title: 'Different Show S03E10 [2026, WEB-DL 1080p]'
+				title: 'Different Show S03E10 [2026, WEB-DL 1080p]',
+				indexerName: 'RuTracker.org'
 			})
 		];
 
 		const criteria = createTvCriteria({
 			query: 'The Night Agent',
-			searchTitles: ['The Night Agent']
+			searchTitles: ['The Night Agent'],
+			season: 3
 		});
 
 		const filtered = privateApi(orchestrator).filterByIdOrTitleMatch(releases, criteria);
@@ -1488,7 +1666,7 @@ describe('SearchOrchestrator.filterByTitleRelevance', () => {
 describe('SearchOrchestrator season-only category filter', () => {
 	// Regression: a season-only TV search reduces the candidate pool to only season packs
 	// (via filterBySeasonEpisode). If those packs are categorized outside the TV range
-	// (Movies/XXX/Other — common on Jackett/Prowlarr and anime trackers), the broad
+	// (Movies/XXX/Other - common on Jackett/Prowlarr and anime trackers), the broad
 	// filterByCategoryMatch guard would reject every pack and yield zero results.
 	// The category guard is therefore skipped for season-only TV searches.
 	const tvCaps = { ...mockCapabilities, categories: new Map([[Category.TV_HD, 'TV/HD']]) };
@@ -1559,7 +1737,7 @@ describe('SearchOrchestrator.filterByCategoryMatch', () => {
 	const orchestrator = new SearchOrchestrator();
 
 	it('rejects a Music-categorized release for a movie search', () => {
-		// Guards against soundtracks masquerading as movies — the original purpose of this filter.
+		// Guards against soundtracks masquerading as movies - the original purpose of this filter.
 		const releases = [
 			createRelease({ title: 'Awesome Movie Soundtrack 2024', categories: [Category.AUDIO_MP3] })
 		];
@@ -1726,6 +1904,77 @@ describe('SearchOrchestrator.filterIndexers protocol filter', () => {
 	});
 });
 
+describe('SearchOrchestrator.filterIndexers respects per-indexer category restriction', () => {
+	const baseOptions = {
+		respectEnabled: false,
+		respectBackoff: false,
+		useTieredSearch: false,
+		timeout: 30000,
+		useCache: false
+	} as const;
+
+	// Natively supports both Movies and TV - the restriction below is what
+	// should narrow it, not a lack of underlying capability.
+	const bothCapabilities: IndexerCapabilities = {
+		...mockCapabilities,
+		categories: new Map([
+			[Category.MOVIES_HD, 'Movies/HD'],
+			[Category.TV_HD, 'TV/HD']
+		])
+	};
+
+	function buildRestrictedIndexer(additionalCategories: number[]): IIndexer {
+		return _createMockIndexer({
+			id: 'restricted-indexer',
+			name: 'RestrictedIndexer',
+			protocol: 'torrent',
+			capabilities: bothCapabilities as unknown as Record<string, unknown>,
+			additionalCategories,
+			enableAutomaticSearch: true,
+			enableInteractiveSearch: true
+		}) as unknown as IIndexer;
+	}
+
+	it('excludes a Movies-restricted indexer from a TV search', () => {
+		const orchestrator = new SearchOrchestrator();
+		const indexer = buildRestrictedIndexer([Category.MOVIES_HD]);
+		const criteria = createTvCriteria({ query: 'Some Show', season: 1 });
+
+		const result = privateApi(orchestrator).filterIndexers([indexer], criteria, {
+			...baseOptions,
+			searchSource: 'interactive'
+		});
+
+		expect(result.eligible).toHaveLength(0);
+	});
+
+	it('keeps the same Movies-restricted indexer eligible for a movie search', () => {
+		const orchestrator = new SearchOrchestrator();
+		const indexer = buildRestrictedIndexer([Category.MOVIES_HD]);
+		const criteria = createMovieCriteria({ query: 'Some Movie' });
+
+		const result = privateApi(orchestrator).filterIndexers([indexer], criteria, {
+			...baseOptions,
+			searchSource: 'interactive'
+		});
+
+		expect(result.eligible).toHaveLength(1);
+	});
+
+	it('does not restrict anything when no category restriction is configured', () => {
+		const orchestrator = new SearchOrchestrator();
+		const indexer = buildRestrictedIndexer([]);
+		const criteria = createTvCriteria({ query: 'Some Show', season: 1 });
+
+		const result = privateApi(orchestrator).filterIndexers([indexer], criteria, {
+			...baseOptions,
+			searchSource: 'interactive'
+		});
+
+		expect(result.eligible).toHaveLength(1);
+	});
+});
+
 describe('SearchOrchestrator.filterBySeasonEpisode movie titles with season markers', () => {
 	const orchestrator = new SearchOrchestrator();
 
@@ -1872,10 +2121,10 @@ describe('filterByCategoryMatch ID-first (audit follow-up)', () => {
 	});
 });
 
-describe('filterOutNonVideoArtifacts — title-embedded artifact tokens (audit)', () => {
+describe('filterOutNonVideoArtifacts - title-embedded artifact tokens (audit)', () => {
 	const orchestrator = new SearchOrchestrator();
 
-	it('keeps "Trailer Park Boys" — the token is part of the title, before quality', () => {
+	it('keeps "Trailer Park Boys" - the token is part of the title, before quality', () => {
 		const criteria = createTvCriteria({ query: 'Trailer Park Boys', season: 1, episode: 1 });
 		const releases = [
 			createRelease({ title: 'Trailer.Park.Boys.S01E01.1080p.WEB-DL.DD5.1.H.264' })
@@ -1893,5 +2142,161 @@ describe('filterOutNonVideoArtifacts — title-embedded artifact tokens (audit)'
 		const filtered = privateApi(orchestrator).filterOutNonVideoArtifacts(releases, criteria);
 
 		expect(filtered).toHaveLength(0);
+	});
+});
+
+describe('SearchOrchestrator.searchIndexer - quota-exceeded detection', () => {
+	it('disables the indexer via recordQuotaExceeded instead of the generic failure path', async () => {
+		const orchestrator = new SearchOrchestrator();
+		const api = privateApi(orchestrator);
+
+		const recordQuotaExceeded = vi.fn().mockResolvedValue(undefined);
+		const recordFailure = vi.fn().mockResolvedValue(undefined);
+		api.statusTracker = {
+			recordSuccess: vi.fn().mockResolvedValue(undefined),
+			recordFailure,
+			recordQuotaExceeded,
+			getStatusSync: vi.fn().mockReturnValue({ priority: 25 })
+		};
+
+		const indexer = buildIndexer({
+			search: async () => {
+				throw new Error('Indexer API error 500: Daily API request limit of 10000 reached');
+			}
+		});
+
+		const result = await api.searchIndexer(indexer, createTvCriteria({ query: 'x' }), 5000, false);
+
+		expect(recordQuotaExceeded).toHaveBeenCalledWith(
+			'test-indexer',
+			expect.stringContaining('Daily API request limit')
+		);
+		expect(recordFailure).not.toHaveBeenCalled();
+		expect(result.error).toContain('Daily API request limit');
+	});
+
+	it('still uses the generic failure path for ordinary errors', async () => {
+		const orchestrator = new SearchOrchestrator();
+		const api = privateApi(orchestrator);
+
+		const recordQuotaExceeded = vi.fn().mockResolvedValue(undefined);
+		const recordFailure = vi.fn().mockResolvedValue(undefined);
+		api.statusTracker = {
+			recordSuccess: vi.fn().mockResolvedValue(undefined),
+			recordFailure,
+			recordQuotaExceeded,
+			getStatusSync: vi.fn().mockReturnValue({ priority: 25 })
+		};
+
+		const indexer = buildIndexer({
+			search: async () => {
+				throw new Error('Connection refused');
+			}
+		});
+
+		await api.searchIndexer(indexer, createTvCriteria({ query: 'x' }), 5000, false);
+
+		expect(recordFailure).toHaveBeenCalledWith('test-indexer', 'Connection refused');
+		expect(recordQuotaExceeded).not.toHaveBeenCalled();
+	});
+});
+
+describe('SearchOrchestrator.filterIndexers profile indexer allowlist', () => {
+	const baseOptions = {
+		respectEnabled: false,
+		respectBackoff: false,
+		useTieredSearch: false,
+		timeout: 30000,
+		useCache: false
+	} as const;
+
+	const movieCapabilities: IndexerCapabilities = {
+		...mockCapabilities,
+		categories: new Map([[Category.MOVIES_HD, 'Movies/HD']])
+	};
+
+	function buildIndexerWithId(id: string, name: string): IIndexer {
+		return _createMockIndexer({
+			id,
+			name,
+			protocol: 'torrent',
+			capabilities: movieCapabilities as unknown as Record<string, unknown>,
+			enableAutomaticSearch: true,
+			enableInteractiveSearch: true
+		}) as unknown as IIndexer;
+	}
+
+	const alpha = buildIndexerWithId('alpha', 'Alpha');
+	const beta = buildIndexerWithId('beta', 'Beta');
+
+	it('treats a null allowlist as unrestricted', () => {
+		const orchestrator = new SearchOrchestrator();
+
+		const result = privateApi(orchestrator).filterIndexers(
+			[alpha, beta],
+			createMovieCriteria({ query: 'Test' }),
+			{ ...baseOptions, allowedIndexerIds: null }
+		);
+
+		expect(result.eligible.map((i) => i.id).sort()).toEqual(['alpha', 'beta']);
+		expect(result.rejected).toHaveLength(0);
+	});
+
+	it('treats an absent allowlist as unrestricted', () => {
+		const orchestrator = new SearchOrchestrator();
+
+		const result = privateApi(orchestrator).filterIndexers(
+			[alpha, beta],
+			createMovieCriteria({ query: 'Test' }),
+			{ ...baseOptions }
+		);
+
+		expect(result.eligible).toHaveLength(2);
+	});
+
+	it('restricts to the listed indexers and reports the rest as indexerFilter', () => {
+		const orchestrator = new SearchOrchestrator();
+
+		const result = privateApi(orchestrator).filterIndexers(
+			[alpha, beta],
+			createMovieCriteria({ query: 'Test' }),
+			{ ...baseOptions, allowedIndexerIds: ['alpha'] }
+		);
+
+		expect(result.eligible.map((i) => i.id)).toEqual(['alpha']);
+		expect(result.rejected).toHaveLength(1);
+		expect(result.rejected[0]).toMatchObject({
+			indexerId: 'beta',
+			reason: 'indexerFilter'
+		});
+		expect(result.rejected[0].message).toMatch(/quality profile indexer selection/i);
+	});
+
+	it('applies in automatic search, not just interactive', () => {
+		const orchestrator = new SearchOrchestrator();
+
+		const result = privateApi(orchestrator).filterIndexers(
+			[alpha, beta],
+			createMovieCriteria({ query: 'Test' }),
+			{ ...baseOptions, searchSource: 'automatic', allowedIndexerIds: ['beta'] }
+		);
+
+		expect(result.eligible.map((i) => i.id)).toEqual(['beta']);
+		expect(result.rejected).toHaveLength(1);
+		expect(result.rejected[0].reason).toBe('indexerFilter');
+	});
+
+	it('composes with criteria.indexerIds (intersection)', () => {
+		const orchestrator = new SearchOrchestrator();
+
+		const result = privateApi(orchestrator).filterIndexers(
+			[alpha, beta],
+			createMovieCriteria({ query: 'Test', indexerIds: ['alpha', 'beta'] }),
+			{ ...baseOptions, allowedIndexerIds: ['alpha'] }
+		);
+
+		expect(result.eligible.map((i) => i.id)).toEqual(['alpha']);
+		expect(result.rejected).toHaveLength(1);
+		expect(result.rejected[0].indexerId).toBe('beta');
 	});
 });

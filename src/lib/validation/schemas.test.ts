@@ -4,16 +4,15 @@ import {
 	grabRequestSchema,
 	logDownloadQuerySchema,
 	indexerUpdateSchema,
-	subtitleProviderUpdateSchema,
 	nntpServerUpdateSchema,
 	libraryUpdateSchema,
 	rootFolderUpdateSchema,
-	languageProfileUpdateSchema,
 	mediaBrowserServerUpdateSchema,
 	mediaBrowserServerTestSchema,
 	movieUpdateSchema,
 	addMovieSchema
 } from './schemas.js';
+import { subtitleProviderUpdateSchema } from '#lib/server/validation/schemas.js';
 
 describe('logDownloadQuerySchema', () => {
 	it('accepts export requests up to the supported 5000 row cap', () => {
@@ -70,7 +69,7 @@ describe('grabRequestSchema', () => {
 
 	it('ignores a legacy client "quality" object with null fields (e.g. SDR hdr: null)', () => {
 		// Regression: SDR releases parse hdr as null. The unused quality field must never
-		// break a grab again — it is stripped rather than validated.
+		// break a grab again - it is stripped rather than validated.
 		const result = grabRequestSchema.safeParse({
 			...validMovieGrab,
 			quality: { resolution: '1080p', source: 'bluray', codec: 'h264', hdr: null }
@@ -79,6 +78,35 @@ describe('grabRequestSchema', () => {
 		if (result.success) {
 			expect(result.data).not.toHaveProperty('quality');
 		}
+	});
+
+	it('accepts an explicit null magnetUrl (e.g. usenet release from the search API)', () => {
+		// Regression: the search API redacts absent URLs to null and JSON.stringify
+		// keeps the key, so `.optional()` alone rejected grabs with
+		// "expected string, received null".
+		const result = grabRequestSchema.safeParse({ ...validMovieGrab, magnetUrl: null, guid: null });
+		expect(result.success).toBe(true);
+		if (result.success) {
+			expect(result.data.magnetUrl).toBeUndefined();
+			expect(result.data.guid).toBeUndefined();
+		}
+	});
+
+	it('accepts an explicit null downloadUrl when a magnetUrl is present', () => {
+		const result = grabRequestSchema.safeParse({
+			title: 'Futurama S06E17 1080p WEB-DL',
+			mediaType: 'tv',
+			downloadUrl: null,
+			magnetUrl: 'magnet:?xt=urn:btih:deadbeef',
+			seriesId: 'series-1',
+			seasonNumber: 6
+		});
+		expect(result.success).toBe(true);
+	});
+
+	it('still rejects when both downloadUrl and magnetUrl are null', () => {
+		const result = grabRequestSchema.safeParse({ ...validMovieGrab, downloadUrl: null });
+		expect(result.success).toBe(false);
 	});
 
 	it('requires a download source (downloadUrl or magnetUrl)', () => {
@@ -141,7 +169,6 @@ describe('update schemas do not backfill defaults', () => {
 		['nntpServerUpdateSchema', nntpServerUpdateSchema, { enabled: false }],
 		['libraryUpdateSchema', libraryUpdateSchema, { isDefault: false }],
 		['rootFolderUpdateSchema', rootFolderUpdateSchema, { isDefault: false }],
-		['languageProfileUpdateSchema', languageProfileUpdateSchema, { isDefault: false }],
 		['mediaBrowserServerUpdateSchema', mediaBrowserServerUpdateSchema, { enabled: false }]
 	])('%s does not synthesize defaults for absent keys', (_name, schema, input) => {
 		expectOnlyProvidedKeys(schema as Parsable, input as Record<string, unknown>);

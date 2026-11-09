@@ -11,14 +11,14 @@
  * from info hashes only contain public trackers, which breaks private trackers.
  */
 
-import { getIndexerManager } from '$lib/server/indexers/IndexerManager';
+import { getIndexerManager } from '#lib/server/indexers/IndexerManager.js';
 import {
 	parseTorrentFile,
 	extractInfoHashFromMagnet,
 	buildMagnetFromInfoHash
-} from '$lib/server/downloadClients/utils/torrentParser';
-import { createChildLogger } from '$lib/logging';
-import { redactUrl } from '$lib/server/utils/urlSecurity';
+} from '#lib/server/downloadClients/utils/torrentParser.js';
+import { createChildLogger } from '#lib/logging/index.js';
+import { redactUrl } from '#lib/server/utils/urlSecurity.js';
 
 const logger = createChildLogger({ module: 'DownloadResolutionService' });
 
@@ -90,7 +90,7 @@ class DownloadResolutionService {
 			'Resolving download'
 		);
 
-		// Strategy 0: Public trackers — the API-provided infohash/magnet is the canonical
+		// Strategy 0: Public trackers - the API-provided infohash/magnet is the canonical
 		// download method. Their torrent-file endpoints are frequently bot-protected (e.g. YTS
 		// behind Cloudflare) and offer no benefit over a magnet for a public swarm: there is no
 		// private announce URL to preserve. Private/semi-private trackers skip this and fetch the
@@ -176,7 +176,7 @@ class DownloadResolutionService {
 
 	/**
 	 * Determine whether an indexer is a public tracker. For public trackers the API-provided
-	 * magnet/infohash is the canonical download method — there is no private announce URL to
+	 * magnet/infohash is the canonical download method - there is no private announce URL to
 	 * preserve, so we avoid their (often bot-protected) torrent-file endpoints.
 	 */
 	private async isPublicIndexer(indexerId: string): Promise<boolean> {

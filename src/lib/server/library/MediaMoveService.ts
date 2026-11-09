@@ -1,13 +1,13 @@
 import { setImmediate } from 'node:timers';
-import { createChildLogger } from '$lib/logging';
-import { db } from '$lib/server/db/index.js';
-import { movies, rootFolders, series, taskHistory } from '$lib/server/db/schema.js';
+import { createChildLogger } from '#lib/logging/index.js';
+import { db } from '#lib/server/db/index.js';
+import { movies, rootFolders, series, taskHistory } from '#lib/server/db/schema.js';
 import { inArray, eq } from 'drizzle-orm';
-import { getTaskHistoryService } from '$lib/server/tasks/TaskHistoryService.js';
-import { activityStreamEvents } from '$lib/server/activity/ActivityStreamEvents.js';
+import { getTaskHistoryService } from '#lib/server/tasks/TaskHistoryService.js';
+import { activityStreamEvents } from '#lib/server/activity/ActivityStreamEvents.js';
 import { libraryMediaEvents } from './LibraryMediaEvents.js';
-import { moveDirectoryWithinRoots } from '$lib/server/filesystem/move-helpers.js';
-import { getMediaBrowserNotifier } from '$lib/server/notifications/mediabrowser';
+import { moveDirectoryWithinRoots } from '#lib/server/filesystem/move-helpers.js';
+import { getMediaBrowserNotifier } from '#lib/server/notifications/mediabrowser/index.js';
 import { getLibraryEntityService } from './LibraryEntityService.js';
 import { libraryOperationLock } from './library-operation-lock.js';
 import { diskScanService } from './disk-scan.js';
@@ -155,7 +155,7 @@ class MediaMoveService {
 
 			// The media physically moved roots, which no scan of either root will
 			// fully explain (source scan sees a deletion, destination an addition).
-			// Notify both paths as a rename so Jellyfin/Emby/Plex reconcile —
+			// Notify both paths as a rename so Jellyfin/Emby/Plex reconcile -
 			// Deleted for the old path, Modified for the new one. Different paths,
 			// so both survive the notifier's per-path dedup.
 			const notifier = getMediaBrowserNotifier();

@@ -4,7 +4,7 @@ import {
 	getPlaybackSessionService,
 	getSessionProxyService,
 	type PlaybackSession
-} from '$lib/server/streaming';
+} from '#lib/server/streaming/index.js';
 
 function errorResponse(message: string, code: string, status: number): Response {
 	return new Response(JSON.stringify({ error: message, code }), {
@@ -53,7 +53,7 @@ async function resolveEpisodeSession(
  * GET /api/streaming/session/tv/{tmdbId}/{season}/{episode}
  *
  * Source-aware launch entry for .strm files. The path deliberately has no
- * `.m3u` suffix so media servers (Jellyfin) treat the source as remuxable —
+ * `.m3u` suffix so media servers (Jellyfin) treat the source as remuxable -
  * Jellyfin's SupportsDirectStream rejects any HTTP path containing `.m3u`.
  * Each source keeps its real format: manifests are only rewritten to retain
  * authenticated proxy URLs, while direct containers are streamed unchanged.

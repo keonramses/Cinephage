@@ -11,9 +11,9 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/MoldyTaint/Cinephage/releases"><img src="https://img.shields.io/github/v/release/MoldyTaint/Cinephage?style=flat-square" alt="GitHub Release"></a>
-  <a href="https://github.com/MoldyTaint/Cinephage/actions"><img src="https://github.com/MoldyTaint/Cinephage/workflows/CI/badge.svg?style=flat-square" alt="CI Status"></a>
-  <a href="https://github.com/MoldyTaint/Cinephage/blob/main/LICENSE"><img src="https://img.shields.io/badge/License-GPLv3-blue.svg?style=flat-square" alt="License"></a>
+  <a href="https://github.com/Cinephage/Cinephage/releases"><img src="https://img.shields.io/github/v/release/Cinephage/Cinephage?style=flat-square" alt="GitHub Release"></a>
+  <a href="https://github.com/Cinephage/Cinephage/actions"><img src="https://github.com/Cinephage/Cinephage/workflows/CI/badge.svg?style=flat-square" alt="CI Status"></a>
+  <a href="https://github.com/Cinephage/Cinephage/blob/main/LICENSE"><img src="https://img.shields.io/badge/License-GPLv3-blue.svg?style=flat-square" alt="License"></a>
   <a href="https://discord.gg/scGCBTSWEt"><img src="https://img.shields.io/discord/1449917989561303165?color=5865F2&logo=discord&logoColor=white&style=flat-square" alt="Discord"></a>
 </p>
 
@@ -32,12 +32,12 @@
 
 <table>
   <tr>
-    <td><img src="https://github.com/MoldyTaint/Cinephage-Docs/blob/main/static/img/Dashboard.png" alt="Dashboard showing active downloads and recent additions" width="400" /></td>
-    <td><img src="https://github.com/MoldyTaint/Cinephage-Docs/blob/main/static/img/Discover.png" alt="Content discovery with filtering and smart lists" width="400" /></td>
+    <td><img src="https://github.com/Cinephage/Cinephage-Docs/blob/main/static/img/Dashboard.png" alt="Dashboard showing active downloads and recent additions" width="400" /></td>
+    <td><img src="https://github.com/Cinephage/Cinephage-Docs/blob/main/static/img/Discover.png" alt="Content discovery with filtering and smart lists" width="400" /></td>
   </tr>
   <tr>
-    <td><img src="https://github.com/MoldyTaint/Cinephage-Docs/blob/main/static/img/LiveTV.png" alt="Live TV channel guide with EPG integration" width="400" /></td>
-    <td><img src="https://github.com/MoldyTaint/Cinephage-Docs/blob/main/static/img/SmartLists.png" alt="Smart list creation with auto-add rules" width="400" /></td>
+    <td><img src="https://github.com/Cinephage/Cinephage-Docs/blob/main/static/img/LiveTV.png" alt="Live TV channel guide with EPG integration" width="400" /></td>
+    <td><img src="https://github.com/Cinephage/Cinephage-Docs/blob/main/static/img/SmartLists.png" alt="Smart list creation with auto-add rules" width="400" /></td>
   </tr>
 </table>
 
@@ -96,7 +96,7 @@ Connect Stalker portals and automatically discover working MAC addresses. Full E
 
 ### Smart lists
 
-Dynamic content discovery with auto-add to library. Import from IMDb, Trakt, TMDb lists, or create custom queries. "Automatically add all 2024 movies rated 7.5+" — fully automated.
+Dynamic content discovery with auto-add to library. Import from IMDb, Trakt, TMDb lists, or create custom queries. "Automatically add all 2024 movies rated 7.5+" - fully automated.
 
 ### Everything else you'd expect
 
@@ -126,8 +126,8 @@ Cinephage runs on port 3000 by default.
 
 ```bash
 mkdir cinephage && cd cinephage
-curl -O https://raw.githubusercontent.com/MoldyTaint/Cinephage/main/docker-compose.yaml
-curl -O https://raw.githubusercontent.com/MoldyTaint/Cinephage/main/.env.example
+curl -O https://raw.githubusercontent.com/Cinephage/Cinephage/main/docker-compose.yaml
+curl -O https://raw.githubusercontent.com/Cinephage/Cinephage/main/.env.example
 cp .env.example .env
 ```
 
@@ -145,7 +145,7 @@ Open http://localhost:3000 and follow the setup wizard.
 
 **Image tags:** `latest` (stable) · `X.Y.Z`/`X.Y`/`X` (stable semver) · `dev` and `dev-YYYYMMDD-RUN` (preview)
 
-> **Note:** Persistent data lives in `./config` (created automatically). Logs go to container stdout/stderr. Never mount `/app` — it contains application code.
+> **Note:** Persistent data lives in `./config` (created automatically). Logs go to container stdout/stderr. Never mount `/app` - it contains application code.
 
 If you later access Cinephage through a hostname or reverse proxy, update `BETTER_AUTH_URL` in `.env` to that public URL. You can also set the External URL in the UI under **Settings > System**.
 
@@ -154,7 +154,7 @@ If you later access Cinephage through a hostname or reverse proxy, update `BETTE
 **Prerequisites:** Node.js 22+ · npm · git · ffmpeg (optional, for media info)
 
 ```bash
-git clone https://github.com/MoldyTaint/Cinephage.git
+git clone https://github.com/Cinephage/Cinephage.git
 cd Cinephage
 npm ci
 npm run build
@@ -230,7 +230,7 @@ Comprehensive documentation is available at **[docs.cinephage.net](https://docs.
 ## Community
 
 - **[Discord](https://discord.gg/scGCBTSWEt)** - Chat and support
-- **[GitHub Issues](https://github.com/MoldyTaint/cinephage/issues)** - Bug reports and feature requests
+- **[GitHub Issues](https://github.com/Cinephage/Cinephage/issues)** - Bug reports and feature requests
 - **[Contributing](CONTRIBUTING.md)** - Development guidelines
 
 ---
@@ -239,11 +239,11 @@ Comprehensive documentation is available at **[docs.cinephage.net](https://docs.
 
 Thanks to everyone who has contributed to Cinephage!
 
-<a href="https://github.com/MoldyTaint/Cinephage/graphs/contributors">
-  <img src="https://contrib.rocks/image?repo=MoldyTaint/Cinephage&max=100&columns=10" alt="Contributors" />
+<a href="https://github.com/Cinephage/Cinephage/graphs/contributors">
+  <img src="https://contrib.rocks/image?repo=Cinephage/Cinephage&max=100&columns=10" alt="Contributors" />
 </a>
 
-[View all contributors →](https://github.com/MoldyTaint/Cinephage/graphs/contributors)
+[View all contributors →](https://github.com/Cinephage/Cinephage/graphs/contributors)
 
 ---
 

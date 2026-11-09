@@ -9,7 +9,7 @@
 		CheckCheck,
 		XCircle,
 		Trash2
-	} from 'lucide-svelte';
+	} from '@lucide/svelte';
 	import { onMount } from 'svelte';
 	import { SvelteSet } from 'svelte/reactivity';
 	import {
@@ -17,9 +17,9 @@
 		batchApprovePortalScanResults,
 		batchIgnorePortalScanResults,
 		clearIgnoredScanResults
-	} from '$lib/api/livetv.js';
-	import * as m from '$lib/paraglide/messages.js';
-	import { formatDisplayDate } from '$lib/utils/format.js';
+	} from '#lib/api/livetv.js';
+	import * as m from '#lib/paraglide/messages.js';
+	import { formatDisplayDate } from '#lib/utils/format.js';
 
 	interface ScanResult {
 		id: string;
@@ -342,7 +342,7 @@
 							<th class="w-12">
 								<input
 									type="checkbox"
-									class="checkbox checkbox-sm"
+									class="checkbox checkbox-sm checkbox-primary"
 									checked={allSelected}
 									onchange={toggleSelectAll}
 								/>
@@ -371,7 +371,7 @@
 								<td>
 									<input
 										type="checkbox"
-										class="checkbox checkbox-sm"
+										class="checkbox checkbox-sm checkbox-primary"
 										checked={selectedIds.has(result.id)}
 										onchange={() => toggleSelection(result.id)}
 									/>

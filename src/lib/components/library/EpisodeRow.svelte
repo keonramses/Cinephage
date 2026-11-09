@@ -14,14 +14,17 @@
 		Captions,
 		CaptionsOff,
 		Trash2
-	} from 'lucide-svelte';
+	} from '@lucide/svelte';
 	import QualityBadge from './QualityBadge.svelte';
 	import AutoSearchStatus from './AutoSearchStatus.svelte';
-	import { SubtitleDisplay } from '$lib/components/subtitles';
-	import SubtitlePopover from '$lib/components/subtitles/SubtitlePopover.svelte';
-	import { normalizeLanguageCode } from '$lib/shared/languages';
-	import * as m from '$lib/paraglide/messages.js';
-	import { formatBytes, getFileName, formatDisplayDate } from '$lib/utils/format.js';
+	import SubtitleRequirementBadge from './SubtitleRequirementBadge.svelte';
+	import { SubtitleDisplay } from '#lib/components/subtitles/index.js';
+	import SubtitlePopover from '#lib/components/subtitles/SubtitlePopover.svelte';
+	import { normalizeLanguageCode } from '#lib/shared/languages.js';
+	import type { EpisodeSubtitleCounts } from '#lib/shared/language-profile.js';
+	import type { SubtitleRequirementProgress } from '#lib/utils/subtitle-status-display.js';
+	import * as m from '#lib/paraglide/messages.js';
+	import { formatBytes, getFileName, formatDisplayDate } from '#lib/utils/format.js';
 
 	interface EpisodeFile {
 		id: string;
@@ -64,8 +67,12 @@
 		runtime: number | null;
 		monitored: boolean | null;
 		hasFile: boolean | null;
+		/** Tri-state subtitle gate (null = inherit from series). */
+		wantsSubtitlesOverride?: boolean | null;
 		file: EpisodeFile | null;
 		subtitles?: Subtitle[];
+		/** Cutoff-aware requirement progress from the loader (null when no effective profile). */
+		subtitleCounts?: EpisodeSubtitleCounts | null;
 	}
 
 	interface AutoSearchResult {
@@ -80,6 +87,8 @@
 		seriesMonitored: boolean;
 		isStreamerProfile?: boolean;
 		wantsSubtitles?: boolean;
+		/** Viewer mode: hide monitor/search/delete controls, keep browsing. */
+		readOnly?: boolean;
 		selected?: boolean;
 		showCheckbox?: boolean;
 		isDownloading?: boolean;
@@ -96,6 +105,7 @@
 		onSubtitleAutoSearch?: (episode: Episode) => void;
 		onSubtitleSync?: (subtitleId: string) => void;
 		onSubtitleDelete?: (subtitleId: string) => void;
+		onSubtitleGateChange?: (episodeId: string, value: boolean | null) => void;
 		onDelete?: (episode: Episode) => void;
 	}
 
@@ -104,6 +114,7 @@
 		seriesMonitored,
 		isStreamerProfile = false,
 		wantsSubtitles = false,
+		readOnly = false,
 		selected = false,
 		showCheckbox = false,
 		isDownloading = false,
@@ -120,6 +131,7 @@
 		onSubtitleAutoSearch,
 		onSubtitleSync,
 		onSubtitleDelete,
+		onSubtitleGateChange,
 		onDelete
 	}: Props = $props();
 
@@ -168,7 +180,45 @@
 			: m.library_episodeRow_seriesUnmonitoredTooltip()
 	);
 	const hasEpisodeFile = $derived(episode.file !== null);
-	const missingSubtitles = $derived(hasEpisodeFile && allSubtitles.length === 0 && wantsSubtitles);
+	// Requirement-aware progress from the loader. Present only when the series
+	// has an effective profile; absent -> fall back to language-agnostic count.
+	const requirementCounts = $derived(episode.subtitleCounts ?? null);
+	const hasRequirementCounts = $derived(
+		requirementCounts !== null && requirementCounts.totalRequirements > 0
+	);
+	const subtitleProgress = $derived.by<SubtitleRequirementProgress | null>(() => {
+		if (!hasRequirementCounts || !requirementCounts) return null;
+		const { satisfiedCount, totalRequirements, satisfiedViaCutoff } = requirementCounts;
+		return {
+			satisfiedCount,
+			totalCount: totalRequirements,
+			satisfiedViaCutoff,
+			state:
+				satisfiedCount === 0
+					? 'missing'
+					: satisfiedCount < totalRequirements
+						? 'partial'
+						: 'satisfied'
+		};
+	});
+	const subtitleProgressTooltip = $derived.by(() => {
+		if (subtitleProgress) {
+			return m.library_badges_subtitleRequirementsTooltip({
+				satisfied: subtitleProgress.satisfiedCount,
+				total: subtitleProgress.totalCount
+			});
+		}
+		return missingSubtitles
+			? m.library_episodeRow_noSubtitlesTooltip()
+			: m.library_episodeRow_subtitleCountTooltip({ count: allSubtitles.length });
+	});
+	const missingSubtitles = $derived.by(() => {
+		if (!hasEpisodeFile) return false;
+		if (requirementCounts) {
+			return requirementCounts.totalRequirements > 0 && requirementCounts.satisfiedCount === 0;
+		}
+		return wantsSubtitles && allSubtitles.length === 0;
+	});
 
 	function formatAirDate(dateString: string | null): string {
 		if (!dateString) return m.library_episodeRow_tba();
@@ -235,7 +285,7 @@
 		<td class="w-10">
 			<input
 				type="checkbox"
-				class="checkbox checkbox-sm"
+				class="checkbox checkbox-sm checkbox-primary"
 				checked={selected}
 				onchange={handleCheckboxChange}
 			/>
@@ -257,22 +307,24 @@
 					{episode.title || m.library_episodeRow_tba()}
 				</span>
 				<div class="ml-auto flex shrink-0 items-center gap-1 sm:hidden">
-					<button
-						class="btn btn-ghost btn-xs {episode.monitored
-							? 'text-success'
-							: 'text-base-content/40'} {monitorDisabled ? 'opacity-40' : ''}"
-						onclick={handleMonitorClick}
-						disabled={monitorDisabled}
-						title={monitorTooltip}
-					>
-						{#if monitorDisabled}
-							<Lock size={14} />
-						{:else if episode.monitored}
-							<Eye size={14} />
-						{:else}
-							<EyeOff size={14} />
-						{/if}
-					</button>
+					{#if !readOnly}
+						<button
+							class="btn btn-ghost btn-xs {episode.monitored
+								? 'text-success'
+								: 'text-base-content/40'} {monitorDisabled ? 'opacity-40' : ''}"
+							onclick={handleMonitorClick}
+							disabled={monitorDisabled}
+							title={monitorTooltip}
+						>
+							{#if monitorDisabled}
+								<Lock size={14} />
+							{:else if episode.monitored}
+								<Eye size={14} />
+							{:else}
+								<EyeOff size={14} />
+							{/if}
+						</button>
+					{/if}
 
 					<AutoSearchStatus
 						status={autoSearchStatus}
@@ -280,43 +332,45 @@
 						error={autoSearchResult?.error}
 						size="xs"
 					/>
-					<div class="dropdown dropdown-end">
-						<div
-							tabindex={autoSearching ? -1 : 0}
-							role="button"
-							class="btn btn-ghost btn-xs"
-							class:btn-disabled={autoSearching}
-							title={m.library_episodeRow_searchOptions()}
-						>
-							{#if autoSearching}
-								<Loader2 size={14} class="animate-spin" />
-							{:else}
-								<Search size={14} />
-							{/if}
-							<ChevronDown size={10} />
-						</div>
-						<!-- svelte-ignore a11y_no_noninteractive_tabindex -->
-						<ul
-							tabindex="0"
-							class="menu dropdown-content z-50 w-52 rounded-box bg-base-200 p-2 shadow-lg"
-						>
-							<li class="menu-title">
-								<span>{m.library_episodeRow_mediaMenuTitle()}</span>
-							</li>
-							<li>
-								<button onclick={handleAutoSearchClick} disabled={autoSearching}>
-									<Zap size={14} />
-									{m.library_episodeRow_autoGrabBest()}
-								</button>
-							</li>
-							<li>
-								<button onclick={handleSearchClick}>
+					{#if !readOnly}
+						<div class="dropdown dropdown-end">
+							<div
+								tabindex={autoSearching ? -1 : 0}
+								role="button"
+								class="btn btn-ghost btn-xs"
+								class:btn-disabled={autoSearching}
+								title={m.library_episodeRow_searchOptions()}
+							>
+								{#if autoSearching}
+									<Loader2 size={14} class="animate-spin" />
+								{:else}
 									<Search size={14} />
-									{m.library_episodeRow_interactiveSearch()}
-								</button>
-							</li>
-						</ul>
-					</div>
+								{/if}
+								<ChevronDown size={10} />
+							</div>
+							<!-- svelte-ignore a11y_no_noninteractive_tabindex -->
+							<ul
+								tabindex="0"
+								class="menu dropdown-content z-50 w-52 rounded-box bg-base-200 p-2 shadow-lg"
+							>
+								<li class="menu-title">
+									<span>{m.library_episodeRow_mediaMenuTitle()}</span>
+								</li>
+								<li>
+									<button onclick={handleAutoSearchClick} disabled={autoSearching}>
+										<Zap size={14} />
+										{m.library_episodeRow_autoGrabBest()}
+									</button>
+								</li>
+								<li>
+									<button onclick={handleSearchClick}>
+										<Search size={14} />
+										{m.library_episodeRow_interactiveSearch()}
+									</button>
+								</li>
+							</ul>
+						</div>
+					{/if}
 					{#if episode.file?.mediaInfo}
 						<div class="dropdown dropdown-end">
 							<div tabindex="0" role="button" class="btn btn-ghost btn-xs">
@@ -368,7 +422,7 @@
 							</div>
 						</div>
 					{/if}
-					{#if onDelete}
+					{#if !readOnly && onDelete}
 						<button
 							class="btn btn-ghost btn-xs {!hasEpisodeFile && !isDownloading
 								? 'text-base-content/30'
@@ -409,7 +463,7 @@
 					{#if episode.file?.size}
 						{formatBytes(episode.file.size)}
 					{:else}
-						—
+						-
 					{/if}
 				</span>
 			</div>
@@ -426,13 +480,12 @@
 							tabindex="0"
 							role="button"
 							class="btn gap-1 btn-ghost btn-xs {missingSubtitles ? 'text-warning' : ''}"
-							title={missingSubtitles
-								? m.library_episodeRow_noSubtitlesTooltip()
-								: m.library_episodeRow_subtitleCountTooltip({ count: allSubtitles.length })}
+							title={subtitleProgressTooltip}
 						>
 							{#if allSubtitles.length > 0}
 								<Captions
 									size={12}
+									aria-hidden="true"
 									class={missingSubtitles ? 'text-warning' : 'text-base-content/50'}
 								/>
 								<span class="inline-flex min-w-0">
@@ -445,26 +498,30 @@
 										countVariant="badge"
 									/>
 								</span>
-							{:else if missingSubtitles}
-								<CaptionsOff
-									size={12}
-									class={missingSubtitles ? 'text-warning' : 'text-base-content/50'}
-								/>
+							{:else if !hasRequirementCounts}
+								<CaptionsOff size={12} aria-hidden="true" class="text-warning" />
 								<span class="text-xs text-warning"
 									>{m.library_episodeRow_subtitlesMissingLabel()}</span
 								>
 							{/if}
+							{#if subtitleProgress}
+								<SubtitleRequirementBadge progress={subtitleProgress} size="xs" />
+							{/if}
 						</div>
-						<SubtitlePopover
-							subtitles={allSubtitles}
-							hasFile={hasEpisodeFile}
-							syncingId={subtitleSyncingId}
-							deletingId={subtitleDeletingId}
-							onSync={onSubtitleSync}
-							onDelete={onSubtitleDelete}
-							onSearch={() => onSubtitleSearch?.(episode)}
-							onAutoSearch={handleSubtitleAutoSearchClick}
-						/>
+						{#if !readOnly}
+							<SubtitlePopover
+								subtitles={allSubtitles}
+								hasFile={hasEpisodeFile}
+								syncingId={subtitleSyncingId}
+								deletingId={subtitleDeletingId}
+								onSync={onSubtitleSync}
+								onDelete={onSubtitleDelete}
+								onSearch={() => onSubtitleSearch?.(episode)}
+								onAutoSearch={handleSubtitleAutoSearchClick}
+								wantsSubtitles={episode.wantsSubtitlesOverride ?? null}
+								onWantsSubtitlesChange={(value) => onSubtitleGateChange?.(episode.id, value)}
+							/>
+						{/if}
 					</div>
 				</div>
 			{/if}
@@ -496,13 +553,12 @@
 						class="btn max-w-full justify-start gap-1 btn-ghost px-1 btn-xs {missingSubtitles
 							? 'text-warning'
 							: ''}"
-						title={missingSubtitles
-							? m.library_episodeRow_noSubtitlesTooltip()
-							: m.library_episodeRow_subtitleCountTooltip({ count: allSubtitles.length })}
+						title={subtitleProgressTooltip}
 					>
 						{#if allSubtitles.length > 0}
 							<Captions
 								size={12}
+								aria-hidden="true"
 								class={missingSubtitles ? 'text-warning' : 'text-base-content/50'}
 							/>
 							<span class="inline-flex max-w-38 min-w-0">
@@ -515,31 +571,37 @@
 									countVariant="badge"
 								/>
 							</span>
-						{:else if missingSubtitles}
-							<Captions size={12} />
-							<span class="text-xs text-warning"
-								>{m.library_episodeRow_subtitlesMissingLabel()}</span
-							>
-						{:else}
-							<CaptionsOff
-								size={12}
-								class={missingSubtitles ? 'text-warning' : 'text-base-content/50'}
-							/>
-							<span class="text-xs text-base-content/40"
-								>{m.library_episodeRow_subtitlesNoneLabel()}</span
-							>
+						{:else if !hasRequirementCounts}
+							{#if missingSubtitles}
+								<Captions size={12} aria-hidden="true" />
+								<span class="text-xs text-warning"
+									>{m.library_episodeRow_subtitlesMissingLabel()}</span
+								>
+							{:else}
+								<CaptionsOff size={12} aria-hidden="true" class="text-base-content/50" />
+								<span class="text-xs text-base-content/40"
+									>{m.library_episodeRow_subtitlesNoneLabel()}</span
+								>
+							{/if}
+						{/if}
+						{#if subtitleProgress}
+							<SubtitleRequirementBadge progress={subtitleProgress} size="xs" />
 						{/if}
 					</div>
-					<SubtitlePopover
-						subtitles={allSubtitles}
-						hasFile={hasEpisodeFile}
-						syncingId={subtitleSyncingId}
-						deletingId={subtitleDeletingId}
-						onSync={onSubtitleSync}
-						onDelete={onSubtitleDelete}
-						onSearch={() => onSubtitleSearch?.(episode)}
-						onAutoSearch={handleSubtitleAutoSearchClick}
-					/>
+					{#if !readOnly}
+						<SubtitlePopover
+							subtitles={allSubtitles}
+							hasFile={hasEpisodeFile}
+							syncingId={subtitleSyncingId}
+							deletingId={subtitleDeletingId}
+							onSync={onSubtitleSync}
+							onDelete={onSubtitleDelete}
+							onSearch={() => onSubtitleSearch?.(episode)}
+							onAutoSearch={handleSubtitleAutoSearchClick}
+							wantsSubtitles={episode.wantsSubtitlesOverride ?? null}
+							onWantsSubtitlesChange={(value) => onSubtitleGateChange?.(episode.id, value)}
+						/>
+					{/if}
 				</div>
 			</div>
 		{:else if isDownloading}
@@ -562,30 +624,32 @@
 		{#if episode.file?.size}
 			{formatBytes(episode.file.size)}
 		{:else}
-			—
+			-
 		{/if}
 	</td>
 
 	<!-- Actions -->
 	<td class="hidden sm:table-cell">
 		<div class="flex flex-wrap items-center gap-1">
-			<!-- Monitor toggle -->
-			<button
-				class="btn btn-ghost btn-xs {episode.monitored
-					? 'text-success'
-					: 'text-base-content/40'} {monitorDisabled ? 'opacity-40' : ''}"
-				onclick={handleMonitorClick}
-				disabled={monitorDisabled}
-				title={monitorTooltip}
-			>
-				{#if monitorDisabled}
-					<Lock size={14} />
-				{:else if episode.monitored}
-					<Eye size={14} />
-				{:else}
-					<EyeOff size={14} />
-				{/if}
-			</button>
+			{#if !readOnly}
+				<!-- Monitor toggle -->
+				<button
+					class="btn btn-ghost btn-xs {episode.monitored
+						? 'text-success'
+						: 'text-base-content/40'} {monitorDisabled ? 'opacity-40' : ''}"
+					onclick={handleMonitorClick}
+					disabled={monitorDisabled}
+					title={monitorTooltip}
+				>
+					{#if monitorDisabled}
+						<Lock size={14} />
+					{:else if episode.monitored}
+						<Eye size={14} />
+					{:else}
+						<EyeOff size={14} />
+					{/if}
+				</button>
+			{/if}
 
 			<!-- Auto-search status indicator -->
 			<AutoSearchStatus
@@ -595,44 +659,46 @@
 				size="xs"
 			/>
 
-			<!-- Search dropdown with auto-grab and interactive options -->
-			<div class="dropdown dropdown-end">
-				<div
-					tabindex={autoSearching ? -1 : 0}
-					role="button"
-					class="btn btn-ghost btn-xs"
-					class:btn-disabled={autoSearching}
-					title="Search options"
-				>
-					{#if autoSearching}
-						<Loader2 size={14} class="animate-spin" />
-					{:else}
-						<Search size={14} />
-					{/if}
-					<ChevronDown size={10} />
-				</div>
-				<!-- svelte-ignore a11y_no_noninteractive_tabindex -->
-				<ul
-					tabindex="0"
-					class="menu dropdown-content z-50 w-52 rounded-box bg-base-200 p-2 shadow-lg"
-				>
-					<li class="menu-title">
-						<span>{m.library_episodeRow_mediaMenuTitle()}</span>
-					</li>
-					<li>
-						<button onclick={handleAutoSearchClick} disabled={autoSearching}>
-							<Zap size={14} />
-							{m.library_episodeRow_autoGrabBest()}
-						</button>
-					</li>
-					<li>
-						<button onclick={handleSearchClick}>
+			{#if !readOnly}
+				<!-- Search dropdown with auto-grab and interactive options -->
+				<div class="dropdown dropdown-end">
+					<div
+						tabindex={autoSearching ? -1 : 0}
+						role="button"
+						class="btn btn-ghost btn-xs"
+						class:btn-disabled={autoSearching}
+						title={m.library_episodeRow_searchOptions()}
+					>
+						{#if autoSearching}
+							<Loader2 size={14} class="animate-spin" />
+						{:else}
 							<Search size={14} />
-							{m.library_episodeRow_interactiveSearch()}
-						</button>
-					</li>
-				</ul>
-			</div>
+						{/if}
+						<ChevronDown size={10} />
+					</div>
+					<!-- svelte-ignore a11y_no_noninteractive_tabindex -->
+					<ul
+						tabindex="0"
+						class="menu dropdown-content z-50 w-52 rounded-box bg-base-200 p-2 shadow-lg"
+					>
+						<li class="menu-title">
+							<span>{m.library_episodeRow_mediaMenuTitle()}</span>
+						</li>
+						<li>
+							<button onclick={handleAutoSearchClick} disabled={autoSearching}>
+								<Zap size={14} />
+								{m.library_episodeRow_autoGrabBest()}
+							</button>
+						</li>
+						<li>
+							<button onclick={handleSearchClick}>
+								<Search size={14} />
+								{m.library_episodeRow_interactiveSearch()}
+							</button>
+						</li>
+					</ul>
+				</div>
+			{/if}
 
 			<!-- File info -->
 			{#if episode.file?.mediaInfo}
@@ -685,8 +751,7 @@
 				</div>
 			{/if}
 
-			<!-- Delete episode -->
-			{#if onDelete}
+			{#if !readOnly && onDelete}
 				<button
 					class="btn btn-ghost btn-xs {!hasEpisodeFile && !isDownloading
 						? 'text-base-content/30'

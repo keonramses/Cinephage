@@ -6,14 +6,18 @@
  * API v4: https://api.gestdown.info
  */
 
-import { BaseSubtitleProvider } from '../BaseProvider';
+import {
+	BaseSubtitleProvider,
+	DEFAULT_CAPABILITIES,
+	type ProviderCapabilities
+} from '../BaseProvider';
 import type {
 	SubtitleSearchCriteria,
 	SubtitleSearchResult,
 	ProviderSearchOptions,
 	LanguageCode
 } from '../../types';
-import { createChildLogger } from '$lib/logging';
+import { createChildLogger } from '#lib/logging/index.js';
 
 const logger = createChildLogger({ logDomain: 'subtitles' as const });
 import { TooManyRequests, ServiceUnavailable } from '../../errors/ProviderErrors';
@@ -29,6 +33,11 @@ import {
 const API_BASE_URL = 'https://api.gestdown.info';
 
 export class GestdownProvider extends BaseSubtitleProvider {
+	// Parses hearingImpaired per search result.
+	protected override _capabilities: ProviderCapabilities = {
+		...DEFAULT_CAPABILITIES,
+		hearingImpairedVerifiable: true
+	};
 	get implementation(): string {
 		return 'gestdown';
 	}

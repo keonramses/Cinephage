@@ -11,11 +11,16 @@
  * - Title normalization for matching
  */
 
-import { db } from '$lib/server/db/index.js';
-import { alternateTitles, movies, series } from '$lib/server/db/schema.js';
+import { db } from '#lib/server/db/index.js';
+import { alternateTitles, movies, series } from '#lib/server/db/schema.js';
 import { eq, and } from 'drizzle-orm';
-import { tmdb } from '$lib/server/tmdb.js';
-import { createChildLogger } from '$lib/logging/index.js';
+import { tmdb } from '#lib/server/tmdb.js';
+import type { MetadataTitleVariant } from '#lib/server/metadata/providers/types.js';
+import { normalizeLanguageTag } from '#lib/server/languages/normalize.js';
+import { languageMatches } from '#lib/server/languages/audio-preference.js';
+import { getLanguageSettingsService } from '#lib/server/subtitles/services/LanguageSettingsService.js';
+import { getLanguageProfileService } from '#lib/server/subtitles/services/LanguageProfileService.js';
+import { createChildLogger } from '#lib/logging/index.js';
 
 const logger = createChildLogger({ module: 'AlternateTitleService', logDomain: 'system' });
 
@@ -195,98 +200,145 @@ export function selectSearchTitles(
 	return capped;
 }
 
+/** The title fields of a movie/series row that search-title ordering reads. */
+interface SearchTitleMedia {
+	title: string;
+	originalTitle: string | null;
+	originalLanguage: string | null;
+	metadataLanguageMode: string;
+	metadataLanguageValue: string | null;
+}
+
+type SearchTitleAlternate = { title: string; country: string | null; language: string | null };
+
 /**
- * Get all search titles for a movie (primary + original + alternates).
- *
- * Order of precedence:
- * 1. Display title (user's preferred language)
- * 2. Original title (if different - covers non-English originals)
- * 3. TMDB alternates from countries matching the preferred language
- * 4. Remaining TMDB alternates (last-resort fallback for regional trackers)
- *
- * The early-exit in SearchOrchestrator means later entries are only tried
- * when the primary titles return nothing, so the ordering matters more than the count.
+ * Language the display title is written in: the item's explicit metadata
+ * language, its original language ('original' mode), or the global metadata
+ * locale.
  */
-export async function getMovieSearchTitles(
-	movieId: string,
-	preferredLanguage?: string
-): Promise<string[]> {
-	const movie = await db.query.movies.findFirst({
-		where: eq(movies.id, movieId),
-		columns: { title: true, originalTitle: true }
-	});
-
-	if (!movie) return [];
-
-	const seen = new Set<string>();
-	// Display title always goes first (user's preferred language, most likely to match standard trackers).
-	const displayTitle = movie.title;
-	seen.add(cleanTitle(displayTitle));
-	const candidatesSeen = new Set<string>(seen);
-
-	const alternates = await db.query.alternateTitles.findMany({
-		where: and(eq(alternateTitles.mediaType, 'movie'), eq(alternateTitles.mediaId, movieId)),
-		columns: { title: true, country: true }
-	});
-
-	// Split alternates: preferred-language countries first, others as fallback.
-	const preferredCountries = preferredLanguage
-		? (LANGUAGE_COUNTRIES[preferredLanguage.toLowerCase()] ?? null)
-		: null;
-	const [langAlts, otherAlts] = preferredCountries
-		? [
-				alternates.filter((a) => a.country && preferredCountries.has(a.country)),
-				alternates.filter((a) => !a.country || !preferredCountries.has(a.country))
-			]
-		: [alternates, []];
-
-	// Collect remaining candidates (original title + alternates), then sort so
-	// romanized (Latin-script) titles appear before CJK-script titles.
-	const remaining: string[] = [];
-	const pushCandidate = (t: string | null | undefined) => {
-		if (!t) return;
-		const norm = cleanTitle(t.trim());
-		if (!norm || candidatesSeen.has(norm)) return;
-		candidatesSeen.add(norm);
-		remaining.push(t.trim());
-	};
-
-	if (movie.originalTitle && movie.originalTitle !== displayTitle) {
-		pushCandidate(movie.originalTitle);
+async function resolveDisplayTitleLanguage(media: SearchTitleMedia): Promise<string | null> {
+	if (media.metadataLanguageMode === 'explicit' && media.metadataLanguageValue) {
+		return media.metadataLanguageValue;
 	}
-	for (const alt of [...langAlts, ...otherAlts]) {
-		pushCandidate(alt.title);
+	if (media.metadataLanguageMode === 'original' && media.originalLanguage) {
+		return media.originalLanguage;
 	}
-
-	const sorted = sortTitlesByScript(remaining);
-	return selectSearchTitles(displayTitle, sorted);
+	try {
+		return (await getLanguageSettingsService().get()).metadataLocale;
+	} catch {
+		return null;
+	}
 }
 
 /**
- * Get all search titles for a series (primary + original + alternates).
- * Same ordering strategy as getMovieSearchTitles.
+ * The item's title in the given language, from what is known locally: the
+ * original title, the display title, a TMDB translation, or an alternate title
+ * from a country speaking it.
  */
-export async function getSeriesSearchTitles(
-	seriesId: string,
+function findTitleInLanguage(
+	language: string,
+	media: SearchTitleMedia,
+	displayLanguage: string | null,
+	alternates: SearchTitleAlternate[]
+): string | null {
+	if (media.originalTitle && languageMatches(media.originalLanguage ?? undefined, language)) {
+		return media.originalTitle;
+	}
+	if (languageMatches(displayLanguage ?? undefined, language)) {
+		return media.title;
+	}
+	const translation = alternates.find((alt) =>
+		languageMatches(alt.language ?? undefined, language)
+	);
+	if (translation) return translation.title;
+	const countries = LANGUAGE_COUNTRIES[language.split('-')[0].toLowerCase()];
+	const regional = countries
+		? alternates.find((alt) => alt.country && countries.has(alt.country))
+		: undefined;
+	return regional?.title ?? null;
+}
+
+/**
+ * Titles to search first, following the item's language profile: the
+ * original title when "prefer original audio track" is on, then a title in
+ * each preferred audio language, in profile order. Releases are named after
+ * the audio they carry (an Italian dub is usually released under its Italian
+ * title), so the language you want to hear decides which title finds it.
+ *
+ * Non-Latin titles (kanji, Cyrillic…) are left to the general ordering:
+ * general trackers name releases in Latin script, and the regional trackers
+ * that want native-script titles get them reordered per indexer by the
+ * SearchOrchestrator. Empty when the item has no language profile, which
+ * keeps the display title first.
+ */
+async function resolveProfileLeadingTitles(
+	mediaType: 'movie' | 'series',
+	mediaId: string,
+	media: SearchTitleMedia,
+	alternates: SearchTitleAlternate[]
+): Promise<string[]> {
+	let audio;
+	try {
+		const profileService = getLanguageProfileService();
+		const profile =
+			mediaType === 'movie'
+				? await profileService.getProfileForMovie(mediaId)
+				: await profileService.getProfileForSeries(mediaId);
+		audio = profile?.audio;
+	} catch (error) {
+		logger.warn(
+			{ mediaType, mediaId, error: error instanceof Error ? error.message : String(error) },
+			'Failed to resolve language profile for search titles, using display title first'
+		);
+	}
+	if (!audio) return [];
+
+	const languages = [
+		...(audio.preferOriginal && media.originalLanguage ? [media.originalLanguage] : []),
+		...audio.languages
+	];
+	if (languages.length === 0) return [];
+
+	const displayLanguage = await resolveDisplayTitleLanguage(media);
+	const titles: string[] = [];
+	for (const language of languages) {
+		const title = findTitleInLanguage(language, media, displayLanguage, alternates);
+		if (title && !containsNonLatinScript(title)) titles.push(title);
+	}
+	return titles;
+}
+
+/**
+ * Order a movie/series' search titles.
+ *
+ * Order of precedence:
+ * 1. Titles in the languages the item's language profile prefers
+ *    (see resolveProfileLeadingTitles)
+ * 2. Display title (metadata language)
+ * 3. Original title (if different - covers non-English originals)
+ * 4. TMDB alternates from countries matching the preferred language
+ * 5. Remaining TMDB alternates (last-resort fallback for regional trackers)
+ *
+ * The early exit in SearchOrchestrator means later entries are only tried
+ * when earlier titles find no matching release, so the ordering matters more
+ * than the count.
+ */
+async function buildSearchTitles(
+	mediaType: 'movie' | 'series',
+	mediaId: string,
+	media: SearchTitleMedia,
 	preferredLanguage?: string
 ): Promise<string[]> {
-	const show = await db.query.series.findFirst({
-		where: eq(series.id, seriesId),
-		columns: { title: true, originalTitle: true }
-	});
-
-	if (!show) return [];
-
-	const candidatesSeen = new Set<string>();
-	// Display title always goes first (user's preferred language).
-	const displayTitle = show.title;
-	candidatesSeen.add(cleanTitle(displayTitle));
-
 	const alternates = await db.query.alternateTitles.findMany({
-		where: and(eq(alternateTitles.mediaType, 'series'), eq(alternateTitles.mediaId, seriesId)),
-		columns: { title: true, country: true }
+		where: and(eq(alternateTitles.mediaType, mediaType), eq(alternateTitles.mediaId, mediaId)),
+		columns: { title: true, country: true, language: true }
 	});
 
+	const leading = await resolveProfileLeadingTitles(mediaType, mediaId, media, alternates);
+	const primary = leading[0] ?? media.title;
+	const candidatesSeen = new Set<string>([cleanTitle(primary)]);
+
+	// Split alternates: preferred-language countries first, others as fallback.
 	const preferredCountries = preferredLanguage
 		? (LANGUAGE_COUNTRIES[preferredLanguage.toLowerCase()] ?? null)
 		: null;
@@ -308,63 +360,110 @@ export async function getSeriesSearchTitles(
 		remaining.push(t.trim());
 	};
 
-	if (show.originalTitle && show.originalTitle !== displayTitle) {
-		pushCandidate(show.originalTitle);
+	for (const title of leading.slice(1)) {
+		pushCandidate(title);
 	}
+	pushCandidate(media.title);
+	pushCandidate(media.originalTitle);
 	for (const alt of [...langAlts, ...otherAlts]) {
 		pushCandidate(alt.title);
 	}
 
 	const sorted = sortTitlesByScript(remaining);
-	return selectSearchTitles(displayTitle, sorted);
+	return selectSearchTitles(primary, sorted);
+}
+
+const SEARCH_TITLE_MEDIA_COLUMNS = {
+	title: true,
+	originalTitle: true,
+	originalLanguage: true,
+	metadataLanguageMode: true,
+	metadataLanguageValue: true
+} as const;
+
+/**
+ * Get all search titles for a movie (profile-preferred + display + original +
+ * alternates). See buildSearchTitles for the ordering.
+ */
+export async function getMovieSearchTitles(
+	movieId: string,
+	preferredLanguage?: string
+): Promise<string[]> {
+	const movie = await db.query.movies.findFirst({
+		where: eq(movies.id, movieId),
+		columns: SEARCH_TITLE_MEDIA_COLUMNS
+	});
+
+	if (!movie) return [];
+	return buildSearchTitles('movie', movieId, movie, preferredLanguage);
 }
 
 /**
- * Fetch and store alternate titles from TMDB for a movie
+ * Get all search titles for a series (profile-preferred + display + original +
+ * alternates). Same ordering as getMovieSearchTitles.
+ */
+export async function getSeriesSearchTitles(
+	seriesId: string,
+	preferredLanguage?: string
+): Promise<string[]> {
+	const show = await db.query.series.findFirst({
+		where: eq(series.id, seriesId),
+		columns: SEARCH_TITLE_MEDIA_COLUMNS
+	});
+
+	if (!show) return [];
+	return buildSearchTitles('series', seriesId, show, preferredLanguage);
+}
+
+/**
+ * Fetch and store alternate titles from TMDB for a movie.
+ *
+ * Two complementary TMDB sources are stored:
+ * 1. `/alternative_titles` - country-tagged rows (`language` stays NULL because
+ *    TMDB supplies only an ISO 3166-1 country on that endpoint, never a language).
+ * 2. `/translations` - language-tagged rows (`country` NULL, `language` set from
+ *    the translation's ISO 639-1 code).
+ *
+ * Each source fails independently soft: a translations outage never discards
+ * the country rows and vice versa.
  */
 export async function fetchAndStoreMovieAlternateTitles(
 	movieId: string,
 	tmdbId: number
 ): Promise<number> {
+	let inserted = 0;
+
 	try {
 		const response = await tmdb.getMovieAlternateTitles(tmdbId);
 
-		if (!response.titles || response.titles.length === 0) {
-			return 0;
-		}
-
-		// Get existing TMDB titles for this movie to avoid duplicates
-		const existing = await db.query.alternateTitles.findMany({
-			where: and(
-				eq(alternateTitles.mediaType, 'movie'),
-				eq(alternateTitles.mediaId, movieId),
-				eq(alternateTitles.source, 'tmdb')
-			),
-			columns: { title: true }
-		});
-		const existingTitles = new Set(existing.map((e) => e.title));
-
-		// Insert new titles
-		let inserted = 0;
-		for (const alt of response.titles) {
-			if (!alt.title || existingTitles.has(alt.title)) continue;
-
-			await db.insert(alternateTitles).values({
-				mediaType: 'movie',
-				mediaId: movieId,
-				title: alt.title,
-				cleanTitle: cleanTitle(alt.title),
-				source: 'tmdb',
-				country: alt.iso_3166_1 || null
+		if (response.titles && response.titles.length > 0) {
+			// Get existing TMDB titles for this movie to avoid duplicates
+			const existing = await db.query.alternateTitles.findMany({
+				where: and(
+					eq(alternateTitles.mediaType, 'movie'),
+					eq(alternateTitles.mediaId, movieId),
+					eq(alternateTitles.source, 'tmdb')
+				),
+				columns: { title: true }
 			});
-			inserted++;
-		}
+			const existingTitles = new Set(existing.map((e) => e.title));
 
-		if (inserted > 0) {
-			logger.debug({ movieId, tmdbId }, `Stored ${inserted} alternate titles for movie`);
-		}
+			for (const alt of response.titles) {
+				if (!alt.title || existingTitles.has(alt.title)) continue;
 
-		return inserted;
+				await db.insert(alternateTitles).values({
+					mediaType: 'movie',
+					mediaId: movieId,
+					title: alt.title,
+					cleanTitle: cleanTitle(alt.title),
+					source: 'tmdb',
+					country: alt.iso_3166_1 || null
+					// language stays NULL: alternative_titles identifies countries only.
+				});
+				existingTitles.add(alt.title);
+				inserted++;
+			}
+		}
 	} catch (error) {
 		logger.warn(
 			{
@@ -374,56 +473,69 @@ export async function fetchAndStoreMovieAlternateTitles(
 			},
 			'Failed to fetch movie alternate titles'
 		);
-		return 0;
 	}
+
+	try {
+		inserted += await storeTranslationTitleRows('movie', movieId, tmdbId);
+	} catch (error) {
+		logger.warn(
+			{
+				movieId,
+				tmdbId,
+				error: error instanceof Error ? error.message : String(error)
+			},
+			'Failed to store movie translation titles'
+		);
+	}
+
+	if (inserted > 0) {
+		logger.debug({ movieId, tmdbId }, `Stored ${inserted} alternate titles for movie`);
+	}
+
+	return inserted;
 }
 
 /**
- * Fetch and store alternate titles from TMDB for a TV series
+ * Fetch and store alternate titles from TMDB for a TV series.
+ * Same dual-source strategy as fetchAndStoreMovieAlternateTitles.
  */
 export async function fetchAndStoreSeriesAlternateTitles(
 	seriesId: string,
 	tmdbId: number
 ): Promise<number> {
+	let inserted = 0;
+
 	try {
 		const response = await tmdb.getTvAlternateTitles(tmdbId);
 
-		if (!response.results || response.results.length === 0) {
-			return 0;
-		}
-
-		// Get existing TMDB titles for this series to avoid duplicates
-		const existing = await db.query.alternateTitles.findMany({
-			where: and(
-				eq(alternateTitles.mediaType, 'series'),
-				eq(alternateTitles.mediaId, seriesId),
-				eq(alternateTitles.source, 'tmdb')
-			),
-			columns: { title: true }
-		});
-		const existingTitles = new Set(existing.map((e) => e.title));
-
-		// Insert new titles
-		let inserted = 0;
-		for (const alt of response.results) {
-			if (!alt.title || existingTitles.has(alt.title)) continue;
-
-			await db.insert(alternateTitles).values({
-				mediaType: 'series',
-				mediaId: seriesId,
-				title: alt.title,
-				cleanTitle: cleanTitle(alt.title),
-				source: 'tmdb',
-				country: alt.iso_3166_1 || null
+		if (response.results && response.results.length > 0) {
+			// Get existing TMDB titles for this series to avoid duplicates
+			const existing = await db.query.alternateTitles.findMany({
+				where: and(
+					eq(alternateTitles.mediaType, 'series'),
+					eq(alternateTitles.mediaId, seriesId),
+					eq(alternateTitles.source, 'tmdb')
+				),
+				columns: { title: true }
 			});
-			inserted++;
-		}
+			const existingTitles = new Set(existing.map((e) => e.title));
 
-		if (inserted > 0) {
-			logger.debug({ seriesId, tmdbId }, `Stored ${inserted} alternate titles for series`);
-		}
+			for (const alt of response.results) {
+				if (!alt.title || existingTitles.has(alt.title)) continue;
 
-		return inserted;
+				await db.insert(alternateTitles).values({
+					mediaType: 'series',
+					mediaId: seriesId,
+					title: alt.title,
+					cleanTitle: cleanTitle(alt.title),
+					source: 'tmdb',
+					country: alt.iso_3166_1 || null
+					// language stays NULL: alternative_titles identifies countries only.
+				});
+				existingTitles.add(alt.title);
+				inserted++;
+			}
+		}
 	} catch (error) {
 		logger.warn(
 			{
@@ -432,6 +544,185 @@ export async function fetchAndStoreSeriesAlternateTitles(
 				error: error instanceof Error ? error.message : String(error)
 			},
 			'Failed to fetch series alternate titles'
+		);
+	}
+
+	try {
+		inserted += await storeTranslationTitleRows('series', seriesId, tmdbId);
+	} catch (error) {
+		logger.warn(
+			{
+				seriesId,
+				tmdbId,
+				error: error instanceof Error ? error.message : String(error)
+			},
+			'Failed to store series translation titles'
+		);
+	}
+
+	if (inserted > 0) {
+		logger.debug({ seriesId, tmdbId }, `Stored ${inserted} alternate titles for series`);
+	}
+
+	return inserted;
+}
+
+/**
+ * Store one language-tagged alternate-title row per TMDB translation that
+ * carries a title (movies: `data.title`, TV: `data.name`).
+ *
+ * Dedupe rules:
+ * - skip when a row with the same mediaType+mediaId+cleanTitle+language already
+ *   exists (any source) - makes refetches idempotent;
+ * - skip translations whose cleanTitle equals the media's own display or
+ *   original title (the localized variants of those are already covered).
+ *
+ * Rows are stored with source 'tmdb' and country NULL - the country rows from
+ * /alternative_titles remain the only country-tagged rows.
+ */
+async function storeTranslationTitleRows(
+	mediaType: 'movie' | 'series',
+	mediaId: string,
+	tmdbId: number
+): Promise<number> {
+	const response =
+		mediaType === 'movie'
+			? await tmdb.getMovieTranslations(tmdbId)
+			: await tmdb.getTvTranslations(tmdbId);
+	const translations = response.translations ?? [];
+	if (translations.length === 0) return 0;
+
+	// Own-title noise guard: translations equal to the display/original title
+	// carry no new search or match value.
+	const media =
+		mediaType === 'movie'
+			? await db.query.movies.findFirst({
+					where: eq(movies.id, mediaId),
+					columns: { title: true, originalTitle: true }
+				})
+			: await db.query.series.findFirst({
+					where: eq(series.id, mediaId),
+					columns: { title: true, originalTitle: true }
+				});
+	const ownTitles = new Set<string>();
+	for (const title of [media?.title, media?.originalTitle]) {
+		const normalized = title ? cleanTitle(title) : '';
+		if (normalized) ownTitles.add(normalized);
+	}
+
+	// (cleanTitle, language) pairs across ALL sources, so a translation never
+	// duplicates an existing user/anilist/mal row for the same language.
+	const existing = await db.query.alternateTitles.findMany({
+		where: and(eq(alternateTitles.mediaType, mediaType), eq(alternateTitles.mediaId, mediaId)),
+		columns: { cleanTitle: true, language: true }
+	});
+	const seen = new Set(existing.map((e) => `${e.cleanTitle}\u0000${e.language ?? ''}`));
+
+	let inserted = 0;
+	for (const translation of translations) {
+		const title = (translation.data?.title ?? translation.data?.name ?? '').trim();
+		// Canonicalize through the server boundary so alias variants (iw/he,
+		// cn/zh-Hans, ...) dedupe against each other; unknown inputs become und
+		// and are skipped rather than stored raw.
+		const language = normalizeLanguageTag(translation.iso_639_1);
+		if (!title || language === 'und') continue;
+
+		const normalized = cleanTitle(title);
+		if (!normalized || ownTitles.has(normalized)) continue;
+
+		const key = `${normalized}\u0000${language}`;
+		if (seen.has(key)) continue;
+		seen.add(key);
+
+		await db.insert(alternateTitles).values({
+			mediaType,
+			mediaId,
+			title,
+			cleanTitle: normalized,
+			source: 'tmdb',
+			language,
+			country: null
+		});
+		inserted++;
+	}
+
+	return inserted;
+}
+
+/**
+ * Store title variants from an anime provider match (AniList or MAL) as
+ * alternate titles.
+ *
+ * Idempotent: a variant is skipped when a row with the same
+ * mediaType+mediaId+source+cleanTitle already exists, so repeated refreshes
+ * and re-links never duplicate rows. Variants from different sources
+ * ('anilist' vs 'mal' vs 'tmdb') may legitimately coexist even when their
+ * titles normalize identically.
+ *
+ * Language policy: variants keep `language` NULL unless the provider itself
+ * supplies a language code - neither AniList nor Jikan/MAL does. Their kind
+ * labels ('romaji', 'native', 'Japanese', …) are script/kind annotations, not
+ * language codes, and are never mapped onto one.
+ */
+export async function storeProviderTitleVariants(
+	mediaType: 'movie' | 'series',
+	mediaId: string,
+	source: 'anilist' | 'mal',
+	variants: MetadataTitleVariant[]
+): Promise<number> {
+	const usable = variants.filter((variant) => typeof variant?.title === 'string');
+	if (usable.length === 0) return 0;
+
+	try {
+		const existing = await db.query.alternateTitles.findMany({
+			where: and(
+				eq(alternateTitles.mediaType, mediaType),
+				eq(alternateTitles.mediaId, mediaId),
+				eq(alternateTitles.source, source)
+			),
+			columns: { cleanTitle: true }
+		});
+		const seen = new Set(existing.map((e) => e.cleanTitle));
+
+		let inserted = 0;
+		for (const variant of usable) {
+			const title = variant.title.trim();
+			const normalized = cleanTitle(title);
+			if (!title || !normalized || seen.has(normalized)) continue;
+			seen.add(normalized);
+
+			await db.insert(alternateTitles).values({
+				mediaType,
+				mediaId,
+				title,
+				cleanTitle: normalized,
+				source,
+				// Only set when the provider supplies a real language code;
+				// canonicalized so alias codes dedupe consistently.
+				language: variant.language ? normalizeLanguageTag(variant.language) : null,
+				// e.g. AniList countryOfOrigin on the native title.
+				country: variant.country ?? null
+			});
+			inserted++;
+		}
+
+		if (inserted > 0) {
+			logger.debug(
+				{ mediaType, mediaId, source, count: inserted },
+				`Stored ${inserted} ${source} title variants`
+			);
+		}
+
+		return inserted;
+	} catch (error) {
+		logger.warn(
+			{
+				mediaType,
+				mediaId,
+				source,
+				error: error instanceof Error ? error.message : String(error)
+			},
+			'Failed to store provider title variants'
 		);
 		return 0;
 	}

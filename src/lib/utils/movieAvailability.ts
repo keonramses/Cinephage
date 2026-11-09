@@ -1,6 +1,6 @@
 import { resolveReleaseStage, type ReleaseStage } from './releaseStage.js';
 import { DOWNLOADABLE_TYPES } from './releaseTypes.js';
-import { RELEASE } from '$lib/config/constants.js';
+import { RELEASE } from '#lib/config/constants.js';
 
 export type MovieAvailabilityLevel = 'announced' | 'inCinemas' | 'released';
 
@@ -180,7 +180,7 @@ export function isMovieAvailableForSearch(
 		releaseDate?: string | null;
 		digitalReleaseDate?: string | null;
 		physicalReleaseDate?: string | null;
-		/** Earliest downloadable (digital/physical/TV) date — covers straight-to-streaming. */
+		/** Earliest downloadable (digital/physical/TV) date - covers straight-to-streaming. */
 		downloadReleaseDate?: string | null;
 		availabilityDelay?: number;
 	},

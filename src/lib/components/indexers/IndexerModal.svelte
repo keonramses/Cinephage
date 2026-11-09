@@ -1,9 +1,9 @@
 <script lang="ts">
-	import { X, Loader2, Globe, Lock, Zap } from 'lucide-svelte';
-	import type { IndexerDefinition, Indexer, IndexerFormData } from '$lib/types/indexer';
-	import { computeUIHints } from '$lib/types/indexer';
-	import ModalWrapper from '$lib/components/ui/modal/ModalWrapper.svelte';
-	import { TestResult } from '$lib/components/ui/modal';
+	import { X, Loader2, Globe, Lock, Zap } from '@lucide/svelte';
+	import type { IndexerDefinition, Indexer, IndexerFormData } from '#lib/types/indexer.js';
+	import { computeUIHints } from '#lib/types/indexer.js';
+	import ModalWrapper from '#lib/components/ui/modal/ModalWrapper.svelte';
+	import { TestResult } from '#lib/components/ui/modal/index.js';
 	import IndexerDefinitionPicker from './IndexerDefinitionPicker.svelte';
 	import IndexerFormStreaming from './IndexerFormStreaming.svelte';
 	import IndexerFormRegular from './IndexerFormRegular.svelte';
@@ -44,6 +44,7 @@
 	let url = $state('');
 	let enabled = $state(true);
 	let priority = $state(25);
+	let rateLimitPerMinute = $state<number | null>(null);
 	let settings = $state<Record<string, string>>({});
 	let hasSensitiveSettings = $state<Record<string, boolean>>({});
 
@@ -97,9 +98,9 @@
 	const isProwlarrManaged = $derived.by(() => {
 		if (mode !== 'edit' || !indexer || !prowlarrBaseUrl) return false;
 		if (indexer.definitionId !== 'prowlarr') return false;
-		// Aggregate indexer — identified by settings flag
+		// Aggregate indexer - identified by settings flag
 		if (indexer.settings?.aggregate === 'true') return true;
-		// Individual indexer — baseUrl must end with a numeric Prowlarr ID
+		// Individual indexer - baseUrl must end with a numeric Prowlarr ID
 		const base = prowlarrBaseUrl.replace(/\/+$/, '');
 		if (!indexer.baseUrl.startsWith(base + '/')) return false;
 		const suffix = indexer.baseUrl.slice(base.length + 1).replace(/\/+$/, '');
@@ -205,6 +206,7 @@
 			url = indexer?.baseUrl ?? def?.siteUrl ?? '';
 			enabled = indexer?.enabled ?? true;
 			priority = indexer?.priority ?? 25;
+			rateLimitPerMinute = indexer?.rateLimitPerMinute ?? null;
 			settings = { ...(indexer?.settings ?? {}) };
 			hasSensitiveSettings = indexer?.sensitiveSettings ?? {};
 
@@ -250,6 +252,7 @@
 			alternateUrls,
 			enabled,
 			priority,
+			rateLimitPerMinute,
 			protocol: effectiveProtocol,
 			settings,
 			enableAutomaticSearch,
@@ -261,7 +264,7 @@
 			rejectDeadTorrents,
 			rejectPasswordProtected,
 			minimumCompletionPercentage,
-			// Only include for newznab/torznab — [] = open search, [...] = restrict, absent = no change
+			// Only include for newznab/torznab - [] = open search, [...] = restrict, absent = no change
 			additionalCategories: isNewznabLike ? additionalCategories : undefined
 		};
 	}
@@ -461,6 +464,7 @@
 				{url}
 				urlError={urlError()}
 				{priority}
+				{rateLimitPerMinute}
 				{enabled}
 				{settings}
 				{hasSensitiveSettings}
@@ -487,6 +491,7 @@
 				onUrlChange={(v) => (url = v)}
 				onUrlBlur={() => (urlTouched = true)}
 				onPriorityChange={(v) => (priority = v)}
+				onRateLimitPerMinuteChange={(v) => (rateLimitPerMinute = v)}
 				onEnabledChange={(v) => (enabled = v)}
 				onSettingsChange={(s) => (settings = s)}
 				onAutomaticSearchChange={(v) => (enableAutomaticSearch = v)}

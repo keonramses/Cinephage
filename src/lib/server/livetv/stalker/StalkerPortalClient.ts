@@ -10,7 +10,7 @@
  * 3. API calls - all require proper headers with token
  */
 
-import { createChildLogger } from '$lib/logging';
+import { createChildLogger } from '#lib/logging/index.js';
 import { randomBytes } from 'node:crypto';
 
 const logger = createChildLogger({ logDomain: 'livetv' as const });
@@ -20,7 +20,7 @@ import type {
 	StalkerCategory,
 	StalkerChannel,
 	EpgProgramRaw
-} from '$lib/types/livetv';
+} from '#lib/types/livetv.js';
 
 const REQUEST_TIMEOUT = 30000; // 30 seconds (increased for slow portals)
 
@@ -54,7 +54,7 @@ export class StalkerProtocolError extends Error {
 }
 
 /**
- * HTTP 456/459 — Max connections reached or IP lock.
+ * HTTP 456/459 - Max connections reached or IP lock.
  * Retrying later may work, but immediate retries won't help.
  */
 export class StalkerMaxConnectionsError extends StalkerProtocolError {
@@ -65,7 +65,7 @@ export class StalkerMaxConnectionsError extends StalkerProtocolError {
 }
 
 /**
- * HTTP 458 — Account blocked/banned by portal.
+ * HTTP 458 - Account blocked/banned by portal.
  * No retry will help; account is dead.
  */
 export class StalkerAccountBlockedError extends StalkerProtocolError {
@@ -76,7 +76,7 @@ export class StalkerAccountBlockedError extends StalkerProtocolError {
 }
 
 /**
- * HTTP 462 — Token/play_token already used (single-use token consumed).
+ * HTTP 462 - Token/play_token already used (single-use token consumed).
  * Must request a new token via create_link; retrying the same URL is pointless.
  */
 export class StalkerTokenUsedError extends StalkerProtocolError {
@@ -196,10 +196,28 @@ export interface StalkerPortalConfig {
 	deviceId2: string;
 	model: string;
 	timezone: string;
+	/**
+	 * Portal UI language sent as the `stb_lang` cookie and `Accept-Language`
+	 * header. Expected as a 2-letter ISO 639-1 code; regional/script variants
+	 * are reduced to their base tag. Defaults to 'en'.
+	 */
+	language?: string;
 	token?: string;
 	username?: string;
 	password?: string;
 	endpoint?: string;
+}
+
+/** Language used when the account config does not specify one. */
+const DEFAULT_STALKER_LANGUAGE = 'en';
+
+/**
+ * Reduce a configured language to the 2-letter base code Stalker portals
+ * understand (`pt-BR` → `pt`), falling back to 'en' for anything unusable.
+ */
+function normalizeStalkerLanguage(value: string | undefined): string {
+	const base = value?.trim().toLowerCase().split('-')[0] ?? '';
+	return /^[a-z]{2}$/.test(base) ? base : DEFAULT_STALKER_LANGUAGE;
 }
 
 interface StalkerResponse<T> {
@@ -350,11 +368,17 @@ export class StalkerPortalClient {
 		this.config = {
 			...config,
 			portalUrl: config.portalUrl.replace(/\/+$/, ''),
-			macAddress: config.macAddress.toUpperCase()
+			macAddress: config.macAddress.toUpperCase(),
+			language: normalizeStalkerLanguage(config.language)
 		};
 
 		// Generate token if not provided
 		this.token = config.token || generateToken();
+	}
+
+	/** Portal UI language (stb_lang / Accept-Language), normalized to 2 letters. */
+	private get language(): string {
+		return this.config.language ?? DEFAULT_STALKER_LANGUAGE;
 	}
 
 	/**
@@ -375,16 +399,16 @@ export class StalkerPortalClient {
 	 * Get the portal API endpoint URL.
 	 *
 	 * Supports two endpoint types:
-	 *   — "portal.php" (default): /c/portal.php or /portal.php
-	 *   — "stalker_portal/server/load.php": for portals that use
+	 *   - "portal.php" (default): /c/portal.php or /portal.php
+	 *   - "stalker_portal/server/load.php": for portals that use
 	 *     the stalker_portal directory structure
 	 *
 	 * Auto-detection heuristic:
-	 *   — If `config.endpoint` is explicitly set, use it.
-	 *   — If the portal URL path contains "/stalker_portal/", use
+	 *   - If `config.endpoint` is explicitly set, use it.
+	 *   - If the portal URL path contains "/stalker_portal/", use
 	 *     the load.php endpoint (these portals consistently return
 	 *     404 on /c/portal.php).
-	 *   — Otherwise, fall back to the legacy portal.php logic.
+	 *   - Otherwise, fall back to the legacy portal.php logic.
 	 */
 	private getAlternativeEndpoint(primaryEndpoint: string): string | null {
 		const url = this.config.portalUrl.trim().replace(/\/+$/, '');
@@ -439,7 +463,7 @@ export class StalkerPortalClient {
 		const parts = [
 			`sn=${encodeURIComponent(this.config.serialNumber)}`,
 			`mac=${encodeURIComponent(this.config.macAddress)}`,
-			'stb_lang=en',
+			`stb_lang=${this.language}`,
 			`timezone=${encodeURIComponent(this.config.timezone)}`
 		];
 		return parts.join('; ') + ';';
@@ -453,7 +477,7 @@ export class StalkerPortalClient {
 			'User-Agent': STB_USER_AGENT,
 			'X-User-Agent': `Model: ${this.config.model}; Link: Ethernet`,
 			Accept: '*/*',
-			'Accept-Language': 'en',
+			'Accept-Language': this.language,
 			Cookie: this.getCookie()
 		};
 	}
@@ -466,7 +490,7 @@ export class StalkerPortalClient {
 			'User-Agent': STB_USER_AGENT,
 			'X-User-Agent': `Model: ${this.config.model}; Link: Ethernet`,
 			Accept: '*/*',
-			'Accept-Language': 'en',
+			'Accept-Language': this.language,
 			Authorization: `Bearer ${this.token}`,
 			Cookie: this.getCookie()
 		};
@@ -475,7 +499,7 @@ export class StalkerPortalClient {
 	/**
 	 * Get headers for streaming from backend servers.
 	 * Stream URLs from create_link are self-authenticating via play_token in the URL.
-	 * Backend stream servers don't understand portal auth headers (Authorization, Cookie) —
+	 * Backend stream servers don't understand portal auth headers (Authorization, Cookie) -
 	 * only User-Agent is needed. Sending portal headers to backend servers can cause errors.
 	 */
 	getStreamHeaders(): HeadersInit {
@@ -723,7 +747,7 @@ export class StalkerPortalClient {
 			throw new Error('Authentication failed: device ID auth rejected');
 		}
 
-		// Cache the full profile from auth — avoids redundant get_profile calls
+		// Cache the full profile from auth - avoids redundant get_profile calls
 		this.lastProfile = result;
 
 		logger.debug(
@@ -746,7 +770,7 @@ export class StalkerPortalClient {
 
 	/**
 	 * Create a stream link for a channel.
-	 * Returns a URL with a single-use play_token — each URL can only be used once.
+	 * Returns a URL with a single-use play_token - each URL can only be used once.
 	 * Does NOT use _retryWithBackoff because each create_link call returns a fresh
 	 * token; retrying the same request just wastes time on non-retryable errors.
 	 *
@@ -765,7 +789,7 @@ export class StalkerPortalClient {
 				cmd: cmd
 			});
 		} catch (error) {
-			// Non-retryable errors — don't attempt re-auth
+			// Non-retryable errors - don't attempt re-auth
 			if (error instanceof StalkerAccountBlockedError) throw error;
 			if (error instanceof StalkerTokenUsedError) throw error;
 			if (error instanceof StalkerMaxConnectionsError) throw error;
@@ -843,7 +867,7 @@ export class StalkerPortalClient {
 					},
 					'[StalkerPortal] Watchdog keepalive failed'
 				);
-				// Session likely expired — mark as unauthenticated so next request re-auths
+				// Session likely expired - mark as unauthenticated so next request re-auths
 				this.authenticated = false;
 				this.stopWatchdog();
 			});
@@ -878,7 +902,7 @@ export class StalkerPortalClient {
 	}
 
 	/**
-	 * Stop the client — clears watchdog timer and marks as unauthenticated.
+	 * Stop the client - clears watchdog timer and marks as unauthenticated.
 	 * Should be called when the client is no longer needed.
 	 */
 	stop(): void {
@@ -931,7 +955,7 @@ export class StalkerPortalClient {
 	/**
 	 * Get fresh stream URL for a channel by stalker_id.
 	 * Always uses create_link with a normalized localhost cmd format.
-	 * This is the format the portal expects — passing full URLs causes
+	 * This is the format the portal expects - passing full URLs causes
 	 * the portal to strip the stream ID, returning broken URLs.
 	 */
 	async getFreshStreamUrl(
@@ -1191,7 +1215,7 @@ export class StalkerPortalClient {
 	/**
 	 * Verify that a stream is actually reachable by picking a random channel,
 	 * calling create_link, and making a HEAD request to the resulting URL.
-	 * This is the real test — profile metadata flags are unreliable.
+	 * This is the real test - profile metadata flags are unreliable.
 	 *
 	 * @param channels - Array of channels to pick from (uses a random one)
 	 * @returns true if a stream was successfully reached, false otherwise
@@ -1233,7 +1257,7 @@ export class StalkerPortalClient {
 					}
 				}
 
-				// No body reader available — fall back to status check
+				// No body reader available - fall back to status check
 				return response.ok || response.status === 200;
 			} finally {
 				clearTimeout(timeoutId);
@@ -1253,7 +1277,7 @@ export class StalkerPortalClient {
 	/**
 	 * Test connection and fetch account metadata.
 	 * Verifies the account works end-to-end: auth, channel list, and actual streaming.
-	 * Does NOT rely on profile blocked/status flags — those are unreliable across portals.
+	 * Does NOT rely on profile blocked/status flags - those are unreliable across portals.
 	 */
 	async testConnection(): Promise<StalkerAccountTestResult> {
 		try {
@@ -1314,14 +1338,14 @@ export class StalkerPortalClient {
 	}
 
 	/**
-	 * Fast connection test for scanning — uses fewer API calls (3 instead of 5-6).
+	 * Fast connection test for scanning - uses fewer API calls (3 instead of 5-6).
 	 * Only performs: handshake + get_profile (via auth) + get_all_channels.
 	 * Skips: get_main_info, get_genres, stream verification (deferred to approval/full test).
 	 * Expiry parsing uses only profile fields (no account_info phone field).
 	 */
 	async testConnectionFast(): Promise<StalkerAccountTestResult> {
 		try {
-			// Step 1: Start (handshake + auth via get_profile — caches profile)
+			// Step 1: Start (handshake + auth via get_profile - caches profile)
 			await this.start();
 
 			// Step 2: Reuse profile from auth (no redundant get_profile call)
@@ -1348,7 +1372,7 @@ export class StalkerPortalClient {
 				profile: {
 					playbackLimit: profile.playback_limit || 1,
 					channelCount,
-					categoryCount: 0, // Unknown — deferred to approval
+					categoryCount: 0, // Unknown - deferred to approval
 					expiresAt,
 					serverTimezone: profile.default_timezone || 'UTC',
 					streamVerified: false // Not verified during fast scan

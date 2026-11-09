@@ -1,21 +1,22 @@
 import { eq } from 'drizzle-orm';
-import { db } from '$lib/server/db/index.js';
-import { movieFiles, movies, scoringProfiles } from '$lib/server/db/schema.js';
-import { grabService } from '$lib/server/downloads/GrabService.js';
-import { getIndexerManager } from '$lib/server/indexers/IndexerManager.js';
-import { evaluateIndexerSearchAvailability } from '$lib/server/indexers/search/availability';
+import { db } from '#lib/server/db/index.js';
+import { movieFiles, movies, scoringProfiles } from '#lib/server/db/schema.js';
+import { grabService } from '#lib/server/downloads/GrabService.js';
+import { getIndexerManager } from '#lib/server/indexers/IndexerManager.js';
+import { evaluateIndexerSearchAvailability } from '#lib/server/indexers/search/availability.js';
+import { resolveAllowedIndexerIds } from '#lib/server/indexers/search/profile-indexer-filter.js';
 import {
 	effectiveBuckets,
 	getFilledResolutions,
 	unfilledBuckets,
 	isMultiQualityMode
-} from '$lib/server/quality/buckets.js';
-import type { Resolution } from '$lib/server/indexers/parser/types.js';
-import type { SearchCriteria, EnhancedReleaseResult } from '$lib/server/indexers/types';
+} from '#lib/server/quality/buckets.js';
+import type { Resolution } from '#lib/server/indexers/parser/types.js';
+import type { SearchCriteria, EnhancedReleaseResult } from '#lib/server/indexers/types/index.js';
 import { AUTO_GRAB_MIN_SCORE } from './search-utils.js';
 import type { AltTitleRefresher } from './alt-titles.js';
 import type { SearchForMovieParams, GrabResult } from './types.js';
-import { createChildLogger } from '$lib/logging/index.js';
+import { createChildLogger } from '#lib/logging/index.js';
 
 const logger = createChildLogger({ module: 'SearchMovie', logDomain: 'scans' });
 
@@ -33,7 +34,10 @@ function grabRelease(release: EnhancedReleaseResult, movieId: string, isUpgrade:
 			indexerId: release.indexerId,
 			indexerName: release.indexerName,
 			size: release.size,
-			protocol: release.protocol as 'torrent' | 'usenet' | 'streaming' | undefined
+			protocol: release.protocol as 'torrent' | 'usenet' | 'streaming' | undefined,
+			tmdbId: release.tmdbId,
+			imdbId: release.imdbId,
+			tvdbId: release.tvdbId
 		},
 		target: { type: 'movie' as const, movieId },
 		options: {
@@ -94,11 +98,13 @@ export async function searchForMovie(
 
 		const indexerManager = await getIndexerManager();
 		const searchSource: 'interactive' | 'automatic' = 'automatic';
+		const allowedIndexerIds = await resolveAllowedIndexerIds(scoringProfileId);
 		const indexerAvailability = evaluateIndexerSearchAvailability(
 			await indexerManager.getIndexers(),
 			{
 				searchType: 'movie',
 				searchSource,
+				allowedIndexerIds,
 				scoringProfileId,
 				getDefinitionCapabilities: (definitionId) =>
 					indexerManager.getDefinitionCapabilities(definitionId)
@@ -208,7 +214,7 @@ export async function searchForMovie(
 				const grabError = grabResult.error ?? grabResult.decision?.reason ?? 'Unknown error';
 				logger.info(
 					{ movieId, title: release.title, error: grabError },
-					'[SearchOnAdd] Release not grabbed — trying next'
+					'[SearchOnAdd] Release not grabbed - trying next'
 				);
 			}
 

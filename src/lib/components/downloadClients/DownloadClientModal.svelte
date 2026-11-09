@@ -1,25 +1,26 @@
 <script lang="ts">
-	import { X } from 'lucide-svelte';
+	import { X } from '@lucide/svelte';
 	import type {
 		DownloadClient,
 		DownloadClientFormData,
 		DownloadClientImplementation,
 		ConnectionTestResult
-	} from '$lib/types/downloadClient';
-	import { FolderBrowser } from '$lib/components/library';
-	import ModalWrapper from '$lib/components/ui/modal/ModalWrapper.svelte';
+	} from '#lib/types/downloadClient.js';
+	import { FolderBrowser } from '#lib/components/library/index.js';
+	import ModalWrapper from '#lib/components/ui/modal/ModalWrapper.svelte';
 	import { clientDefinitions } from './forms/clientDefinitions';
 	import DownloadClientSettings from './forms/DownloadClientSettings.svelte';
 	import ClientFormFields from './ClientFormFields.svelte';
+	import DebridClientFields from './DebridClientFields.svelte';
 	import ClientSpecificOptions from './ClientSpecificOptions.svelte';
 	import ClientTestConnection from './ClientTestConnection.svelte';
-	import { toFriendlyDownloadClientError } from '$lib/downloadClients/errorMessages';
+	import { toFriendlyDownloadClientError } from '#lib/downloadClients/errorMessages.js';
 	import {
 		serializeDownloadClientForm,
 		type DownloadClientFormState,
 		type NntpServerFormData
 	} from './formSerializer.js';
-	import * as m from '$lib/paraglide/messages.js';
+	import * as m from '#lib/paraglide/messages.js';
 
 	interface NntpServer {
 		id: string;
@@ -40,6 +41,7 @@
 		client?: DownloadClient | NntpServer | null;
 		initialImplementation?: DownloadClientImplementation | 'nntp' | null;
 		allowNntp?: boolean;
+		existingClients?: Array<{ id: string; implementation: string }>;
 		saving: boolean;
 		error?: string | null;
 		onClose: () => void;
@@ -68,6 +70,7 @@
 		client = null,
 		initialImplementation = null,
 		allowNntp = true,
+		existingClients = [],
 		saving,
 		error = null,
 		onClose,
@@ -94,6 +97,8 @@
 	let password = $state('');
 	let apiToken = $state('');
 	let removeAfterImport = $state(false);
+	let allowMovies = $state(true);
+	let allowTv = $state(true);
 
 	let movieCategory = $state('movies');
 	let tvCategory = $state('tv');
@@ -102,6 +107,8 @@
 	let olderPriority = $state<'normal' | 'high' | 'force'>('normal');
 	let initialState = $state<'start' | 'pause' | 'force'>('start');
 	let sequentialDownload = $state(false);
+	let seedRatioLimit = $state('');
+	let seedTimeLimit = $state('');
 
 	let downloadPathLocal = $state('');
 	let downloadPathRemote = $state('');
@@ -138,6 +145,15 @@
 	);
 	const isNntpServer = $derived(implementation === 'nntp');
 	const isDebrid = $derived(selectedDefinition?.isDebrid === true);
+	const showPriorityField = $derived.by(() => {
+		const group = selectedDefinition?.protocol;
+		if (!group || group !== 'debrid') return false;
+		const currentId = mode === 'edit' ? (client as DownloadClient | undefined)?.id : undefined;
+		return existingClients.some((c) => {
+			if (currentId && c.id === currentId) return false;
+			return clientDefinitions.find((d) => d.id === c.implementation)?.protocol === group;
+		});
+	});
 	const hasApiToken = $derived((client as DownloadClient | undefined)?.hasApiToken ?? false);
 	const isSabnzbd = $derived(implementation === 'sabnzbd');
 	const isMountModeClient = $derived(
@@ -233,6 +249,10 @@
 			initialState = dcClient?.initialState ?? 'start';
 			sequentialDownload = dcClient?.sequentialDownload ?? false;
 			removeAfterImport = dcClient?.removeAfterImport ?? false;
+			seedRatioLimit = dcClient?.seedRatioLimit ?? '';
+			seedTimeLimit = dcClient?.seedTimeLimit != null ? String(dcClient.seedTimeLimit) : '';
+			allowMovies = dcClient?.allowMovies ?? true;
+			allowTv = dcClient?.allowTv ?? true;
 			downloadPathLocal = dcClient?.downloadPathLocal ?? '';
 			downloadPathRemote = dcClient?.downloadPathRemote ?? '';
 			tempPathLocal = dcClient?.tempPathLocal ?? '';
@@ -263,6 +283,12 @@
 			if (def) {
 				port = def.defaultPort;
 				name = def.name;
+				// Non-debrid clients default to removing completed downloads (for
+				// seeding clients: once seed goals are met), matching the migration
+				// backfill for existing clients.
+				if (!def.isDebrid) {
+					removeAfterImport = true;
+				}
 				if (newImpl === 'nntp') {
 					useSsl = true;
 				}
@@ -297,6 +323,8 @@
 			olderPriority,
 			initialState,
 			sequentialDownload,
+			seedRatioLimit,
+			seedTimeLimit,
 			downloadPathLocal,
 			downloadPathRemote,
 			tempPathLocal,
@@ -305,7 +333,9 @@
 			priority,
 			implementation: implementation as DownloadClientImplementation,
 			apiToken,
-			removeAfterImport
+			removeAfterImport,
+			allowMovies,
+			allowTv
 		};
 		return serializeDownloadClientForm(formState, isNntpServer, mode);
 	}
@@ -480,51 +510,21 @@
 			</div>
 		{:else}
 			{#if isDebrid}
-				<div class="space-y-4">
-					<div class="form-control">
-						<label class="label py-1" for="name">{m.common_name()}</label>
-						<input
-							id="name"
-							class="input-bordered input input-sm"
-							bind:value={name}
-							maxlength={MAX_NAME_LENGTH}
-						/>
-					</div>
-					<div class="form-control">
-						<label class="label py-1" for="apiToken">{m.downloadClient_apiToken()}</label>
-						<input
-							id="apiToken"
-							type="password"
-							class="input-bordered input input-sm"
-							bind:value={apiToken}
-							placeholder={mode === 'edit' && hasApiToken ? '********' : ''}
-						/>
-					</div>
-					<div class="form-control">
-						<label class="label py-1" for="priority">{m.common_priority()}</label>
-						<input
-							id="priority"
-							type="number"
-							min="1"
-							class="input-bordered input input-sm"
-							bind:value={priority}
-						/>
-					</div>
-					<label class="label cursor-pointer justify-start gap-2"
-						><input
-							type="checkbox"
-							class="checkbox checkbox-sm"
-							bind:checked={enabled}
-						/>{m.common_enabled()}</label
-					>
-					<label class="label cursor-pointer justify-start gap-2"
-						><input
-							type="checkbox"
-							class="checkbox checkbox-sm"
-							bind:checked={removeAfterImport}
-						/>{m.downloadClient_removeAfterImport()}</label
-					>
-				</div>
+				<DebridClientFields
+					bind:name
+					bind:apiToken
+					bind:priority
+					bind:enabled
+					bind:removeAfterImport
+					bind:allowMovies
+					bind:allowTv
+					{mode}
+					{hasApiToken}
+					selectedDefinitionName={selectedDefinition?.name ?? ''}
+					maxNameLength={MAX_NAME_LENGTH}
+					{nameTooLong}
+					showPriority={showPriorityField}
+				/>
 			{:else}<div class="grid grid-cols-1 gap-4 sm:grid-cols-2 sm:gap-6">
 					<div class="space-y-4">
 						<ClientFormFields
@@ -561,6 +561,9 @@
 							bind:olderPriority
 							bind:initialState
 							bind:sequentialDownload
+							bind:removeAfterImport
+							bind:seedRatioLimit
+							bind:seedTimeLimit
 							bind:downloadPathLocal
 							bind:downloadPathRemote
 							bind:tempPathLocal

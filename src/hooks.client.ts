@@ -1,6 +1,7 @@
-import type { HandleClientError } from '@sveltejs/kit';
+import { isHttpError } from '@sveltejs/kit';
+import type { HandleClientError } from '@sveltejs/kit/hooks';
 
-import { logger } from '$lib/logging';
+import { logger } from '#lib/logging/index.js';
 
 interface ClientErrorReportPayload {
 	supportId: string;
@@ -25,15 +26,28 @@ function createClientSupportId(): string {
 }
 
 function serializeClientError(error: unknown): ClientErrorReportPayload['error'] | undefined {
-	if (!(error instanceof Error)) {
-		return undefined;
+	if (error instanceof Error) {
+		return {
+			name: error.name,
+			message: error.message,
+			stack: error.stack
+		};
 	}
 
-	return {
-		name: error.name,
-		message: error.message,
-		stack: error.stack
-	};
+	// Non-Error throws (DOMException, plain strings, NS_ERROR_FAILURE...) must
+	// still serialize - dropping them turned every such crash into `err: {}`.
+	if (typeof error === 'string') {
+		return { name: 'string', message: error };
+	}
+	if (error && typeof error === 'object') {
+		const anyError = error as { name?: unknown; message?: unknown };
+		return {
+			name: typeof anyError.name === 'string' ? anyError.name : 'unknown',
+			message:
+				typeof anyError.message === 'string' && anyError.message ? anyError.message : String(error)
+		};
+	}
+	return { name: 'unknown', message: String(error) };
 }
 
 function reportClientError(payload: ClientErrorReportPayload): void {
@@ -53,7 +67,13 @@ function reportClientError(payload: ClientErrorReportPayload): void {
 	});
 }
 
-export const handleError: HandleClientError = ({ error, event, status }) => {
+export const handleError: HandleClientError = ({ error, event }) => {
+	// SvelteKit 3 routes expected error(...) throws through handleError too.
+	// Surface the authored message and skip crash reporting for them.
+	if (isHttpError(error) && error.status < 500) {
+		return { message: error.body.message, code: 'HTTP_ERROR' };
+	}
+
 	const supportId = createClientSupportId();
 	const message = 'Unhandled client error';
 	const serializedError = serializeClientError(error);
@@ -64,7 +84,6 @@ export const handleError: HandleClientError = ({ error, event, status }) => {
 			logDomain: 'client',
 			component: 'hooks.client',
 			supportId,
-			status,
 			path: event.url.pathname,
 			routeId: event.route.id ?? null
 		},
@@ -74,7 +93,6 @@ export const handleError: HandleClientError = ({ error, event, status }) => {
 	reportClientError({
 		supportId,
 		message,
-		status,
 		path: event.url.pathname,
 		routeId: event.route.id ?? null,
 		userAgent: typeof navigator !== 'undefined' ? navigator.userAgent : undefined,

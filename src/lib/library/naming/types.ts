@@ -1,7 +1,7 @@
 /**
  * Shared naming/rename types
  *
- * Lives outside $lib/server so it can be imported from .svelte files
+ * Lives outside #lib/server so it can be imported from .svelte files
  * without leaking server code into the client bundle. The server's
  * RenamePreviewService imports these types from here.
  */
@@ -50,7 +50,7 @@ export interface RenamePreviewResult {
 	totalErrors: number;
 
 	// Set when the movie folder template uses {Collection} but this movie
-	// has no collection data — paths will be wrong until metadata is refreshed.
+	// has no collection data - paths will be wrong until metadata is refreshed.
 	missingCollectionData?: boolean;
 }
 

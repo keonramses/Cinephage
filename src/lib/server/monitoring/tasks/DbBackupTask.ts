@@ -1,8 +1,8 @@
-import { sqlite } from '$lib/server/db/index.js';
-import { dbBackupService } from '$lib/server/db/DbBackupService.js';
-import { createChildLogger } from '$lib/logging/index.js';
+import { sqlite } from '#lib/server/db/index.js';
+import { dbBackupService } from '#lib/server/db/DbBackupService.js';
+import { createChildLogger } from '#lib/logging/index.js';
 import type { TaskResult } from '../MonitoringScheduler.js';
-import type { TaskExecutionContext } from '$lib/server/tasks/TaskExecutionContext.js';
+import type { TaskExecutionContext } from '#lib/server/tasks/TaskExecutionContext.js';
 
 const logger = createChildLogger({ module: 'DbBackupTask', logDomain: 'monitoring' });
 
@@ -12,7 +12,7 @@ export async function executeDbBackupTask(ctx: TaskExecutionContext | null): Pro
 
 	const settings = await dbBackupService.getSettings();
 	if (!settings.enabled) {
-		logger.info('[DbBackupTask] Scheduled backups disabled — skipping');
+		logger.info('[DbBackupTask] Scheduled backups disabled - skipping');
 		return { taskType: 'dbBackup', itemsProcessed: 0, itemsGrabbed: 0, errors: 0, executedAt };
 	}
 

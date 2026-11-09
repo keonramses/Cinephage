@@ -1,10 +1,12 @@
 <script lang="ts">
-	import * as m from '$lib/paraglide/messages.js';
+	import * as m from '#lib/paraglide/messages.js';
 	import { SvelteSet } from 'svelte/reactivity';
-	import type { MovieFile } from '$lib/types/library';
+	import type { MovieFile } from '#lib/types/library.js';
 	import QualityBadge from './QualityBadge.svelte';
 	import MediaInfoPopover from './MediaInfoPopover.svelte';
-	import { SubtitleDisplay } from '$lib/components/subtitles';
+	import SubtitleRequirementBadge from './SubtitleRequirementBadge.svelte';
+	import { SubtitleDisplay } from '#lib/components/subtitles/index.js';
+	import type { SubtitleRequirementProgress } from '#lib/utils/subtitle-status-display.js';
 	import {
 		File,
 		Trash2,
@@ -14,9 +16,9 @@
 		CaptionsOff,
 		Download,
 		Loader2
-	} from 'lucide-svelte';
-	import { normalizeLanguageCode } from '$lib/shared/languages';
-	import { formatBytes, getFileName, formatDisplayDateShort } from '$lib/utils/format.js';
+	} from '@lucide/svelte';
+	import { normalizeLanguageCode } from '#lib/shared/languages.js';
+	import { formatBytes, getFileName, formatDisplayDateShort } from '#lib/utils/format.js';
 
 	interface Subtitle {
 		id: string;
@@ -32,7 +34,11 @@
 	interface Props {
 		file: MovieFile;
 		subtitles?: Subtitle[];
+		/** Requirement-aware progress from the movie loader (null when no effective profile). */
+		subtitleProgress?: SubtitleRequirementProgress | null;
 		isStreamerProfile?: boolean;
+		/** Viewer mode: hide delete and subtitle acquisition controls. */
+		readOnly?: boolean;
 		onDelete?: (fileId: string) => void;
 		onSubtitleSearch?: () => void;
 		onSubtitleAutoSearch?: () => void;
@@ -42,7 +48,9 @@
 	let {
 		file,
 		subtitles = [],
+		subtitleProgress = null,
 		isStreamerProfile = false,
+		readOnly = false,
 		onDelete,
 		onSubtitleSearch,
 		onSubtitleAutoSearch,
@@ -104,7 +112,7 @@
 			{#if file.mediaInfo}
 				<MediaInfoPopover mediaInfo={file.mediaInfo} />
 			{/if}
-			{#if onDelete}
+			{#if !readOnly && onDelete}
 				<button
 					class="btn btn-ghost text-error btn-xs"
 					onclick={() => onDelete(file.id)}
@@ -208,14 +216,17 @@
 	<div class="mt-3 flex flex-wrap items-center justify-between gap-2 border-t border-base-300 pt-3">
 		<div class="flex min-w-0 flex-1 items-center gap-2">
 			{#if allSubtitles.length > 0}
-				<Captions size={14} class="text-base-content/50" />
+				<Captions size={14} aria-hidden="true" class="text-base-content/50" />
 				<SubtitleDisplay subtitles={allSubtitles} size="sm" showSyncStatus={true} />
 			{:else}
-				<CaptionsOff size={14} class="text-base-content/50" />
+				<CaptionsOff size={14} aria-hidden="true" class="text-base-content/50" />
 				<SubtitleDisplay subtitles={allSubtitles} size="sm" showSyncStatus={true} />
 			{/if}
+			{#if subtitleProgress}
+				<SubtitleRequirementBadge progress={subtitleProgress} size="sm" showCutoff={true} />
+			{/if}
 		</div>
-		{#if onSubtitleSearch || onSubtitleAutoSearch}
+		{#if !readOnly && (onSubtitleSearch || onSubtitleAutoSearch)}
 			<div class="flex flex-wrap items-center gap-1">
 				{#if onSubtitleSearch}
 					<button

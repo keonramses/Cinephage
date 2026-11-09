@@ -1,6 +1,7 @@
 // Library management components
 export { default as FolderBrowser } from './FolderBrowser.svelte';
 export { default as QualityBadge } from './QualityBadge.svelte';
+export { default as SubtitleRequirementBadge } from './SubtitleRequirementBadge.svelte';
 export { default as ScoreBadge } from './ScoreBadge.svelte';
 export { default as ScoreDetailModal } from './ScoreDetailModal.svelte';
 export { default as MonitorToggle } from './MonitorToggle.svelte';
@@ -18,6 +19,7 @@ export { default as AddToLibraryModal } from './AddToLibraryModal.svelte';
 export { default as AddMovieForm } from './AddMovieForm.svelte';
 export { default as AddSeriesForm } from './AddSeriesForm.svelte';
 export { default as MediaSearchInput } from './MediaSearchInput.svelte';
+export { default as ChangeMatchModal } from './ChangeMatchModal.svelte';
 
 // TV Series components
 export { default as LibrarySeriesHeader } from './LibrarySeriesHeader.svelte';

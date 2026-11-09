@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { SvelteSet } from 'svelte/reactivity';
-	import * as m from '$lib/paraglide/messages.js';
+	import * as m from '#lib/paraglide/messages.js';
 	import {
 		ArrowUp,
 		Check,
@@ -12,7 +12,7 @@
 		Search,
 		Sparkles,
 		X
-	} from 'lucide-svelte';
+	} from '@lucide/svelte';
 
 	type MediaType = 'movie' | 'tv';
 
@@ -250,7 +250,7 @@
 					<div class="mb-1 flex items-center gap-2 border-b border-base-300/50 px-2 pb-1">
 						<input
 							type="checkbox"
-							class="checkbox shrink-0 checkbox-xs"
+							class="checkbox shrink-0 checkbox-xs checkbox-primary"
 							checked={allSelected}
 							onchange={toggleSelectAll}
 							title="Select all"
@@ -267,7 +267,7 @@
 						>
 							<input
 								type="checkbox"
-								class="checkbox shrink-0 checkbox-sm"
+								class="checkbox shrink-0 checkbox-sm checkbox-primary"
 								checked={selectedPaths.has(entry.path)}
 								onclick={(e) => {
 									e.stopPropagation();

@@ -6,13 +6,17 @@
  * Query parameters:
  * - start: ISO date string (default: now)
  * - end: ISO date string (default: +6 hours)
+ * - lang: Optional display language tag (e.g. "en", "fr", "pt-BR"; the base tag
+ *   is used). Invalid/unknown values are ignored. When omitted, the plain EPG
+ *   text columns are returned unchanged.
  */
 
-import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
-import { getEpgService } from '$lib/server/livetv/epg';
-import { createChildLogger } from '$lib/logging';
-import { ValidationError } from '$lib/errors';
+import { getEpgService } from '#lib/server/livetv/epg/index.js';
+import { createChildLogger } from '#lib/logging/index.js';
+import { normalizeLanguageTag } from '#lib/server/languages/normalize.js';
+import { getLanguageSettingsService } from '#lib/server/subtitles/services/LanguageSettingsService.js';
+import { ValidationError } from '#lib/errors/index.js';
 import { z } from 'zod';
 
 const logger = createChildLogger({ module: 'LiveTvEpgChannelById', logDomain: 'livetv' });
@@ -23,6 +27,25 @@ const paramsSchema = z.object({
 	start: z.string().datetime().optional(),
 	end: z.string().datetime().optional()
 });
+
+/**
+ * Resolve the display language for localized EPG text (same chain as the guide
+ * route): explicit `?lang=` → instance metadata locale → null.
+ */
+async function resolveLangParam(url: URL): Promise<string | null> {
+	const raw = url.searchParams.get('lang');
+	if (raw && raw.trim()) {
+		const tag = normalizeLanguageTag(raw);
+		return tag === 'und' ? null : tag;
+	}
+	try {
+		const settings = await getLanguageSettingsService().get();
+		const tag = normalizeLanguageTag(settings.metadataLocale);
+		return tag === 'und' ? null : tag;
+	} catch {
+		return null;
+	}
+}
 
 export const GET: RequestHandler = async ({ params, url }) => {
 	try {
@@ -54,9 +77,14 @@ export const GET: RequestHandler = async ({ params, url }) => {
 		}
 
 		// Get programs for channel
-		const programs = epgService.getChannelPrograms(channelId, start, end);
+		const programs = epgService.getChannelPrograms(
+			channelId,
+			start,
+			end,
+			await resolveLangParam(url)
+		);
 
-		return json({
+		return Response.json({
 			success: true,
 			channelId,
 			programs,
@@ -68,7 +96,7 @@ export const GET: RequestHandler = async ({ params, url }) => {
 	} catch (error) {
 		// Validation errors
 		if (error instanceof ValidationError) {
-			return json(
+			return Response.json(
 				{
 					success: false,
 					error: error.message,
@@ -78,7 +106,7 @@ export const GET: RequestHandler = async ({ params, url }) => {
 			);
 		}
 		logger.error('[API] Failed to get EPG for channel', error instanceof Error ? error : undefined);
-		return json(
+		return Response.json(
 			{
 				success: false,
 				error: error instanceof Error ? error.message : 'Failed to get EPG data'

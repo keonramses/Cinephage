@@ -6,7 +6,7 @@ import type { PlaybackSession, SessionResourceKind } from '../types';
  * Mirrors playlist-rewriter.ts for MPEG-DASH. Every segment/media URL in the
  * MPD is rewritten through the playback session so that:
  *   - same-origin URLs under the MPD's directory become
- *     /api/streaming/session/{token}/dash/{relative-path} — a template-safe
+ *     /api/streaming/session/{token}/dash/{relative-path} - a template-safe
  *     catch-all that preserves $Number$/$Time$ placeholders (which a
  *     registered-resource route cannot, since concrete numbers arrive only at
  *     request time)
@@ -44,10 +44,15 @@ export function rewriteDashManifest(options: RewriteDashOptions): string {
 	const origin = base.origin;
 	const mpdDirPath = base.pathname.substring(0, base.pathname.lastIndexOf('/') + 1);
 
+	/** Preserve a reverse-proxy subpath configured in the base URL. */
+	function resolveAgainstBase(path: string): URL {
+		const normalizedBase = options.baseUrl.endsWith('/') ? options.baseUrl : `${options.baseUrl}/`;
+		return new URL(path.replace(/^\/+/, ''), normalizedBase);
+	}
+
 	function buildDashProxyUrl(relativePath: string): string {
-		const url = new URL(
-			`/api/streaming/session/${options.session.token}/dash/${relativePath}`,
-			options.baseUrl
+		const url = resolveAgainstBase(
+			`api/streaming/session/${options.session.token}/dash/${relativePath}`
 		);
 		if (options.apiKey) {
 			url.searchParams.set('api_key', options.apiKey);
@@ -60,9 +65,8 @@ export function rewriteDashManifest(options: RewriteDashOptions): string {
 			? inferExtension(absoluteUrl)
 			: 'bin';
 		const resourceId = options.registerResource(absoluteUrl, 'segment', extension);
-		const url = new URL(
-			`/api/streaming/session/${options.session.token}/segment/${resourceId}.${extension}`,
-			options.baseUrl
+		const url = resolveAgainstBase(
+			`api/streaming/session/${options.session.token}/segment/${resourceId}.${extension}`
 		);
 		if (options.apiKey) {
 			url.searchParams.set('api_key', options.apiKey);

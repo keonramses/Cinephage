@@ -5,7 +5,7 @@
  * and improve response times for frequently accessed data.
  */
 
-import { createChildLogger } from '$lib/logging';
+import { createChildLogger } from '#lib/logging/index.js';
 
 const logger = createChildLogger({ logDomain: 'system' as const });
 
@@ -184,7 +184,8 @@ export function getCacheKey(
 	endpoint: string,
 	skipFilters: boolean,
 	language?: string,
-	skipKeywordBlocklist = false
+	skipKeywordBlocklist = false,
+	region?: string
 ): string {
-	return `tmdb:${endpoint}:${language ?? 'default'}:${skipFilters}:${skipKeywordBlocklist}`;
+	return `tmdb:${endpoint}:${language ?? 'default'}:${region ?? 'default'}:${skipFilters}:${skipKeywordBlocklist}`;
 }

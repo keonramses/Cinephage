@@ -90,8 +90,8 @@ export interface IndexerDefinition {
 	/** Description of the indexer */
 	description: string;
 
-	/** Language code (e.g., 'en-US') */
-	language: string;
+	/** Language code (e.g., 'en-US'); undefined when the definition omits it. */
+	language?: string;
 
 	// === Classification ===
 
@@ -167,7 +167,8 @@ export interface IndexerDefinitionSummary {
 	description: string;
 	type: IndexerAccessType;
 	protocol: IndexerProtocol;
-	language: string;
+	/** Definition-declared language; undefined when the definition omits it. */
+	language?: string;
 	settings: SettingField[];
 	urls: string[];
 }
@@ -251,7 +252,7 @@ export function toDefinitionSummary(definition: IndexerDefinition): IndexerDefin
 // UI Type Conversion
 // ============================================================================
 
-/** Setting type matching UI expectations from $lib/types/indexer.ts */
+/** Setting type matching UI expectations from #lib/types/indexer.ts */
 export type UISettingType =
 	| 'text'
 	| 'password'
@@ -267,7 +268,7 @@ export type UISettingType =
 
 /**
  * UI-compatible definition setting type.
- * Matches the DefinitionSetting type in $lib/types/indexer.ts
+ * Matches the DefinitionSetting type in #lib/types/indexer.ts
  */
 export interface UIDefinitionSetting {
 	name: string;
@@ -282,7 +283,7 @@ export interface UIDefinitionSetting {
 
 /**
  * UI-compatible indexer definition type.
- * Matches the IndexerDefinition type in $lib/types/indexer.ts
+ * Matches the IndexerDefinition type in #lib/types/indexer.ts
  */
 export interface UIIndexerDefinition {
 	id: string;
@@ -455,7 +456,7 @@ export function yamlToUnifiedDefinition(
 		id: def.id,
 		name: def.name,
 		description: def.description ?? `${def.name} indexer`,
-		language: def.language ?? 'en-US',
+		language: def.language,
 		type: mapAccessType(def.type),
 		protocol: def.protocol ?? 'torrent',
 		internal: def.internal ?? false,

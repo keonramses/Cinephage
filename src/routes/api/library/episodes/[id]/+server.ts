@@ -1,14 +1,15 @@
-import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types.js';
-import { db } from '$lib/server/db/index.js';
-import { episodes, episodeFiles, series, seasons, rootFolders } from '$lib/server/db/schema.js';
+import { db } from '#lib/server/db/index.js';
+import { episodes, episodeFiles, series, seasons, rootFolders } from '#lib/server/db/schema.js';
 import { eq } from 'drizzle-orm';
 import { unlink, rmdir } from 'node:fs/promises';
 import { join, dirname } from 'node:path';
-import { searchOnAdd } from '$lib/server/library/searchOnAdd.js';
-import { monitoringScheduler } from '$lib/server/monitoring/MonitoringScheduler.js';
-import { libraryMediaEvents } from '$lib/server/library/LibraryMediaEvents';
-import { createChildLogger } from '$lib/logging';
+import { searchOnAdd } from '#lib/server/library/searchOnAdd.js';
+import { monitoringScheduler } from '#lib/server/monitoring/MonitoringScheduler.js';
+import { libraryMediaEvents } from '#lib/server/library/LibraryMediaEvents.js';
+import { createChildLogger } from '#lib/logging/index.js';
+import { episodeUpdateSchema } from '#lib/validation/schemas.js';
+import { parseBody } from '#lib/server/api/validate.js';
 
 const logger = createChildLogger({ module: 'LibraryEpisodeByIdApi', logDomain: 'scans' });
 
@@ -17,15 +18,17 @@ const logger = createChildLogger({ module: 'LibraryEpisodeByIdApi', logDomain: '
  * Update episode settings (primarily monitoring)
  */
 export const PATCH: RequestHandler = async ({ params, request }) => {
-	try {
-		const body = await request.json();
-		const { monitored, wantsSubtitlesOverride } = body;
+	const { monitored, wantsSubtitlesOverride, subtitleRequirementsOverride } = await parseBody(
+		request,
+		episodeUpdateSchema
+	);
 
+	try {
 		// Validate episode exists
 		const [episode] = await db.select().from(episodes).where(eq(episodes.id, params.id)).limit(1);
 
 		if (!episode) {
-			return json({ success: false, error: 'Episode not found' }, { status: 404 });
+			return Response.json({ success: false, error: 'Episode not found' }, { status: 404 });
 		}
 
 		// Detect if monitoring is being enabled (was false, now true)
@@ -38,12 +41,13 @@ export const PATCH: RequestHandler = async ({ params, request }) => {
 			updateData.monitored = monitored;
 		}
 		if (wantsSubtitlesOverride !== undefined) {
-			// Can be true, false, or null (to inherit from series)
+			// Tri-state: true forces subtitles on, false opts out, null inherits
+			// from the series.
 			updateData.wantsSubtitlesOverride = wantsSubtitlesOverride;
 		}
-
-		if (Object.keys(updateData).length === 0) {
-			return json({ success: false, error: 'No valid fields to update' }, { status: 400 });
+		if (subtitleRequirementsOverride !== undefined) {
+			// Validated requirement list or null to clear (inherit via series).
+			updateData.subtitleRequirementsOverride = subtitleRequirementsOverride;
 		}
 
 		// Update episode
@@ -68,7 +72,7 @@ export const PATCH: RequestHandler = async ({ params, request }) => {
 						},
 						'[API] Skipping search for episode in unmonitored series'
 					);
-					return json({ success: true });
+					return Response.json({ success: true });
 				}
 
 				// Fire and forget - don't block the response
@@ -93,10 +97,10 @@ export const PATCH: RequestHandler = async ({ params, request }) => {
 
 		libraryMediaEvents.emitSeriesUpdated(episode.seriesId);
 
-		return json({ success: true });
+		return Response.json({ success: true });
 	} catch (error) {
 		logger.error('[API] Error updating episode', error instanceof Error ? error : undefined);
-		return json(
+		return Response.json(
 			{
 				success: false,
 				error: error instanceof Error ? error.message : 'Failed to update episode'
@@ -134,16 +138,19 @@ export const DELETE: RequestHandler = async ({ params, url }) => {
 			.where(eq(episodes.id, params.id));
 
 		if (!episode) {
-			return json({ success: false, error: 'Episode not found' }, { status: 404 });
+			return Response.json({ success: false, error: 'Episode not found' }, { status: 404 });
 		}
 
 		if (!episode.hasFile) {
-			return json({ success: false, error: 'Episode has no files to delete' }, { status: 400 });
+			return Response.json(
+				{ success: false, error: 'Episode has no files to delete' },
+				{ status: 400 }
+			);
 		}
 
 		// Block file deletion from read-only folders
 		if (deleteFiles && episode.rootFolderReadOnly) {
-			return json(
+			return Response.json(
 				{ success: false, error: 'Cannot delete files from read-only folder' },
 				{ status: 400 }
 			);
@@ -243,10 +250,10 @@ export const DELETE: RequestHandler = async ({ params, url }) => {
 		libraryMediaEvents.emitSeriesUpdated(episode.seriesId);
 
 		// Note: Episode metadata is kept - it will show as "missing"
-		return json({ success: true });
+		return Response.json({ success: true });
 	} catch (error) {
 		logger.error('[API] Error deleting episode files', error instanceof Error ? error : undefined);
-		return json(
+		return Response.json(
 			{
 				success: false,
 				error: error instanceof Error ? error.message : 'Failed to delete episode files'

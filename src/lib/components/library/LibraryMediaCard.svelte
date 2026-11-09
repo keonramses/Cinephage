@@ -1,10 +1,10 @@
 <script lang="ts">
-	import * as m from '$lib/paraglide/messages.js';
-	import type { LibraryMovie, LibrarySeries } from '$lib/types/library';
-	import { isLibraryMovie, getBestQualityFromFiles, displayTitle } from '$lib/types/library';
-	import TmdbImage from '$lib/components/tmdb/TmdbImage.svelte';
-	import { Eye, EyeOff, Check, X, Download, AlertTriangle } from 'lucide-svelte';
-	import { resolvePath } from '$lib/utils/routing';
+	import * as m from '#lib/paraglide/messages.js';
+	import type { LibraryMovie, LibrarySeries } from '#lib/types/library.js';
+	import { isLibraryMovie, getBestQualityFromFiles, displayTitle } from '#lib/types/library.js';
+	import TmdbImage from '#lib/components/tmdb/TmdbImage.svelte';
+	import { Eye, EyeOff, Check, X, Download, AlertTriangle } from '@lucide/svelte';
+	import { resolvePath } from '#lib/utils/routing.js';
 
 	type LibraryItem = LibraryMovie | LibrarySeries;
 
@@ -14,6 +14,8 @@
 		selected?: boolean;
 		onSelectChange?: (id: string, selected: boolean) => void;
 		collectionName?: string;
+		/** Instance default for items with no explicit prefer-original flag. */
+		preferOriginalTitleDefault?: boolean | null;
 	}
 
 	let {
@@ -21,7 +23,8 @@
 		selectable = false,
 		selected = false,
 		onSelectChange,
-		collectionName
+		collectionName,
+		preferOriginalTitleDefault = false
 	}: Props = $props();
 
 	function handleCheckboxClick(e: MouseEvent) {
@@ -204,7 +207,7 @@
 			class="translate-y-4 transform transition-transform duration-300 group-hover:translate-y-0"
 		>
 			<h3 class="line-clamp-2 text-sm leading-tight font-bold text-white">
-				{displayTitle(item)}
+				{displayTitle(item, preferOriginalTitleDefault)}
 			</h3>
 			<div class="mt-1 flex items-center justify-between gap-2">
 				{#if item.year}

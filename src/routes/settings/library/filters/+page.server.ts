@@ -1,15 +1,19 @@
-import { db } from '$lib/server/db';
-import { settings } from '$lib/server/db/schema';
-import { tmdb } from '$lib/server/tmdb';
+import { db } from '#lib/server/db/index.js';
+import { settings } from '#lib/server/db/schema.js';
+import { tmdb } from '#lib/server/tmdb.js';
 import { eq } from 'drizzle-orm';
 import type { PageServerLoad } from './$types';
-import type { GlobalTmdbFilters } from '$lib/types/tmdb';
-import { createChildLogger } from '$lib/logging';
-import { TMDB } from '$lib/config/constants.js';
+import type { GlobalTmdbFilters } from '#lib/types/tmdb.js';
+import { createChildLogger } from '#lib/logging/index.js';
+import { TMDB } from '#lib/config/constants.js';
 
 // TMDB content-filter settings (genre exclusions etc.), not disk scanning - 'system' fits better than 'scans'.
 const logger = createChildLogger({ module: 'LibraryFiltersSettingsPage', logDomain: 'system' });
 
+// Language/region localization is edited in the Library > Languages tab
+// (/settings/library/languages); this loader only supplies the remaining
+// content filters. Stored language/region values still ride along in `filters`
+// so the PUT payload keeps its shape (the filters API mirrors them, harmless).
 export const load: PageServerLoad = async () => {
 	// Fetch current settings
 	const settingsData = await db.query.settings.findFirst({
@@ -38,18 +42,14 @@ export const load: PageServerLoad = async () => {
 
 	// Fetch Genres (only if TMDB is configured)
 	let genres: { id: number; name: string }[] = [];
-	let countries: { code: string; name: string }[] = [];
-	let languages: { code: string; name: string }[] = [];
 
 	if (tmdbConfigured) {
 		try {
-			const [movieGenres, tvGenres, countriesData, languagesData] = await Promise.all([
+			const [movieGenres, tvGenres] = await Promise.all([
 				tmdb.fetch('/genre/movie/list') as Promise<{
 					genres: { id: number; name: string }[];
 				} | null>,
-				tmdb.fetch('/genre/tv/list') as Promise<{ genres: { id: number; name: string }[] } | null>,
-				tmdb.getCountries(),
-				tmdb.getLanguages()
+				tmdb.fetch('/genre/tv/list') as Promise<{ genres: { id: number; name: string }[] } | null>
 			]);
 
 			if (movieGenres && tvGenres) {
@@ -61,24 +61,6 @@ export const load: PageServerLoad = async () => {
 					.map(([id, name]) => ({ id, name }))
 					.sort((a, b) => a.name.localeCompare(b.name));
 			}
-
-			if (countriesData) {
-				countries = countriesData
-					.map((c) => ({
-						code: c.iso_3166_1,
-						name: c.english_name
-					}))
-					.sort((a, b) => a.name.localeCompare(b.name));
-			}
-
-			if (languagesData) {
-				languages = languagesData
-					.map((l) => ({
-						code: l.iso_639_1,
-						name: l.english_name
-					}))
-					.sort((a, b) => a.name.localeCompare(b.name));
-			}
 		} catch (e) {
 			logger.error({ err: e }, 'Failed to fetch TMDB configuration');
 		}
@@ -87,8 +69,6 @@ export const load: PageServerLoad = async () => {
 	return {
 		filters: currentFilters,
 		genres,
-		countries,
-		languages,
 		tmdbConfigured
 	};
 };

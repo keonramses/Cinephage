@@ -1,16 +1,16 @@
 import { describe, it, expect, vi, afterAll, beforeEach } from 'vitest';
 import { createTestDb, destroyTestDb, type TestDatabase } from '../../../test/db-helper.js';
-import { movies } from '$lib/server/db/schema.js';
+import { movies } from '#lib/server/db/schema.js';
 
 const testDb: TestDatabase = createTestDb();
 
-vi.mock('$lib/server/db/index.js', () => ({
+vi.mock('#lib/server/db/index.js', () => ({
 	get db() {
 		return testDb.db;
 	}
 }));
 
-vi.mock('$lib/server/quality/QualityFilter.js', () => ({
+vi.mock('#lib/server/quality/QualityFilter.js', () => ({
 	qualityFilter: {
 		getProfile: vi.fn().mockResolvedValue(null),
 		getDefaultScoringProfile: vi.fn().mockResolvedValue({ id: 'balanced', upgradesAllowed: true })
@@ -30,7 +30,9 @@ describe('GrabService.resolveTarget - desiredQualities threading', () => {
 		destroyTestDb(testDb);
 	});
 	beforeEach(() => {
-		testDb.sqlite.exec('DELETE FROM movies;');
+		testDb.sqlite.exec(
+			'DELETE FROM acquisition_reservations; DELETE FROM acquisition_intents; DELETE FROM movies;'
+		);
 	});
 
 	it('threads movie desiredQualities into the resolved context', async () => {

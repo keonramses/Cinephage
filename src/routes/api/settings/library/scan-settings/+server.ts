@@ -6,21 +6,20 @@
  *
  * Surfaces the previously-hidden librarySettings keys that controlled
  * the LibraryScheduler but had no UI:
- *   - scan_interval_hours (default 12) — periodic scan interval
- *   - watch_enabled (default true)     — filesystem watching
- *   - auto_match_threshold (default 0.8) — auto-match confidence
- *   - scan_on_startup (default true)   — scan on app startup
+ *   - scan_interval_hours (default 12) - periodic scan interval
+ *   - watch_enabled (default true)     - filesystem watching
+ *   - auto_match_threshold (default 0.8) - auto-match confidence
+ *   - scan_on_startup (default true)   - scan on app startup
  *
  * Phase 4 (per-library scan modes) will give these proper per-library
  * treatment; this interim UI makes them visible and editable now.
  */
-
-import { json, error } from '@sveltejs/kit';
+import { error } from '@sveltejs/kit';
 import type { RequestHandler } from './$types.js';
-import { db } from '$lib/server/db/index.js';
-import { librarySettings } from '$lib/server/db/schema.js';
+import { db } from '#lib/server/db/index.js';
+import { librarySettings } from '#lib/server/db/schema.js';
 import { eq } from 'drizzle-orm';
-import { requireAdmin } from '$lib/server/auth/authorization.js';
+import { requireAdmin } from '#lib/server/auth/authorization.js';
 import { z } from 'zod';
 
 const KEYS = {
@@ -72,7 +71,7 @@ export const GET: RequestHandler = async (event) => {
 		readSetting(KEYS.scanOnStartup)
 	]);
 
-	return json({
+	return Response.json({
 		scanIntervalHours: intervalRaw ? Number(intervalRaw) : DEFAULTS.scanIntervalHours,
 		watchEnabled: watchRaw !== null ? watchRaw === 'true' : DEFAULTS.watchEnabled,
 		autoMatchThreshold: thresholdRaw ? Number(thresholdRaw) : DEFAULTS.autoMatchThreshold,
@@ -99,5 +98,5 @@ export const PUT: RequestHandler = async (event) => {
 		writeSetting(KEYS.scanOnStartup, String(scanOnStartup))
 	]);
 
-	return json({ success: true });
+	return Response.json({ success: true });
 };

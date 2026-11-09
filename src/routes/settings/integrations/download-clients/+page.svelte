@@ -1,24 +1,24 @@
 <script lang="ts">
-	import { invalidateAll } from '$app/navigation';
-	import { Plus, Search } from 'lucide-svelte';
-	import { toasts } from '$lib/stores/toast.svelte';
+	import { refreshAll } from '$app/navigation';
+	import { Plus, Search } from '@lucide/svelte';
+	import { toasts } from '#lib/stores/toast.svelte.js';
 	import { SvelteSet } from 'svelte/reactivity';
-	import { toFriendlyDownloadClientError } from '$lib/downloadClients/errorMessages';
+	import { toFriendlyDownloadClientError } from '#lib/downloadClients/errorMessages.js';
 	import type { PageData } from './$types';
 	import type {
 		DownloadClientFormData,
 		ConnectionTestResult,
 		UnifiedClientItem
-	} from '$lib/types/downloadClient';
+	} from '#lib/types/downloadClient.js';
 	import {
 		DownloadClientBulkActions,
 		DownloadClientModal,
 		DownloadClientTable
-	} from '$lib/components/downloadClients';
-	import { ConfirmationModal } from '$lib/components/ui/modal';
-	import { SettingsPage } from '$lib/components/ui/settings';
-	import * as m from '$lib/paraglide/messages.js';
-	import { isBlankOrRedacted } from '$lib/shared/sensitiveSettings';
+	} from '#lib/components/downloadClients/index.js';
+	import { ConfirmationModal } from '#lib/components/ui/modal/index.js';
+	import { SettingsPage } from '#lib/components/ui/settings/index.js';
+	import * as m from '#lib/paraglide/messages.js';
+	import { isBlankOrRedacted } from '#lib/shared/sensitiveSettings.js';
 	import {
 		createDownloadClient,
 		updateDownloadClient,
@@ -27,12 +27,12 @@
 		testNewDownloadClient,
 		updateMonitoringSettings,
 		ApiError
-	} from '$lib/api';
+	} from '#lib/api/index.js';
 	import type {
 		DownloadClientCreate,
 		DownloadClientUpdate,
 		DownloadClientTest
-	} from '$lib/validation/schemas.js';
+	} from '#lib/validation/schemas.js';
 
 	let { data }: { data: PageData } = $props();
 
@@ -83,6 +83,16 @@
 				client.hasApiToken
 		)
 	);
+
+	// If the last usable debrid client is removed/disabled, fall back to torrent
+	// rather than leaving an unreachable "debrid" preference in place with no
+	// control left in the UI to change it back.
+	$effect(() => {
+		if (!debridAvailable && defaultAcquisitionProtocol === 'debrid') {
+			defaultAcquisitionProtocol = 'torrent';
+			void saveDefaultAcquisitionProtocol();
+		}
+	});
 
 	async function saveDefaultAcquisitionProtocol() {
 		const response = await fetch('/api/settings/acquisition', {
@@ -332,7 +342,7 @@
 				await createDownloadClient(payload as unknown as DownloadClientCreate);
 			}
 
-			await invalidateAll();
+			await refreshAll();
 			closeModal();
 		} catch (error) {
 			if (error instanceof ApiError) {
@@ -351,7 +361,7 @@
 		if (!editingClient) return;
 		try {
 			await deleteDownloadClient(editingClient.id);
-			await invalidateAll();
+			await refreshAll();
 			closeModal();
 		} catch (error) {
 			toasts.error(
@@ -376,7 +386,7 @@
 		if (!deleteTarget) return;
 		try {
 			await deleteDownloadClient(deleteTarget.id);
-			await invalidateAll();
+			await refreshAll();
 			confirmDeleteOpen = false;
 			deleteTarget = null;
 		} catch (error) {
@@ -396,7 +406,7 @@
 	async function handleToggle(client: UnifiedClientItem) {
 		try {
 			await updateDownloadClient(client.id, { enabled: !client.enabled });
-			await invalidateAll();
+			await refreshAll();
 		} catch (error) {
 			toasts.error(
 				toDownloadClientErrorMessage(
@@ -428,7 +438,7 @@
 				)
 			);
 		} finally {
-			await invalidateAll();
+			await refreshAll();
 			testingId = null;
 		}
 	}
@@ -441,7 +451,7 @@
 				await updateDownloadClient(id, { enabled: true });
 			}
 
-			await invalidateAll();
+			await refreshAll();
 			selectedIds.clear();
 		} catch (error) {
 			toasts.error(
@@ -467,7 +477,7 @@
 				await updateDownloadClient(id, { enabled: false });
 			}
 
-			await invalidateAll();
+			await refreshAll();
 			selectedIds.clear();
 		} catch (error) {
 			toasts.error(
@@ -502,7 +512,7 @@
 				await deleteDownloadClient(id);
 			}
 
-			await invalidateAll();
+			await refreshAll();
 			selectedIds.clear();
 			confirmBulkDeleteOpen = false;
 		} catch (error) {
@@ -542,7 +552,7 @@
 				}
 			}
 
-			await invalidateAll();
+			await refreshAll();
 			toasts.info(
 				m.settings_integrations_bulkTestComplete({
 					successCount: String(successCount),
@@ -645,23 +655,22 @@
 		</div>
 	</div>
 
-	<div class="mb-4 rounded-lg border border-base-300 bg-base-100 p-4">
-		<label class="label py-1" for="defaultAcquisitionProtocol">
-			<span class="label-text font-medium">{m.acquisition_defaultPreference()}</span>
-		</label>
-		<select
-			id="defaultAcquisitionProtocol"
-			class="select-bordered select select-sm"
-			bind:value={defaultAcquisitionProtocol}
-			onchange={saveDefaultAcquisitionProtocol}
-		>
-			<option value="torrent">{m.acquisition_torrent()}</option>
-			<option value="debrid" disabled={!debridAvailable}>{m.acquisition_debrid()}</option>
-		</select>
-		{#if !debridAvailable}<p class="mt-2 text-xs text-base-content/60">
-				{m.acquisition_debridUnavailableReason()}
-			</p>{/if}
-	</div>
+	{#if debridAvailable}
+		<div class="mb-4 rounded-lg border border-base-300 bg-base-100 p-4">
+			<label class="label py-1" for="defaultAcquisitionProtocol">
+				<span class="label-text font-medium">{m.acquisition_defaultPreference()}</span>
+			</label>
+			<select
+				id="defaultAcquisitionProtocol"
+				class="select-bordered select select-sm"
+				bind:value={defaultAcquisitionProtocol}
+				onchange={saveDefaultAcquisitionProtocol}
+			>
+				<option value="torrent">{m.acquisition_torrentClient()}</option>
+				<option value="debrid">{m.acquisition_debrid()}</option>
+			</select>
+		</div>
+	{/if}
 
 	{#if selectedIds.size > 0}
 		<DownloadClientBulkActions
@@ -696,7 +705,7 @@
 <DownloadClientModal
 	open={modalOpen}
 	mode={modalMode}
-	client={editingClient as unknown as import('$lib/types/downloadClient').DownloadClient | null}
+	client={editingClient as unknown as import('#lib/types/downloadClient.js').DownloadClient | null}
 	{saving}
 	error={saveError}
 	stalledTimeoutMinutes={data.stalledDownloadTimeoutMinutes}
@@ -725,6 +734,10 @@
 	onDelete={handleDelete}
 	onTest={handleTest}
 	allowNntp={false}
+	existingClients={data.downloadClients.map((c) => ({
+		id: c.id,
+		implementation: c.implementation
+	}))}
 />
 
 <ConfirmationModal

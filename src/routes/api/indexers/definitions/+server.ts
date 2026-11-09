@@ -1,12 +1,11 @@
-import { json } from '@sveltejs/kit';
-import { getIndexerManager } from '$lib/server/indexers/IndexerManager';
-import { toUIDefinition } from '$lib/server/indexers/loader';
+import { getIndexerManager } from '#lib/server/indexers/IndexerManager.js';
+import { toUIDefinition } from '#lib/server/indexers/loader/index.js';
 
 /**
  * GET /api/indexers/definitions
  * Returns all available indexer definitions from the unified YAML-based system.
  * Internal/auto-managed definitions (flagged `internal: true` in their YAML,
- * e.g. cinephage-stream) are excluded from this list — they are seeded by
+ * e.g. cinephage-stream) are excluded from this list - they are seeded by
  * their owning subsystem and surfaced on the indexers page as read-only.
  */
 export async function GET() {
@@ -35,5 +34,5 @@ export async function GET() {
 		})
 		.sort((a, b) => a.name.localeCompare(b.name));
 
-	return json(definitions);
+	return Response.json(definitions);
 }

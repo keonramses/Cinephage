@@ -1,8 +1,7 @@
-import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types.js';
 import { stat } from 'node:fs/promises';
 import { join, resolve, normalize } from 'node:path';
-import { db } from '$lib/server/db/index.js';
+import { db } from '#lib/server/db/index.js';
 import {
 	downloadHistory,
 	downloadQueue,
@@ -10,35 +9,45 @@ import {
 	movieFiles,
 	rootFolders,
 	subtitles
-} from '$lib/server/db/schema.js';
+} from '#lib/server/db/schema.js';
 import { eq } from 'drizzle-orm';
-import { mediaInfoService } from '$lib/server/library/index.js';
-import { getLanguageProfileService } from '$lib/server/subtitles/services/LanguageProfileService.js';
-import { searchSubtitlesForNewMedia } from '$lib/server/subtitles/services/SubtitleImportService.js';
-import { monitoringScheduler } from '$lib/server/monitoring/MonitoringScheduler.js';
-import { monitoringSearchService } from '$lib/server/monitoring/search/MonitoringSearchService.js';
-import { getDownloadClientManager } from '$lib/server/downloadClients/DownloadClientManager.js';
-import { deleteAllAlternateTitles } from '$lib/server/services/index.js';
-import { deleteDirectoryWithinRoot } from '$lib/server/filesystem/delete-helpers.js';
-import { libraryMediaEvents } from '$lib/server/library/LibraryMediaEvents';
-import { tmdb } from '$lib/server/tmdb.js';
-import { movieUpdateSchema } from '$lib/validation/schemas';
-import { parseBody } from '$lib/server/api/validate.js';
+import { mediaInfoService } from '#lib/server/library/index.js';
+import { getLanguageProfileService } from '#lib/server/subtitles/services/LanguageProfileService.js';
+import { searchSubtitlesForNewMedia } from '#lib/server/subtitles/services/SubtitleImportService.js';
+import { monitoringScheduler } from '#lib/server/monitoring/MonitoringScheduler.js';
+import { monitoringSearchService } from '#lib/server/monitoring/search/MonitoringSearchService.js';
+import { getDownloadClientManager } from '#lib/server/downloadClients/DownloadClientManager.js';
+import { deleteAllAlternateTitles } from '#lib/server/services/index.js';
+import {
+	deleteDirectoryWithinRoot,
+	deleteFilesWithinRoot,
+	namesRootItself
+} from '#lib/server/filesystem/delete-helpers.js';
+import { libraryMediaEvents } from '#lib/server/library/LibraryMediaEvents.js';
+import { tmdb } from '#lib/server/tmdb.js';
+import { movieUpdateSchema } from '#lib/validation/schemas.js';
+import { parseBody } from '#lib/server/api/validate.js';
+import { acquisitionService } from '#lib/server/acquisition/AcquisitionService.js';
 import {
 	validateRootFolder,
 	getAnimeSubtypeEnforcement
-} from '$lib/server/library/LibraryAddService.js';
-import { isLikelyAnimeMedia } from '$lib/shared/anime-classification.js';
-import { mediaMoveService } from '$lib/server/library/MediaMoveService.js';
-import { getLibraryEntityService } from '$lib/server/library/LibraryEntityService.js';
-import { getLibraryScheduler } from '$lib/server/library/library-scheduler.js';
-import { getMetadataProviderConfig } from '$lib/server/metadata/provider-settings.js';
-import { resolveMissingAnimeProviderRefs } from '$lib/server/metadata/provider-ref-resolver.js';
-import { importService } from '$lib/server/downloadClients/import/index.js';
-import { getFileManagementSettings } from '$lib/server/settings/file-management.js';
-import { redundantFileIds } from '$lib/server/quality/buckets.js';
-import { resolveMovieMultiQuality } from '$lib/server/quality/movie-buckets.js';
-import { refreshMovieMetadata } from '$lib/server/metadata/metadata-refresh.js';
+} from '#lib/server/library/LibraryAddService.js';
+import { isLikelyAnimeMedia } from '#lib/shared/anime-classification.js';
+import { mediaMoveService } from '#lib/server/library/MediaMoveService.js';
+import { getLibraryEntityService } from '#lib/server/library/LibraryEntityService.js';
+import { getLibraryScheduler } from '#lib/server/library/library-scheduler.js';
+import { getMetadataProviderConfig } from '#lib/server/metadata/provider-settings.js';
+import { resolveMissingAnimeProviderRefs } from '#lib/server/metadata/provider-ref-resolver.js';
+import { persistLinkedProviderTitleVariants } from '#lib/server/metadata/provider-resolution.js';
+import { importService } from '#lib/server/downloadClients/import/index.js';
+import { getFileManagementSettings } from '#lib/server/settings/file-management.js';
+import { redundantFileIds } from '#lib/server/quality/buckets.js';
+import { resolveMovieMultiQuality } from '#lib/server/quality/movie-buckets.js';
+import {
+	refreshMovieMetadata,
+	metadataLanguageToLegacy,
+	warnLegacyMetadataLanguage
+} from '#lib/server/metadata/metadata-refresh.js';
 
 function isAnimeMovieSignal(input: {
 	rootFolderPath: string | null;
@@ -87,7 +96,8 @@ export const GET: RequestHandler = async ({ params }) => {
 				digitalReleaseDate: movies.digitalReleaseDate,
 				physicalReleaseDate: movies.physicalReleaseDate,
 				availabilityDelay: movies.availabilityDelay,
-				metadataLanguage: movies.metadataLanguage,
+				metadataLanguageMode: movies.metadataLanguageMode,
+				metadataLanguageValue: movies.metadataLanguageValue,
 				preferOriginalTitle: movies.preferOriginalTitle
 			})
 			.from(movies)
@@ -95,13 +105,23 @@ export const GET: RequestHandler = async ({ params }) => {
 			.where(eq(movies.id, params.id));
 
 		if (!movie) {
-			return json({ success: false, error: 'Movie not found' }, { status: 404 });
+			return Response.json({ success: false, error: 'Movie not found' }, { status: 404 });
 		}
 
-		const [files, existingSubtitles, subtitleStatus, releaseInfo] = await Promise.all([
+		const profileService = getLanguageProfileService();
+		const [
+			files,
+			existingSubtitles,
+			subtitleStatus,
+			effectiveLanguageProfile,
+			effectiveSubtitleRequirements,
+			releaseInfo
+		] = await Promise.all([
 			db.select().from(movieFiles).where(eq(movieFiles.movieId, movie.id)),
 			db.select().from(subtitles).where(eq(subtitles.movieId, movie.id)),
-			getLanguageProfileService().getMovieSubtitleStatus(movie.id),
+			profileService.getMovieSubtitleStatus(movie.id),
+			profileService.getEffectiveProfileForMovie(movie.id),
+			profileService.getEffectiveSubtitleRequirements({ movieId: movie.id }),
 			tmdb.getMovieReleaseInfo(movie.tmdbId).catch((err) => {
 				logger.warn(
 					{
@@ -132,10 +152,15 @@ export const GET: RequestHandler = async ({ params }) => {
 				(movie.providerRefs as Partial<Record<'tmdb' | 'anilist' | 'mal', string>> | null) ??
 				undefined
 		});
-		return json({
+		return Response.json({
 			success: true,
 			movie: {
 				...movie,
+				// Legacy view derived from the v2 pair (kept one release).
+				metadataLanguage: metadataLanguageToLegacy(
+					movie.metadataLanguageMode,
+					movie.metadataLanguageValue
+				),
 				providerRefs: enrichedProviderRefs,
 				tmdbStatus: releaseInfo?.status ?? null,
 				releaseDate: releaseInfo?.release_date ?? null,
@@ -169,12 +194,18 @@ export const GET: RequestHandler = async ({ params }) => {
 					satisfied: subtitleStatus.satisfied,
 					missing: subtitleStatus.missing,
 					existing: subtitleStatus.existing
-				}
+				},
+				// The profile governing this movie plus where it was resolved
+				// from (movie override > library default > instance default).
+				effectiveLanguageProfile: effectiveLanguageProfile ?? null,
+				// The subtitle requirements in force (item override or profile
+				// chain) with their resolution source.
+				effectiveSubtitleRequirements: effectiveSubtitleRequirements ?? null
 			}
 		});
 	} catch (error) {
 		logger.error('[API] Error fetching movie', error instanceof Error ? error : undefined);
-		return json(
+		return Response.json(
 			{
 				success: false,
 				error: error instanceof Error ? error.message : 'Failed to fetch movie'
@@ -202,10 +233,13 @@ export const PATCH: RequestHandler = async ({ params, request }) => {
 		removeUnwantedFiles,
 		wantsSubtitles,
 		languageProfileId,
+		subtitleRequirementsOverride,
 		delayProfileId,
 		folderPath,
 		tmdbCollectionId,
 		collectionName,
+		metadataLanguageMode,
+		metadataLanguageValue,
 		metadataLanguage,
 		preferOriginalTitle
 	} = body;
@@ -221,13 +255,18 @@ export const PATCH: RequestHandler = async ({ params, request }) => {
 			desiredQualities: movies.desiredQualities,
 			wantsSubtitles: movies.wantsSubtitles,
 			languageProfileId: movies.languageProfileId,
+			subtitleRequirementsOverride: movies.subtitleRequirementsOverride,
 			hasFile: movies.hasFile,
-			metadataLanguage: movies.metadataLanguage
+			metadataLanguageMode: movies.metadataLanguageMode,
+			metadataLanguageValue: movies.metadataLanguageValue
 		})
 		.from(movies)
 		.where(eq(movies.id, params.id));
 
 	const updateData: Record<string, unknown> = {};
+	// Track fields applied outside updateData (via service calls) so the
+	// "no valid fields" guard below stays accurate.
+	let appliedSideEffectFields = 0;
 	let moveRequest:
 		| {
 				mediaId: string;
@@ -263,7 +302,7 @@ export const PATCH: RequestHandler = async ({ params, request }) => {
 		const nextRootFolderId = typeof rootFolderId === 'string' ? rootFolderId.trim() : '';
 		const currentRootFolderId = currentMovie?.rootFolderId ?? null;
 		if (!nextRootFolderId) {
-			return json(
+			return Response.json(
 				{
 					success: false,
 					error: 'Root folder is required and cannot be unset after adding media.'
@@ -277,7 +316,7 @@ export const PATCH: RequestHandler = async ({ params, request }) => {
 			const hasExistingFiles = currentMovie?.hasFile === true;
 			const canMoveFromCurrentRoot = Boolean(currentRootFolderId);
 			if (hasExistingFiles && canMoveFromCurrentRoot && moveFilesOnRootChange !== true) {
-				return json(
+				return Response.json(
 					{
 						success: false,
 						error:
@@ -336,8 +375,28 @@ export const PATCH: RequestHandler = async ({ params, request }) => {
 	if (typeof wantsSubtitles === 'boolean') {
 		updateData.wantsSubtitles = wantsSubtitles;
 	}
+	// Per-item subtitle requirement override: validated list or null to clear
+	// (inherit from the profile chain). Replaces only the requirement list.
+	if (subtitleRequirementsOverride !== undefined) {
+		updateData.subtitleRequirementsOverride = subtitleRequirementsOverride;
+		appliedSideEffectFields++;
+	}
+	// Language profile override: a string must reference an existing profile
+	// and is applied through the service; null clears the override so the
+	// movie inherits (library default → instance default).
 	if (languageProfileId !== undefined) {
-		updateData.languageProfileId = languageProfileId;
+		const profileService = getLanguageProfileService();
+		if (languageProfileId !== null) {
+			const profile = await profileService.getProfile(languageProfileId);
+			if (!profile) {
+				return Response.json(
+					{ success: false, error: `Language profile not found: ${languageProfileId}` },
+					{ status: 400 }
+				);
+			}
+		}
+		await profileService.assignToMovie(params.id, languageProfileId);
+		appliedSideEffectFields++;
 	}
 	if (folderPath !== undefined) {
 		const trimmed = folderPath.trim();
@@ -348,11 +407,11 @@ export const PATCH: RequestHandler = async ({ params, request }) => {
 				.where(eq(rootFolders.id, currentMovie.rootFolderId))
 				.limit(1);
 			if (!rootFolder) {
-				return json({ success: false, error: 'Root folder not found' }, { status: 400 });
+				return Response.json({ success: false, error: 'Root folder not found' }, { status: 400 });
 			}
 			const resolved = normalize(join(rootFolder.path, trimmed));
 			if (!resolved.startsWith(normalize(rootFolder.path) + '/')) {
-				return json(
+				return Response.json(
 					{ success: false, error: 'Folder must be within the root folder' },
 					{ status: 400 }
 				);
@@ -360,7 +419,7 @@ export const PATCH: RequestHandler = async ({ params, request }) => {
 			try {
 				await stat(resolved);
 			} catch {
-				return json(
+				return Response.json(
 					{ success: false, error: `Folder does not exist on disk: ${resolve(resolved)}` },
 					{ status: 400 }
 				);
@@ -375,24 +434,53 @@ export const PATCH: RequestHandler = async ({ params, request }) => {
 	if (collectionName !== undefined) {
 		updateData.collectionName = collectionName;
 	}
-	if (metadataLanguage !== undefined) {
-		updateData.metadataLanguage = metadataLanguage;
+	// Metadata language override (v2 pair). The update schema maps the
+	// deprecated single-string form onto metadataLanguageMode/Value.
+	const metadataLanguageProvided =
+		metadataLanguageMode !== undefined ||
+		metadataLanguageValue !== undefined ||
+		metadataLanguage !== undefined;
+	const nextMetadataLanguageMode = metadataLanguageProvided
+		? (metadataLanguageMode ?? 'inherit')
+		: null;
+	const nextMetadataLanguageValue =
+		nextMetadataLanguageMode === 'explicit' ? (metadataLanguageValue ?? null) : null;
+	if (metadataLanguageProvided) {
+		if (metadataLanguage !== undefined) {
+			warnLegacyMetadataLanguage('PATCH /api/library/movies/[id]');
+		}
+		updateData.metadataLanguageMode = nextMetadataLanguageMode;
+		updateData.metadataLanguageValue = nextMetadataLanguageValue;
 	}
-	if (typeof preferOriginalTitle === 'boolean') {
+	if (preferOriginalTitle === null || typeof preferOriginalTitle === 'boolean') {
 		updateData.preferOriginalTitle = preferOriginalTitle;
 	}
 
-	if (Object.keys(updateData).length === 0 && !moveRequest) {
-		return json({ success: false, error: 'No valid fields to update' }, { status: 400 });
+	if (Object.keys(updateData).length === 0 && !moveRequest && appliedSideEffectFields === 0) {
+		return Response.json({ success: false, error: 'No valid fields to update' }, { status: 400 });
 	}
 
 	if (Object.keys(updateData).length > 0) {
 		await db.update(movies).set(updateData).where(eq(movies.id, params.id));
 	}
 
+	// Manual anime provider link: fetch the linked AniList/MAL entries and
+	// persist their title variants as alternate titles (idempotent). Runs in
+	// the background - external provider latency must not stall the PATCH.
+	if (providerRefs?.anilist || providerRefs?.mal) {
+		persistLinkedProviderTitleVariants('movie', params.id, providerRefs).catch((err) => {
+			logger.warn(
+				{ movieId: params.id, err },
+				'[API] Failed to persist linked provider title variants'
+			);
+		});
+	}
+
 	// Refresh metadata from TMDB when language override changes
 	const languageChanged =
-		metadataLanguage !== undefined && metadataLanguage !== (currentMovie?.metadataLanguage ?? null);
+		metadataLanguageProvided &&
+		(nextMetadataLanguageMode !== (currentMovie?.metadataLanguageMode ?? null) ||
+			nextMetadataLanguageValue !== (currentMovie?.metadataLanguageValue ?? null));
 	if (languageChanged) {
 		refreshMovieMetadata(params.id).catch((err) => {
 			logger.error(
@@ -477,7 +565,7 @@ export const PATCH: RequestHandler = async ({ params, request }) => {
 				},
 				'[API] Failed to reconcile redundant quality files'
 			);
-			return json(
+			return Response.json(
 				{
 					success: false,
 					error: error instanceof Error ? error.message : 'Failed to remove unwanted files'
@@ -534,15 +622,21 @@ export const PATCH: RequestHandler = async ({ params, request }) => {
 		);
 	}
 
-	// Check if subtitle monitoring was just enabled
+	// Check if subtitle monitoring was just enabled, or the requirement
+	// override changed while the gate is on. Requirements may come from the
+	// profile chain (library/instance default), so the gate alone enables.
 	if (currentMovie?.hasFile) {
-		const wasEnabled = currentMovie.wantsSubtitles === true && currentMovie.languageProfileId;
+		const wasEnabled = currentMovie.wantsSubtitles === true;
 		const newWantsSubtitles = wantsSubtitles ?? currentMovie.wantsSubtitles;
-		const newProfileId = languageProfileId ?? currentMovie.languageProfileId;
-		const isNowEnabled = newWantsSubtitles === true && newProfileId;
+		const isNowEnabled = newWantsSubtitles === true;
+		const overrideChanged =
+			subtitleRequirementsOverride !== undefined &&
+			JSON.stringify(subtitleRequirementsOverride) !==
+				JSON.stringify(currentMovie.subtitleRequirementsOverride ?? null);
 
-		// Trigger subtitle search if just enabled (wasn't before, is now)
-		if (!wasEnabled && isNowEnabled) {
+		// Trigger subtitle search if just enabled (wasn't before, is now) or
+		// the requirements changed while enabled.
+		if (isNowEnabled && (!wasEnabled || overrideChanged)) {
 			const settings = await monitoringScheduler.getSettings();
 			if (settings.subtitleSearchOnImportEnabled) {
 				logger.info(
@@ -574,7 +668,7 @@ export const PATCH: RequestHandler = async ({ params, request }) => {
 	}
 
 	const failedCount = reconcileFailures.length;
-	return json({
+	return Response.json({
 		success: true,
 		moveQueued: Boolean(moveTask),
 		moveTaskId: moveTask?.taskId,
@@ -616,29 +710,61 @@ export const DELETE: RequestHandler = async ({ params, url }) => {
 			.where(eq(movies.id, params.id));
 
 		if (!movie) {
-			return json({ success: false, error: 'Movie not found' }, { status: 404 });
+			return Response.json({ success: false, error: 'Movie not found' }, { status: 404 });
 		}
 
 		// Get all files for this movie
 		const files = await db.select().from(movieFiles).where(eq(movieFiles.movieId, params.id));
 
-		// Only require files if not removing from library entirely
-		if (files.length === 0 && !removeFromLibrary) {
-			return json({ success: false, error: 'Movie has no files to delete' }, { status: 400 });
+		// Unmatch also releases client-side tracking from the Unmatched-tab
+		// track/enroll flow so the torrent resurfaces in Unmatched. Real
+		// grabs (including arr_push-pushed ones) and the client itself are
+		// never touched - only rows explicitly stamped with `origin` qualify.
+		const unmatchedRelease = acquisitionService.releaseUnmatchedQueueItems(
+			{ movieId: params.id },
+			'files unmatched from library'
+		);
+
+		// Only require files if not removing from library entirely and there
+		// is no client tracking to release back to Unmatched.
+		if (
+			files.length === 0 &&
+			!removeFromLibrary &&
+			unmatchedRelease.released === 0 &&
+			unmatchedRelease.heldBack === 0
+		) {
+			return Response.json(
+				{ success: false, error: 'Movie has no files to delete' },
+				{ status: 400 }
+			);
 		}
 
 		// Block file deletion from read-only folders
 		if (deleteFiles && movie.rootFolderReadOnly) {
-			return json(
+			return Response.json(
 				{ success: false, error: 'Cannot delete files from read-only folder' },
 				{ status: 400 }
 			);
 		}
 
-		// Delete files from disk if requested
+		// Delete files from disk if requested. A movie whose tracked path IS the
+		// root folder (a loose file at the top of the library) must remove its
+		// own files, never the directory: that would take every other title in
+		// the root with it.
 		if (deleteFiles && movie.rootFolderPath && movie.path) {
-			const movieFolder = await deleteDirectoryWithinRoot(movie.rootFolderPath, movie.path);
-			logger.debug({ movieFolder }, '[API] Removed movie folder and all contents');
+			if (namesRootItself(movie.rootFolderPath, movie.path)) {
+				const removed = await deleteFilesWithinRoot(
+					movie.rootFolderPath,
+					files.map((file) => join(movie.path!, file.relativePath))
+				);
+				logger.debug(
+					{ count: removed.length },
+					'[API] Removed root-level movie files without deleting the library root'
+				);
+			} else {
+				const movieFolder = await deleteDirectoryWithinRoot(movie.rootFolderPath, movie.path);
+				logger.debug({ movieFolder }, '[API] Removed movie folder and all contents');
+			}
 		}
 
 		// Delete movie file records from database
@@ -678,7 +804,9 @@ export const DELETE: RequestHandler = async ({ params, url }) => {
 						);
 					}
 				}
-				// Delete queue record
+				// Delete queue record - cancel the acquisition intent first so the
+				// slot is released rather than leaking until restart.
+				acquisitionService.cancelByQueueId(queueItem.id, 'media removed from library');
 				await db.delete(downloadQueue).where(eq(downloadQueue.id, queueItem.id));
 			}
 
@@ -697,21 +825,23 @@ export const DELETE: RequestHandler = async ({ params, url }) => {
 			libraryMediaEvents.emitMovieUpdated(params.id);
 
 			logger.info({ movieId: params.id }, '[API] Removed movie from library');
-			return json({ success: true, removed: true });
+			return Response.json({ success: true, removed: true });
 		} else {
 			// Update movie to show as missing
 			await db
 				.update(movies)
 				.set({ hasFile: false, lastSearchTime: null })
 				.where(eq(movies.id, params.id));
+
+			// Unmatched-flow queue rows were already released above.
 			libraryMediaEvents.emitMovieUpdated(params.id);
 
 			// Note: Movie metadata is kept - it will show as "missing"
-			return json({ success: true });
+			return Response.json({ success: true });
 		}
 	} catch (error) {
 		logger.error('[API] Error deleting movie files', error instanceof Error ? error : undefined);
-		return json(
+		return Response.json(
 			{
 				success: false,
 				error: error instanceof Error ? error.message : 'Failed to delete movie files'
@@ -722,7 +852,7 @@ export const DELETE: RequestHandler = async ({ params, url }) => {
 };
 
 // Import for static method access
-import { MediaInfoService } from '$lib/server/library/index.js';
-import { createChildLogger } from '$lib/logging';
+import { MediaInfoService } from '#lib/server/library/index.js';
+import { createChildLogger } from '#lib/logging/index.js';
 
 const logger = createChildLogger({ module: 'LibraryMovieByIdApi', logDomain: 'scans' });

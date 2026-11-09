@@ -5,10 +5,10 @@
  * Parses M3U playlists to extract channels and stream URLs.
  */
 
-import { db } from '$lib/server/db';
-import { livetvAccounts, livetvChannels, livetvCategories } from '$lib/server/db/schema';
+import { db } from '#lib/server/db/index.js';
+import { livetvAccounts, livetvChannels, livetvCategories } from '#lib/server/db/schema.js';
 import { and, eq, inArray, notInArray } from 'drizzle-orm';
-import { createChildLogger } from '$lib/logging';
+import { createChildLogger } from '#lib/logging/index.js';
 import { randomUUID } from 'node:crypto';
 import { promisify } from 'util';
 import { gunzip, inflate } from 'zlib';
@@ -25,11 +25,14 @@ import type {
 	LiveTvCategory,
 	ChannelSyncResult,
 	EpgProgram,
+	EpgLocalizedText,
 	LiveTvAccountTestResult,
 	M3uChannelData,
 	M3uConfig
-} from '$lib/types/livetv';
+} from '#lib/types/livetv.js';
 import { recordToAccount } from '../LiveTvAccountManager.js';
+import { encryptLivetvConfig } from '../configCrypto.js';
+import { resolveHttpUrl } from '../urlGuards.js';
 
 const gunzipAsync = promisify(gunzip);
 const inflateAsync = promisify(inflate);
@@ -229,7 +232,13 @@ export class M3uProvider implements LiveTvProvider {
 				await db
 					.update(livetvAccounts)
 					.set({
-						m3uConfig: nextConfig,
+						// `config` came from recordToAccount, which decrypts `url`,
+						// `headers` and other credential keys. Writing it back raw
+						// downgrades the row to plaintext on every playlist refresh.
+						m3uConfig: encryptLivetvConfig(
+							accountId,
+							nextConfig as unknown as Record<string, unknown>
+						) as unknown as M3uConfig,
 						updatedAt: now
 					})
 					.where(eq(livetvAccounts.id, accountId));
@@ -540,17 +549,28 @@ export class M3uProvider implements LiveTvProvider {
 
 				if (playlistContent) {
 					const parsed = this.parseM3u(playlistContent);
-					epgUrl = parsed.headerEpgUrl ?? undefined;
+					// The header attribute is third-party content - only honor
+					// it when it parses as an ordinary http(s) URL.
+					epgUrl = resolveHttpUrl(parsed.headerEpgUrl)?.toString() ?? undefined;
+					if (parsed.headerEpgUrl && !epgUrl) {
+						logger.warn(
+							{ accountId: account.id, declared: parsed.headerEpgUrl.slice(0, 80) },
+							'[M3uProvider] Playlist-declared EPG URL rejected (invalid scheme/format); ignoring'
+						);
+					}
 				}
 
 				if (epgUrl) {
 					await db
 						.update(livetvAccounts)
 						.set({
-							m3uConfig: {
+							// `config` is decrypted at this point (recordToAccount);
+							// re-encrypt before persisting or the row downgrades to
+							// plaintext on every EPG sync.
+							m3uConfig: encryptLivetvConfig(account.id, {
 								...config,
 								epgUrl
-							},
+							} as unknown as Record<string, unknown>) as unknown as M3uConfig,
 							updatedAt: new Date().toISOString()
 						})
 						.where(eq(livetvAccounts.id, account.id));
@@ -571,6 +591,13 @@ export class M3uProvider implements LiveTvProvider {
 			}
 
 			// Fetch XMLTV data
+			if (!resolveHttpUrl(epgUrl)) {
+				logger.warn(
+					{ accountId: account.id },
+					'[M3uProvider] EPG URL is not a valid http(s) URL; skipping EPG sync'
+				);
+				return [];
+			}
 			logger.info({ epgUrl }, '[M3uProvider] Fetching XMLTV EPG');
 			const headers = this.buildRequestHeaders(config);
 			if (!headers['User-Agent']) {
@@ -739,10 +766,17 @@ export class M3uProvider implements LiveTvProvider {
 					// Keep any programme that overlaps the requested window.
 					if (progEnd < startTime || progStart > endTime) continue;
 
-					// Extract program info
+					// Extract program info. The plain columns intentionally keep the
+					// pre-i18n behavior (first element's text) so existing readers are
+					// unaffected; the full per-language variant lists are preserved
+					// alongside for display-time selection (migration 140).
 					const title = this.extractXmltvText(prog.title);
 					const description = this.extractXmltvText(prog.desc);
 					const category = this.extractXmltvText(prog.category);
+
+					const titleI18n = this.extractXmltvTexts(prog.title);
+					const descriptionI18n = this.extractXmltvTexts(prog.desc);
+					const categoryI18n = this.extractXmltvTexts(prog.category);
 
 					// Handle credits (director, actors)
 					let director: string | null = null;
@@ -770,6 +804,9 @@ export class M3uProvider implements LiveTvProvider {
 							title: title || 'Unknown',
 							description,
 							category,
+							titleI18n: titleI18n.length > 0 ? titleI18n : null,
+							descriptionI18n: descriptionI18n.length > 0 ? descriptionI18n : null,
+							categoryI18n: categoryI18n.length > 0 ? categoryI18n : null,
 							director,
 							actor,
 							startTime: progStart.toISOString(),
@@ -802,8 +839,10 @@ export class M3uProvider implements LiveTvProvider {
 
 			return programs;
 		} catch (error) {
+			// Rethrow so EpgService records the failure on the account instead of
+			// reporting a clean "no data" sync while cached programs age out.
 			logger.error({ accountId: account.id, err: error }, '[M3uProvider] EPG fetch failed');
-			return [];
+			throw error instanceof Error ? error : new Error(String(error));
 		}
 	}
 
@@ -865,13 +904,61 @@ export class M3uProvider implements LiveTvProvider {
 		return null;
 	}
 
+	/**
+	 * Extract ALL localized text variants from an XMLTV text element.
+	 *
+	 * XMLTV text elements (title/desc/category) may repeat with different `lang`
+	 * attributes. fast-xml-parser is configured in fetchEpg with
+	 * `attributeNamePrefix: '@_'`, so a parsed element looks like
+	 * `{ '#text': 'News', '@_lang': 'en' }` (or a plain string when the element
+	 * has no attributes), and repeated elements become an array. Every variant
+	 * is collected as `{ lang, text }` with `lang` being the lower-cased
+	 * `@_lang` value or null; elements without text are skipped. Source order is
+	 * preserved.
+	 */
+	private extractXmltvTexts(value: unknown): EpgLocalizedText[] {
+		if (!value) return [];
+		const elements = Array.isArray(value) ? value : [value];
+		const texts: EpgLocalizedText[] = [];
+		for (const element of elements) {
+			if (element == null) continue;
+			let text: string | null = null;
+			let lang: string | null = null;
+			if (typeof element === 'string') {
+				text = element;
+			} else if (typeof element === 'object') {
+				const record = element as Record<string, unknown>;
+				if (record['#text'] != null) {
+					text = String(record['#text']);
+				}
+				if (typeof record['@_lang'] === 'string' && record['@_lang'].trim() !== '') {
+					lang = record['@_lang'].trim().toLowerCase();
+				}
+			}
+			if (text == null) continue;
+			texts.push({ lang, text });
+		}
+		return texts;
+	}
+
+	/**
+	 * Build a normalization key for matching M3U channels against XMLTV ones.
+	 *
+	 * NFKD-normalizes, strips combining marks, lower-cases, then keeps only
+	 * Unicode letters and numbers (`\p{L}`/`\p{N}`), so Latin diacritics
+	 * collapse ('Café' → 'cafe') while non-Latin scripts (CJK, Cyrillic,
+	 * Arabic, …) keep a stable key instead of collapsing to nothing. Returns
+	 * null when nothing usable remains - null keys are never entered into or
+	 * looked up in the lookup map, so two punctuation-only names can never
+	 * cross-match.
+	 */
 	private normalizeChannelLookupKey(value: string | undefined): string | null {
 		if (!value) return null;
 		const normalized = value
 			.normalize('NFKD')
 			.replace(/[\u0300-\u036f]/g, '')
 			.toLowerCase()
-			.replace(/[^a-z0-9]+/g, '');
+			.replace(/[^\p{L}\p{N}]+/gu, '');
 		return normalized || null;
 	}
 
@@ -883,6 +970,14 @@ export class M3uProvider implements LiveTvProvider {
 		if (!epgUrl) {
 			return {
 				status: 'not_configured'
+			};
+		}
+
+		if (!resolveHttpUrl(epgUrl)) {
+			return {
+				status: 'unreachable',
+				source,
+				error: 'EPG URL is not a valid http(s) URL'
 			};
 		}
 

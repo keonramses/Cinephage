@@ -1,17 +1,17 @@
-import { strmService, StrmService, getStreamingBaseUrl } from '$lib/server/streaming/index.js';
-import { getRecoverableApiKeyByType } from '$lib/server/auth/index.js';
-import { ReleaseParser } from '$lib/server/indexers/parser/ReleaseParser.js';
-import { mediaInfoService } from '$lib/server/library/media-info.js';
-import { getLibraryRelativePath } from '$lib/server/library/media-paths.js';
-import { monitoringScheduler } from '$lib/server/monitoring/MonitoringScheduler.js';
-import { searchSubtitlesForNewMedia } from '$lib/server/subtitles/services/SubtitleImportService.js';
-import { fileExists, importService } from '$lib/server/downloadClients/import/index.js';
-import { deletePhysicalFile } from '$lib/server/downloadClients/import/FileTransfer.js';
-import { getFileManagementSettings } from '$lib/server/settings/file-management.js';
-import { eventBuffer } from '$lib/server/sse/EventBuffer.js';
-import { libraryMediaEvents } from '$lib/server/library/LibraryMediaEvents.js';
-import { createChildLogger } from '$lib/logging/index.js';
-import { db } from '$lib/server/db/index.js';
+import { strmService, StrmService, getStreamingBaseUrl } from '#lib/server/streaming/index.js';
+import { getOwnerStreamingApiKey } from '#lib/server/auth/index.js';
+import { ReleaseParser } from '#lib/server/indexers/parser/ReleaseParser.js';
+import { mediaInfoService } from '#lib/server/library/media-info.js';
+import { getLibraryRelativePath } from '#lib/server/library/media-paths.js';
+import { monitoringScheduler } from '#lib/server/monitoring/MonitoringScheduler.js';
+import { searchSubtitlesForNewMedia } from '#lib/server/subtitles/services/SubtitleImportService.js';
+import { fileExists, importService } from '#lib/server/downloadClients/import/index.js';
+import { deletePhysicalFile } from '#lib/server/downloadClients/import/FileTransfer.js';
+import { getFileManagementSettings } from '#lib/server/settings/file-management.js';
+import { eventBuffer } from '#lib/server/sse/EventBuffer.js';
+import { libraryMediaEvents } from '#lib/server/library/LibraryMediaEvents.js';
+import { createChildLogger } from '#lib/logging/index.js';
+import { db } from '#lib/server/db/index.js';
 import {
 	movies,
 	movieFiles,
@@ -19,15 +19,19 @@ import {
 	episodes,
 	episodeFiles,
 	downloadHistory
-} from '$lib/server/db/schema.js';
+} from '#lib/server/db/schema.js';
 import { eq, and } from 'drizzle-orm';
 import { randomUUID } from 'node:crypto';
 import { statSync } from 'node:fs';
 import { unlink } from 'node:fs/promises';
 import { join } from 'node:path';
-import { resolveMovieMultiQuality } from '$lib/server/quality/movie-buckets.js';
-import { replaceIdsForImport } from '$lib/server/quality/buckets.js';
-import type { Resolution } from '$lib/server/indexers/parser/types.js';
+import { resolveMovieMultiQuality } from '#lib/server/quality/movie-buckets.js';
+import { buildStreamingQuality } from './streaming-quality.js';
+import {
+	computeMovieReplacement,
+	computeEpisodeReplacement
+} from '#lib/server/downloadClients/import/replacement.js';
+import type { Resolution } from '#lib/server/indexers/parser/types.js';
 import type { GrabRequest, ResolvedContext, HandlerResult } from '../grab-types.js';
 
 const logger = createChildLogger({ module: 'StreamingHandler' });
@@ -77,7 +81,7 @@ export class StreamingHandler {
 		}
 
 		try {
-			const key = await getRecoverableApiKeyByType('streaming');
+			const key = await getOwnerStreamingApiKey();
 			const available = !!key;
 			this.streamingKeyCache = { available, checkedAt: now };
 			if (available) {
@@ -113,6 +117,10 @@ export class StreamingHandler {
 		}
 
 		const baseUrl = await getStreamingBaseUrl('http://localhost:5173');
+
+		if (parsed.isCompleteSeries && mediaType === 'tv' && seriesId) {
+			return this.handleCompleteSeries(request, resolved, parsed, baseUrl);
+		}
 
 		if (parsed.isSeasonPack && mediaType === 'tv' && seriesId && parsed.season !== undefined) {
 			return this.handleSeasonPack(request, resolved, parsed, baseUrl);
@@ -159,12 +167,10 @@ export class StreamingHandler {
 			const mediaInfo = await mediaInfoService.extractMediaInfo(filePath, { allowStrmProbe });
 
 			const parsedRelease = parser.parse(release.title);
-			const quality = {
-				resolution: parsedRelease.resolution ?? '1080p',
-				source: 'Streaming',
-				codec: 'HLS',
-				hdr: undefined
-			};
+			// The stream's real ladder is only known at playback time, so the
+			// probed height outranks the release title and an unprobed .strm
+			// must not be labelled 1080p by default (4K sources are real now).
+			const quality = buildStreamingQuality(mediaInfo, parsedRelease);
 
 			if (mediaType === 'movie' && movieId) {
 				return this.importStreamingMovie(release, {
@@ -235,28 +241,52 @@ export class StreamingHandler {
 		);
 		const newResolution = quality.resolution as Resolution | undefined;
 
-		if (isUpgrade) {
-			await this.deleteExistingMovieFiles(movieId, movie.rootFolder.path, movie.path, {
-				multiQuality,
-				newResolution
+		// .strm destinations are deterministic (title/year/tmdbId): an existing
+		// row for the same path is updated in place, so re-grabs never create
+		// duplicates and never unlink their own file (self-deletion bug).
+		const samePathRow = await db.query.movieFiles.findFirst({
+			where: and(eq(movieFiles.movieId, movieId), eq(movieFiles.relativePath, relativePath))
+		});
+
+		const fileId = samePathRow?.id ?? randomUUID();
+		if (samePathRow) {
+			await db
+				.update(movieFiles)
+				.set({
+					size: fileSize,
+					dateAdded: new Date().toISOString(),
+					sceneName: release.title,
+					releaseGroup: parsedRelease.releaseGroup ?? 'Streaming',
+					edition: parsedRelease.edition ?? undefined,
+					quality,
+					mediaInfo
+				})
+				.where(eq(movieFiles.id, fileId));
+		} else {
+			await db.insert(movieFiles).values({
+				id: fileId,
+				movieId,
+				relativePath,
+				size: fileSize,
+				dateAdded: new Date().toISOString(),
+				sceneName: release.title,
+				releaseGroup: parsedRelease.releaseGroup ?? 'Streaming',
+				edition: parsedRelease.edition ?? undefined,
+				quality,
+				mediaInfo
 			});
 		}
 
-		const fileId = randomUUID();
-		await db.insert(movieFiles).values({
-			id: fileId,
-			movieId,
-			relativePath,
-			size: fileSize,
-			dateAdded: new Date().toISOString(),
-			sceneName: release.title,
-			releaseGroup: parsedRelease.releaseGroup ?? 'Streaming',
-			edition: parsedRelease.edition ?? undefined,
-			quality,
-			mediaInfo
-		});
-
 		await db.update(movies).set({ hasFile: true }).where(eq(movies.id, movieId));
+
+		// Retire AFTER registration, selected from current state via the
+		// shared policy. The just-written row is excluded by id - the old
+		// delete-before-insert order unlinked the fresh .strm.
+		await this.retireMovieFiles(movieId, movie.rootFolder.path, movie.path, {
+			multiQuality,
+			newResolution,
+			keepFileIds: [fileId]
+		});
 
 		await db.insert(downloadHistory).values({
 			title: release.title,
@@ -355,15 +385,6 @@ export class StreamingHandler {
 
 		const relativePath = getLibraryRelativePath(show.rootFolder.path, show.path, filePath);
 
-		if (isUpgrade) {
-			await this.deleteExistingEpisodeFiles(
-				seriesId,
-				episodeRow.id,
-				show.rootFolder.path,
-				show.path
-			);
-		}
-
 		const fileId = await upsertEpisodeFileByPath({
 			seriesId,
 			seasonNumber: season,
@@ -379,6 +400,12 @@ export class StreamingHandler {
 		});
 
 		await db.update(episodes).set({ hasFile: true }).where(eq(episodes.id, episodeRow.id));
+
+		// Register-then-retire: overlapping files are selected from current
+		// state after the new row exists (coverage rule, self-deletion guard).
+		await this.retireEpisodeFiles(seriesId, [episodeRow.id], show.rootFolder.path, show.path, {
+			keepFileIds: [fileId]
+		});
 
 		await db.insert(downloadHistory).values({
 			title: release.title,
@@ -432,15 +459,71 @@ export class StreamingHandler {
 		};
 	}
 
-	private async handleSeasonPack(
+	/**
+	 * Complete-series (`stream://tv/{id}/all`) grabs: expand into per-season
+	 * packs and import each, so indexer results that emit `/all` are handled
+	 * instead of failing the single-episode path.
+	 */
+	private async handleCompleteSeries(
 		request: GrabRequest,
 		resolved: ResolvedContext,
 		parsedStream: NonNullable<ReturnType<typeof StrmService.parseStreamUrl>>,
 		baseUrl: string
 	): Promise<HandlerResult> {
+		const { seriesId } = resolved;
+		if (!seriesId) {
+			return { success: false, error: 'seriesId is required for a complete-series grab' };
+		}
+
+		const show = await db.query.series.findFirst({
+			where: eq(series.id, seriesId)
+		});
+		if (!show) {
+			return { success: false, error: 'Series not found' };
+		}
+
+		const seriesEpisodes = await db.query.episodes.findMany({
+			where: eq(episodes.seriesId, seriesId)
+		});
+		const seasonNumbers = [...new Set(seriesEpisodes.map((episode) => episode.seasonNumber))]
+			.filter((seasonNumber) => seasonNumber > 0) // Season 0 (specials) is excluded
+			.sort((a, b) => a - b);
+
+		if (seasonNumbers.length === 0) {
+			return { success: false, error: 'Series has no episodes to stream' };
+		}
+
+		let successResult: HandlerResult | null = null;
+		let lastError: string | undefined;
+
+		for (const seasonNumber of seasonNumbers) {
+			const seasonResult = await this.handleSeasonPack(
+				request,
+				resolved,
+				parsedStream,
+				baseUrl,
+				seasonNumber
+			);
+			if (seasonResult.success) {
+				successResult ??= seasonResult;
+			} else {
+				lastError = seasonResult.error;
+			}
+		}
+
+		return successResult ?? { success: false, error: lastError ?? 'Failed to create .strm files' };
+	}
+
+	private async handleSeasonPack(
+		request: GrabRequest,
+		resolved: ResolvedContext,
+		parsedStream: NonNullable<ReturnType<typeof StrmService.parseStreamUrl>>,
+		baseUrl: string,
+		seasonNumberOverride?: number
+	): Promise<HandlerResult> {
 		const { release, options } = request;
 		const { seriesId } = resolved;
-		const seasonNumber = parsedStream.season!;
+		const seasonNumber = seasonNumberOverride ?? parsedStream.season!;
 		const isUpgrade = options.isUpgrade;
 
 		if (!seriesId) {
@@ -487,12 +570,9 @@ export class StreamingHandler {
 		}
 
 		const parsedRelease = parser.parse(release.title);
-		const quality = {
-			resolution: parsedRelease.resolution ?? '1080p',
-			source: 'Streaming',
-			codec: 'HLS',
-			hdr: undefined
-		};
+		// Per-episode rows carry their own probed height, so quality is resolved
+		// when each file is inspected rather than once for the whole pack.
+		const fallbackQuality = buildStreamingQuality(undefined, parsedRelease);
 
 		const episodeFileData: Array<{
 			episodeId: string;
@@ -501,6 +581,7 @@ export class StreamingHandler {
 			fileSize: number;
 			relativePath: string;
 			mediaInfo: Awaited<ReturnType<typeof mediaInfoService.extractMediaInfo>>;
+			quality: ReturnType<typeof buildStreamingQuality>;
 		}> = [];
 
 		for (const epResult of strmResult.results) {
@@ -523,7 +604,8 @@ export class StreamingHandler {
 					filePath: epResult.filePath,
 					fileSize: Number(stats.size),
 					relativePath,
-					mediaInfo
+					mediaInfo,
+					quality: buildStreamingQuality(mediaInfo, parsedRelease)
 				});
 			} catch (error) {
 				logger.error(
@@ -557,26 +639,6 @@ export class StreamingHandler {
 					continue;
 				}
 
-				if (isUpgrade) {
-					const allSeriesFiles = await db.query.episodeFiles.findMany({
-						where: eq(episodeFiles.seriesId, seriesId)
-					});
-					const existingFiles = allSeriesFiles.filter((f) =>
-						f.episodeIds?.includes(epData.episodeId)
-					);
-					for (const oldFile of existingFiles) {
-						const oldFilePath = join(show.rootFolder!.path, show.path, oldFile.relativePath);
-						try {
-							if (await fileExists(oldFilePath)) {
-								await unlink(oldFilePath);
-							}
-						} catch {
-							// non-critical
-						}
-						await db.delete(episodeFiles).where(eq(episodeFiles.id, oldFile.id));
-					}
-				}
-
 				const fileId = await upsertEpisodeFileByPath({
 					seriesId,
 					seasonNumber,
@@ -586,11 +648,21 @@ export class StreamingHandler {
 					dateAdded: new Date().toISOString(),
 					sceneName: release.title,
 					releaseGroup: parsedRelease.releaseGroup ?? 'Streaming',
-					quality,
+					quality: epData.quality,
 					mediaInfo: epData.mediaInfo
 				});
 
 				await db.update(episodes).set({ hasFile: true }).where(eq(episodes.id, epData.episodeId));
+
+				// Register-then-retire with the coverage rule; the just-upserted
+				// row is excluded (same path → updated in place, never deleted).
+				await this.retireEpisodeFiles(
+					seriesId,
+					[epData.episodeId],
+					show.rootFolder!.path,
+					show.path,
+					{ keepFileIds: [fileId] }
+				);
 
 				createdEpisodeIds.push(epData.episodeId);
 				createdFileIds.push(fileId);
@@ -608,7 +680,7 @@ export class StreamingHandler {
 					seasonNumber,
 					status: 'streaming',
 					size: totalSize,
-					quality,
+					quality: fallbackQuality,
 					episodeFileIds: createdFileIds,
 					grabbedAt: new Date().toISOString(),
 					importedAt: new Date().toISOString()
@@ -661,25 +733,35 @@ export class StreamingHandler {
 		}
 	}
 
-	private async deleteExistingMovieFiles(
+	/**
+	 * Retire existing movie files per the shared state-based policy. Runs
+	 * AFTER the new row is registered; `keepFileIds` excludes it. Physical
+	 * deletion failure keeps the DB row (scan re-discovery guard).
+	 */
+	private async retireMovieFiles(
 		movieId: string,
 		rootFolderPath: string,
 		moviePath: string,
-		options?: { multiQuality?: boolean; newResolution?: Resolution }
+		options: {
+			multiQuality: boolean;
+			newResolution?: Resolution;
+			keepFileIds: string[];
+		}
 	): Promise<void> {
 		const existingFiles = await db.query.movieFiles.findMany({
 			where: eq(movieFiles.movieId, movieId)
 		});
 
-		// This is only invoked on upgrade; in multi-quality mode only the file(s)
-		// in the same resolution bucket are replaced, other tiers are preserved.
 		const replaceIds = new Set(
-			replaceIdsForImport(existingFiles, {
-				newResolution: options?.newResolution,
-				multiQuality: options?.multiQuality ?? false,
-				isUpgrade: true
+			computeMovieReplacement({
+				existingFiles,
+				newResolution: options.newResolution,
+				multiQuality: options.multiQuality,
+				retire: true,
+				keepFileIds: options.keepFileIds
 			})
 		);
+		if (replaceIds.size === 0) return;
 
 		const { recycleEnabled } = await getFileManagementSettings();
 
@@ -688,32 +770,56 @@ export class StreamingHandler {
 			const oldFilePath = join(rootFolderPath, moviePath, oldFile.relativePath);
 			try {
 				await deletePhysicalFile(oldFilePath, recycleEnabled, rootFolderPath);
-			} catch {
-				// non-critical
+			} catch (error) {
+				logger.warn(
+					{ fileId: oldFile.id, path: oldFilePath, err: error },
+					'Failed to delete old streaming movie file - keeping DB row'
+				);
+				continue;
 			}
 			await db.delete(movieFiles).where(eq(movieFiles.id, oldFile.id));
 		}
 	}
 
-	private async deleteExistingEpisodeFiles(
+	/**
+	 * Retire episode files overlapping `episodeId` per the coverage rule:
+	 * multi-episode files survive unless the incoming set preserves every
+	 * episode they hold; .strm placeholders always yield to real files.
+	 */
+	private async retireEpisodeFiles(
 		seriesId: string,
-		episodeId: string,
+		incomingEpisodeIds: string[],
 		rootFolderPath: string,
-		seriesPath: string
+		seriesPath: string,
+		options?: { keepFileIds?: string[] }
 	): Promise<void> {
 		const allSeriesFiles = await db.query.episodeFiles.findMany({
 			where: eq(episodeFiles.seriesId, seriesId)
 		});
-		const existingFiles = allSeriesFiles.filter((f) => f.episodeIds?.includes(episodeId));
 
-		for (const oldFile of existingFiles) {
+		const replaceIds = new Set(
+			computeEpisodeReplacement({
+				existingFiles: allSeriesFiles,
+				incomingEpisodeIds,
+				keepFileIds: options?.keepFileIds,
+				retireStrmPlaceholders: true
+			})
+		);
+		if (replaceIds.size === 0) return;
+
+		for (const oldFile of allSeriesFiles) {
+			if (!replaceIds.has(oldFile.id)) continue;
 			const oldFilePath = join(rootFolderPath, seriesPath, oldFile.relativePath);
 			try {
 				if (await fileExists(oldFilePath)) {
 					await unlink(oldFilePath);
 				}
-			} catch {
-				// non-critical
+			} catch (error) {
+				logger.warn(
+					{ fileId: oldFile.id, path: oldFilePath, err: error },
+					'Failed to delete old streaming episode file - keeping DB row'
+				);
+				continue;
 			}
 			await db.delete(episodeFiles).where(eq(episodeFiles.id, oldFile.id));
 		}

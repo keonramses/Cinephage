@@ -1,9 +1,8 @@
-import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
-import { db } from '$lib/server/db';
-import { mediaServerSyncedItems } from '$lib/server/db/schema';
-import { eq } from 'drizzle-orm';
-import type { AggregatedMediaItem } from '$lib/server/mediaServerStats/types.js';
+import { db } from '#lib/server/db/index.js';
+import { mediaBrowserServers, mediaServerSyncedItems } from '#lib/server/db/schema.js';
+import { and, eq, inArray } from 'drizzle-orm';
+import type { AggregatedMediaItem } from '#lib/server/mediaServerStats/types.js';
 
 const VALID_SORT_FIELDS = ['playCount', 'fileSize', 'title', 'lastPlayedDate'] as const;
 type SortField = (typeof VALID_SORT_FIELDS)[number];
@@ -24,7 +23,12 @@ export const GET: RequestHandler = async ({ url }) => {
 	const page = Math.max(1, parseInt(pageParam, 10) || 1);
 	const limit = Math.min(100, Math.max(1, parseInt(limitParam, 10) || 25));
 
-	const conditions = [];
+	// A disabled server's synced data is kept (not deleted) so re-enabling and
+	// re-syncing is cheap, but it must stop counting toward this aggregate.
+	const servers = await db.select().from(mediaBrowserServers);
+	const enabledServerIds = servers.filter((s) => s.enabled).map((s) => s.id);
+
+	const conditions = [inArray(mediaServerSyncedItems.serverId, enabledServerIds)];
 	if (typeParam && VALID_ITEM_TYPES.includes(typeParam as (typeof VALID_ITEM_TYPES)[number])) {
 		conditions.push(
 			eq(mediaServerSyncedItems.itemType, typeParam as (typeof VALID_ITEM_TYPES)[number])
@@ -35,10 +39,13 @@ export const GET: RequestHandler = async ({ url }) => {
 	const allItems = await db
 		.select()
 		.from(mediaServerSyncedItems)
-		.where(conditions.length > 0 ? conditions[0] : undefined)
+		.where(and(...conditions))
 		.limit(MAX_RAW_ITEMS);
 
-	const aggregated = aggregateItems(allItems);
+	const serverById = new Map(
+		servers.map((server) => [server.id, { name: server.name, serverType: server.serverType }])
+	);
+	const aggregated = aggregateItems(allItems, serverById);
 
 	aggregated.sort((a, b) => {
 		let cmp = 0;
@@ -66,7 +73,7 @@ export const GET: RequestHandler = async ({ url }) => {
 	const offset = (page - 1) * limit;
 	const pagedItems = aggregated.slice(offset, offset + limit);
 
-	return json({
+	return Response.json({
 		items: pagedItems,
 		total,
 		page,
@@ -75,13 +82,15 @@ export const GET: RequestHandler = async ({ url }) => {
 };
 
 function aggregateItems(
-	rows: (typeof mediaServerSyncedItems.$inferSelect)[]
+	rows: (typeof mediaServerSyncedItems.$inferSelect)[],
+	serverById: Map<string, { name: string; serverType: string }>
 ): AggregatedMediaItem[] {
 	const map = new Map<string, AggregatedMediaItem>();
 
 	for (const row of rows) {
 		const key = `${row.tmdbId ?? 'null'}-${row.tvdbId ?? 'null'}-${row.title}`;
 		const existing = map.get(key);
+		const server = row.serverId ? serverById.get(row.serverId) : undefined;
 		if (existing) {
 			existing.totalPlayCount += row.playCount ?? 0;
 			if (
@@ -90,11 +99,12 @@ function aggregateItems(
 			) {
 				existing.lastPlayedDate = row.lastPlayedDate;
 			}
-			if (row.serverId) {
+			if (row.serverId && server) {
 				existing.serverBreakdown.push({
 					serverId: row.serverId,
-					serverName: '',
-					serverType: 'jellyfin',
+					serverName: server.name,
+					serverType:
+						server.serverType as AggregatedMediaItem['serverBreakdown'][number]['serverType'],
 					playCount: row.playCount ?? 0,
 					lastPlayedDate: row.lastPlayedDate ?? null,
 					videoCodec: row.videoCodec ?? null,
@@ -114,22 +124,24 @@ function aggregateItems(
 				itemType: row.itemType,
 				totalPlayCount: row.playCount ?? 0,
 				lastPlayedDate: row.lastPlayedDate ?? null,
-				serverBreakdown: row.serverId
-					? [
-							{
-								serverId: row.serverId,
-								serverName: '',
-								serverType: 'jellyfin',
-								playCount: row.playCount ?? 0,
-								lastPlayedDate: row.lastPlayedDate ?? null,
-								videoCodec: row.videoCodec ?? null,
-								width: row.width ?? null,
-								height: row.height ?? null,
-								isHDR: (row.isHDR ?? 0) === 1,
-								containerFormat: row.containerFormat ?? null
-							}
-						]
-					: []
+				serverBreakdown:
+					row.serverId && server
+						? [
+								{
+									serverId: row.serverId,
+									serverName: server.name,
+									serverType:
+										server.serverType as AggregatedMediaItem['serverBreakdown'][number]['serverType'],
+									playCount: row.playCount ?? 0,
+									lastPlayedDate: row.lastPlayedDate ?? null,
+									videoCodec: row.videoCodec ?? null,
+									width: row.width ?? null,
+									height: row.height ?? null,
+									isHDR: (row.isHDR ?? 0) === 1,
+									containerFormat: row.containerFormat ?? null
+								}
+							]
+						: []
 			});
 		}
 	}

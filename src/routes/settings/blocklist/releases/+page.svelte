@@ -1,18 +1,18 @@
 <script lang="ts">
-	import { Search, Ban, Clock, Trash2 } from 'lucide-svelte';
+	import { Search, Ban, Clock, Trash2 } from '@lucide/svelte';
 	import { SvelteSet } from 'svelte/reactivity';
-	import { toasts } from '$lib/stores/toast.svelte';
-	import { SettingsPage } from '$lib/components/ui/settings';
-	import { ConfirmationModal } from '$lib/components/ui/modal';
-	import { BlocklistTable, BlocklistBulkActions } from '$lib/components/blocklist';
-	import type { BlocklistEntry } from '$lib/components/blocklist';
-	import * as m from '$lib/paraglide/messages.js';
+	import { toasts } from '#lib/stores/toast.svelte.js';
+	import { SettingsPage } from '#lib/components/ui/settings/index.js';
+	import { ConfirmationModal } from '#lib/components/ui/modal/index.js';
+	import { BlocklistTable, BlocklistBulkActions } from '#lib/components/blocklist/index.js';
+	import type { BlocklistEntry } from '#lib/components/blocklist/index.js';
+	import * as m from '#lib/paraglide/messages.js';
 	import {
 		getBlocklist,
 		deleteBlocklistEntries,
 		purgeBlocklistExpired,
 		updateBlocklistExpiry
-	} from '$lib/api/settings.js';
+	} from '#lib/api/settings.js';
 
 	let { data }: { data: { entries: BlocklistEntry[]; total: number } } = $props();
 
@@ -253,7 +253,11 @@
 		</div>
 
 		<label class="label cursor-pointer gap-2">
-			<input type="checkbox" class="checkbox checkbox-xs" bind:checked={filters.activeOnly} />
+			<input
+				type="checkbox"
+				class="checkbox checkbox-xs checkbox-primary"
+				bind:checked={filters.activeOnly}
+			/>
 			<span class="label-text text-sm">{m.blocklist_filterActiveOnly()}</span>
 		</label>
 

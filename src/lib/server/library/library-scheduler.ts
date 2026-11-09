@@ -5,18 +5,19 @@
  * Provides centralized control over library scanning operations.
  */
 
-import { db } from '$lib/server/db/index.js';
-import { librarySettings, libraryScanHistory, rootFolders, series } from '$lib/server/db/schema.js';
+import { db } from '#lib/server/db/index.js';
+import { librarySettings, libraryScanHistory, rootFolders, series } from '#lib/server/db/schema.js';
 import { eq, desc, and } from 'drizzle-orm';
 import { diskScanService, type ScanResult } from './disk-scan.js';
 import { mediaMatcherService } from './media-matcher.js';
 import { libraryWatcherService } from './library-watcher.js';
-import { getImportService } from '$lib/server/downloadClients/import/ImportService.js';
+import { getImportService } from '#lib/server/downloadClients/import/ImportService.js';
+import { scheduleReconcileRootFolder } from '#lib/server/subtitles/services/subtitle-reconcile-hooks.js';
 import { EventEmitter } from 'events';
-import { createChildLogger } from '$lib/logging';
+import { createChildLogger } from '#lib/logging/index.js';
 
 const logger = createChildLogger({ logDomain: 'scans' as const });
-import type { BackgroundService, ServiceStatus } from '$lib/server/services/background-service.js';
+import type { BackgroundService, ServiceStatus } from '#lib/server/services/background-service.js';
 
 /**
  * Default scan interval in hours
@@ -298,6 +299,17 @@ export class LibrarySchedulerService extends EventEmitter implements BackgroundS
 			await this.updateAllSeriesStats();
 			this.lastScanTime = new Date();
 
+			// Best-effort subtitle reconciliation for the scanned folders. Fire and
+			// forget so a subtitle failure can never block or fail the scan.
+			for (const result of results) {
+				scheduleReconcileRootFolder(result.rootFolderId).catch((error) => {
+					logger.warn(
+						{ err: error, rootFolderId: result.rootFolderId },
+						'[LibraryScheduler] Subtitle reconciliation hook failed'
+					);
+				});
+			}
+
 			this.emit('scanComplete', { type: 'full', results });
 			return results;
 		} catch (error) {
@@ -325,6 +337,14 @@ export class LibrarySchedulerService extends EventEmitter implements BackgroundS
 			// Update series stats (cached episode counts)
 			await this.updateAllSeriesStats();
 			this.lastScanTime = new Date();
+
+			// Best-effort subtitle reconciliation for the scanned folder.
+			scheduleReconcileRootFolder(rootFolderId).catch((error) => {
+				logger.warn(
+					{ err: error, rootFolderId },
+					'[LibraryScheduler] Subtitle reconciliation hook failed'
+				);
+			});
 
 			this.emit('scanComplete', { type: 'folder', rootFolderId, result });
 			return result;

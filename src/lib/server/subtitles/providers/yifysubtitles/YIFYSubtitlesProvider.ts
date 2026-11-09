@@ -6,14 +6,18 @@
  * Site: https://yifysubtitles.ch (or .org)
  */
 
-import { BaseSubtitleProvider } from '../BaseProvider';
+import {
+	BaseSubtitleProvider,
+	DEFAULT_CAPABILITIES,
+	type ProviderCapabilities
+} from '../BaseProvider';
 import type {
 	SubtitleSearchCriteria,
 	SubtitleSearchResult,
 	ProviderSearchOptions,
 	LanguageCode
 } from '../../types';
-import { createChildLogger } from '$lib/logging';
+import { createChildLogger } from '#lib/logging/index.js';
 
 const logger = createChildLogger({ logDomain: 'subtitles' as const });
 import * as cheerio from 'cheerio';
@@ -27,6 +31,11 @@ import { YIFY_LANGUAGES, YIFY_LANGUAGE_REVERSE } from './types';
 const BASE_URL = 'https://yifysubtitles.ch';
 
 export class YIFYSubtitlesProvider extends BaseSubtitleProvider {
+	// Parses isHi per search result.
+	protected override _capabilities: ProviderCapabilities = {
+		...DEFAULT_CAPABILITIES,
+		hearingImpairedVerifiable: true
+	};
 	get implementation(): string {
 		return 'yifysubtitles';
 	}
@@ -354,7 +363,7 @@ export class YIFYSubtitlesProvider extends BaseSubtitleProvider {
 	): Promise<string | undefined> {
 		// Try TMDB external IDs first (most reliable)
 		try {
-			const { tmdb } = await import('$lib/server/tmdb');
+			const { tmdb } = await import('#lib/server/tmdb.js');
 			const searchResult = await tmdb.searchMovies(title, year);
 			if (searchResult.results?.length > 0) {
 				const match = searchResult.results[0];

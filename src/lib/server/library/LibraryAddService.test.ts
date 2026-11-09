@@ -8,10 +8,11 @@ const mocks = vi.hoisted(() => ({
 	seedDefaultScoringProfiles: vi.fn(),
 	getProfile: vi.fn(),
 	getDefaultScoringProfile: vi.fn(),
-	getEffectiveAnimeRootFolderEnforcement: vi.fn().mockResolvedValue(false)
+	getEffectiveAnimeRootFolderEnforcement: vi.fn().mockResolvedValue(false),
+	logWarn: vi.fn()
 }));
 
-vi.mock('$lib/server/db/index.js', () => ({
+vi.mock('#lib/server/db/index.js', () => ({
 	db: {
 		select: mocks.select
 	},
@@ -19,7 +20,7 @@ vi.mock('$lib/server/db/index.js', () => ({
 	initializeDatabase: vi.fn().mockResolvedValue(undefined)
 }));
 
-vi.mock('$lib/server/quality/index.js', () => ({
+vi.mock('#lib/server/quality/index.js', () => ({
 	qualityFilter: {
 		seedDefaultScoringProfiles: mocks.seedDefaultScoringProfiles,
 		getProfile: mocks.getProfile,
@@ -27,39 +28,39 @@ vi.mock('$lib/server/quality/index.js', () => ({
 	}
 }));
 
-vi.mock('$lib/server/tmdb.js', () => ({ tmdb: {} }));
-vi.mock('$lib/server/workers/index.js', () => ({
+vi.mock('#lib/server/tmdb.js', () => ({ tmdb: {} }));
+vi.mock('#lib/server/workers/index.js', () => ({
 	SearchWorker: class {},
 	workerManager: { spawnInBackground: vi.fn() }
 }));
-vi.mock('$lib/server/indexers/IndexerManager.js', () => ({ getIndexerManager: vi.fn() }));
+vi.mock('#lib/server/indexers/IndexerManager.js', () => ({ getIndexerManager: vi.fn() }));
 vi.mock('./searchOnAdd.js', () => ({ searchOnAdd: {} }));
 vi.mock('./anime-root-enforcement-settings.js', () => ({
 	getEffectiveAnimeRootFolderEnforcement: mocks.getEffectiveAnimeRootFolderEnforcement
 }));
-vi.mock('$lib/logging/index.js', () => ({
-	logger: { info: vi.fn(), debug: vi.fn(), warn: vi.fn(), error: vi.fn(), child: vi.fn() },
+vi.mock('#lib/logging/index.js', () => ({
+	logger: { info: vi.fn(), debug: vi.fn(), warn: mocks.logWarn, error: vi.fn(), child: vi.fn() },
 	createChildLogger: vi.fn(() => ({
 		info: vi.fn(),
 		debug: vi.fn(),
-		warn: vi.fn(),
+		warn: mocks.logWarn,
 		error: vi.fn(),
 		child: vi.fn()
 	}))
 }));
-vi.mock('$lib/logging', () => ({
-	logger: { info: vi.fn(), debug: vi.fn(), warn: vi.fn(), error: vi.fn(), child: vi.fn() },
+vi.mock('#lib/logging/index.js', () => ({
+	logger: { info: vi.fn(), debug: vi.fn(), warn: mocks.logWarn, error: vi.fn(), child: vi.fn() },
 	createChildLogger: vi.fn(() => ({
 		info: vi.fn(),
 		debug: vi.fn(),
-		warn: vi.fn(),
+		warn: mocks.logWarn,
 		error: vi.fn(),
 		child: vi.fn()
 	}))
 }));
 
 import { getEffectiveScoringProfileId, validateRootFolder } from './LibraryAddService.js';
-import { ValidationError } from '$lib/errors';
+import { ValidationError } from '#lib/errors/index.js';
 
 beforeEach(() => {
 	vi.clearAllMocks();

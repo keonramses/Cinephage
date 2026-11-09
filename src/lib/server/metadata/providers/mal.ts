@@ -2,8 +2,12 @@ import type {
 	MetadataDetails,
 	MetadataMediaType,
 	MetadataProvider,
-	MetadataSearchResult
+	MetadataSearchResult,
+	MetadataTitleVariant
 } from './types.js';
+import { createChildLogger } from '#lib/logging/index.js';
+
+const logger = createChildLogger({ module: 'MalProvider', logDomain: 'system' });
 
 // Jikan v4 shapes (unofficial MAL mirror, no auth required)
 interface JikanTitle {
@@ -62,7 +66,12 @@ async function jikanFetch(url: string): Promise<Response> {
 	const wait = JIKAN_MIN_INTERVAL_MS - (now - lastRequestAt);
 	if (wait > 0) await new Promise((r) => setTimeout(r, wait));
 	lastRequestAt = Date.now();
-	return fetch(url, { headers: { accept: 'application/json' } });
+	// Without this, a stalled Jikan response blocks the caller indefinitely,
+	// resolveAnimeProviderRef awaits this per query variant directly on the
+	// series page's SSR critical path (see resolveMissingAnimeProviderRefs),
+	// so an unresponsive upstream here previously meant an unbounded page-load
+	// stall.
+	return fetch(url, { headers: { accept: 'application/json' }, signal: AbortSignal.timeout(5000) });
 }
 
 function mapStatus(status?: string | null): string | undefined {
@@ -101,6 +110,33 @@ function collectGenres(anime: JikanAnime): string[] {
 	return [...names];
 }
 
+/**
+ * Expose every title variant Jikan/MAL reports (english, japanese, the
+ * titles[] list) instead of discarding them. Jikan supplies no language or
+ * country codes - its type labels ('Japanese', 'English', 'Synonym', …) are
+ * kind annotations, not ISO codes - so `language`/`country` stay null and are
+ * never guessed.
+ */
+function buildTitleVariants(anime: JikanAnime): MetadataTitleVariant[] {
+	const variants: MetadataTitleVariant[] = [];
+	const seen = new Set<string>();
+
+	const push = (title?: string | null) => {
+		const trimmed = title?.trim();
+		if (!trimmed) return;
+		const key = trimmed.toLowerCase();
+		if (seen.has(key)) return;
+		seen.add(key);
+		variants.push({ title: trimmed, language: null, country: null });
+	};
+
+	push(anime.title_english);
+	push(anime.title_japanese);
+	for (const entry of anime.titles ?? []) push(entry.title);
+
+	return variants;
+}
+
 export class MalProvider implements MetadataProvider {
 	readonly id = 'mal' as const;
 	readonly name = 'MyAnimeList (Jikan)';
@@ -120,9 +156,31 @@ export class MalProvider implements MetadataProvider {
 		url.searchParams.set('limit', '10');
 		url.searchParams.set('sfw', 'false');
 
-		const res = await jikanFetch(url.toString()).catch(() => null);
-		if (!res?.ok) return [];
-		const body = (await res.json().catch(() => null)) as JikanSearchResponse | null;
+		// Previously a bare `.catch(() => null)` with no logging at all - any
+		// failure (network error, timeout, rate limit) looked identical to a
+		// genuine "no results", with nothing in the logs to tell them apart.
+		const res = await jikanFetch(url.toString()).catch((err) => {
+			logger.warn(
+				{ query, error: err instanceof Error ? err.message : String(err) },
+				'[MAL] Search request failed'
+			);
+			return null;
+		});
+		if (!res) return [];
+		if (!res.ok) {
+			logger.warn(
+				{ query, status: res.status, statusText: res.statusText },
+				res.status === 429 ? '[MAL] Search rate-limited by Jikan' : '[MAL] Search request not ok'
+			);
+			return [];
+		}
+		const body = (await res.json().catch((err) => {
+			logger.warn(
+				{ query, error: err instanceof Error ? err.message : String(err) },
+				'[MAL] Failed to parse search response'
+			);
+			return null;
+		})) as JikanSearchResponse | null;
 		const items = body?.data ?? [];
 
 		return items.map((item) => ({
@@ -153,6 +211,7 @@ export class MalProvider implements MetadataProvider {
 			id: String(item.mal_id),
 			title: item.title_english ?? item.title,
 			originalTitle: item.title_japanese ?? undefined,
+			alternateTitles: buildTitleVariants(item),
 			overview: item.synopsis ?? undefined,
 			year: extractYear(item),
 			posterUrl: item.images?.jpg?.large_image_url ?? null,

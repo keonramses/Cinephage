@@ -7,11 +7,17 @@ import {
 } from '../../../../../../test/db-helper';
 import { callHandler } from '../../../../../../test/api-helper';
 import { randomUUID } from 'node:crypto';
-import { renamingFailures, movieFiles, episodeFiles, movies, series } from '$lib/server/db/schema';
+import {
+	renamingFailures,
+	movieFiles,
+	episodeFiles,
+	movies,
+	series
+} from '#lib/server/db/schema.js';
 
 const testDb: TestDatabase = createTestDb();
 
-vi.mock('$lib/server/db', () => ({
+vi.mock('#lib/server/db/index.js', () => ({
 	get db() {
 		return testDb.db;
 	},
@@ -29,7 +35,7 @@ const mockLogger = vi.hoisted(() => ({
 	child: vi.fn().mockReturnThis()
 }));
 
-vi.mock('$lib/logging', () => ({
+vi.mock('#lib/logging/index.js', () => ({
 	logger: mockLogger,
 	createChildLogger: vi.fn(() => mockLogger)
 }));
@@ -51,7 +57,8 @@ async function call(id: string) {
 	try {
 		return await callHandler(POST, 'POST', undefined, {
 			url: `http://localhost/api/reports/renaming-failures/${id}/retry`,
-			params: { id }
+			params: { id },
+			auth: 'admin' as const
 		});
 	} catch (err: any) {
 		if (err && typeof err.status === 'number') {
@@ -312,7 +319,7 @@ describe('Renaming Failures Retry API', () => {
 			.insert(renamingFailures)
 			.values({
 				id,
-				fileId: randomUUID(), // non-existent fileId — update will be a no-op, not a throw
+				fileId: randomUUID(), // non-existent fileId - update will be a no-op, not a throw
 				fileType: 'movie',
 				sourcePath: '/movies/test/orphan.mkv',
 				intendedPath: '/movies/test/orphan-new.mkv',
@@ -325,7 +332,7 @@ describe('Renaming Failures Retry API', () => {
 		mockAccess.mockResolvedValue(undefined);
 		mockRename.mockResolvedValue(undefined);
 
-		// No movieFile seeded for the fileId — the update runs but affects 0 rows (no throw)
+		// No movieFile seeded for the fileId - the update runs but affects 0 rows (no throw)
 		const { status, data } = await call(id);
 		expect(status).toBe(200);
 		expect((data as any).success).toBe(true);

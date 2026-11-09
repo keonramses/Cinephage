@@ -1,31 +1,29 @@
-import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
 import { z } from 'zod';
-import { db } from '$lib/server/db/index.js';
-import { movies } from '$lib/server/db/schema.js';
+import { db } from '#lib/server/db/index.js';
+import { movies } from '#lib/server/db/schema.js';
 import { eq } from 'drizzle-orm';
-import { tmdb } from '$lib/server/tmdb.js';
-import { requireAuth } from '$lib/server/auth/authorization.js';
-import { buildMovieFolderName } from '$lib/server/library/naming/naming-helpers.js';
-import { namingSettingsService } from '$lib/server/library/naming/NamingSettingsService.js';
+import { tmdb } from '#lib/server/tmdb.js';
+import { requireAuth } from '#lib/server/auth/authorization.js';
+import { buildMovieFolderName } from '#lib/server/library/naming/naming-helpers.js';
+import { namingSettingsService } from '#lib/server/library/naming/NamingSettingsService.js';
 import {
 	extractLanguageCodes,
 	resolveLocalizedTitles
-} from '$lib/server/library/naming/localization.js';
+} from '#lib/server/library/naming/localization.js';
 import {
 	validateRootFolder,
 	getAnimeSubtypeEnforcement,
 	getEffectiveScoringProfileId,
-	getLanguageProfileId,
 	fetchMovieDetails,
 	fetchMovieExternalIds,
 	triggerMovieSearch
-} from '$lib/server/library/LibraryAddService.js';
-import { isLikelyAnimeMedia } from '$lib/shared/anime-classification.js';
-import { fetchAndStoreMovieAlternateTitles } from '$lib/server/services/AlternateTitleService.js';
-import { getLibraryEntityService } from '$lib/server/library/LibraryEntityService.js';
-import { libraryMediaEvents } from '$lib/server/library/LibraryMediaEvents.js';
-import { createChildLogger } from '$lib/logging';
+} from '#lib/server/library/LibraryAddService.js';
+import { isLikelyAnimeMedia } from '#lib/shared/anime-classification.js';
+import { fetchAndStoreMovieAlternateTitles } from '#lib/server/services/AlternateTitleService.js';
+import { getLibraryEntityService } from '#lib/server/library/LibraryEntityService.js';
+import { libraryMediaEvents } from '#lib/server/library/LibraryMediaEvents.js';
+import { createChildLogger } from '#lib/logging/index.js';
 
 const logger = createChildLogger({ module: 'LibraryCollectionsTrackApi', logDomain: 'scans' });
 
@@ -42,13 +40,13 @@ export const POST: RequestHandler = async (event) => {
 
 	const tmdbCollectionId = parseInt(event.params.tmdbId, 10);
 	if (isNaN(tmdbCollectionId)) {
-		return json({ success: false, error: 'Invalid collection ID' }, { status: 400 });
+		return Response.json({ success: false, error: 'Invalid collection ID' }, { status: 400 });
 	}
 
 	const body = await event.request.json().catch(() => null);
 	const parsed = trackSchema.safeParse(body);
 	if (!parsed.success) {
-		return json({ success: false, error: 'Invalid request body' }, { status: 400 });
+		return Response.json({ success: false, error: 'Invalid request body' }, { status: 400 });
 	}
 
 	const { rootFolderId, scoringProfileId, monitored, searchOnAdd: shouldSearch } = parsed.data;
@@ -62,12 +60,15 @@ export const POST: RequestHandler = async (event) => {
 	});
 
 	if (!collection) {
-		return json({ success: false, error: 'Collection not found on TMDB' }, { status: 404 });
+		return Response.json(
+			{ success: false, error: 'Collection not found on TMDB' },
+			{ status: 404 }
+		);
 	}
 
 	const parts = collection.parts ?? [];
 	if (parts.length === 0) {
-		return json({ success: true, added: 0, skipped: 0, errors: [] });
+		return Response.json({ success: true, added: 0, skipped: 0, errors: [] });
 	}
 
 	// Find which parts are already in the library
@@ -83,7 +84,7 @@ export const POST: RequestHandler = async (event) => {
 	const missing = parts.filter((p) => !existingTmdbIds.has(p.id));
 
 	if (missing.length === 0) {
-		return json({ success: true, added: 0, skipped: parts.length, errors: [] });
+		return Response.json({ success: true, added: 0, skipped: parts.length, errors: [] });
 	}
 
 	const enforceAnimeSubtype = await getAnimeSubtypeEnforcement();
@@ -149,7 +150,6 @@ export const POST: RequestHandler = async (event) => {
 			);
 
 			const { imdbId } = await fetchMovieExternalIds(part.id);
-			const languageProfileId = await getLanguageProfileId(true, part.id);
 
 			const [newMovie] = await db
 				.insert(movies)
@@ -157,6 +157,7 @@ export const POST: RequestHandler = async (event) => {
 					tmdbId: part.id,
 					imdbId,
 					title: movieDetails.title,
+					originalLanguage: movieDetails.original_language,
 					originalTitle: movieDetails.original_title,
 					year,
 					overview: movieDetails.overview,
@@ -173,7 +174,6 @@ export const POST: RequestHandler = async (event) => {
 					availabilityDelay: 0,
 					hasFile: false,
 					wantsSubtitles: true,
-					languageProfileId,
 					tmdbCollectionId: collectionData?.id ?? tmdbCollectionId,
 					collectionName: collectionData?.name ?? collection.name,
 					releaseDate: movieDetails.release_date ?? null
@@ -213,5 +213,5 @@ export const POST: RequestHandler = async (event) => {
 		}
 	}
 
-	return json({ success: true, ...results });
+	return Response.json({ success: true, ...results });
 };

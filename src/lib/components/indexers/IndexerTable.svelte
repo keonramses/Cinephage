@@ -14,10 +14,10 @@
 		ToggleRight,
 		Settings,
 		Trash2
-	} from 'lucide-svelte';
+	} from '@lucide/svelte';
 	import IndexerStatusBadge from './IndexerStatusBadge.svelte';
 	import IndexerRow from './IndexerRow.svelte';
-	import type { IndexerWithStatus, IndexerSort } from '$lib/types/indexer';
+	import type { IndexerWithStatus, IndexerSort } from '#lib/types/indexer.js';
 
 	interface Props {
 		indexers: IndexerWithStatus[];
@@ -178,7 +178,7 @@
 				<label class="flex items-center gap-2 text-xs font-medium">
 					<input
 						type="checkbox"
-						class="checkbox checkbox-sm"
+						class="checkbox checkbox-sm checkbox-primary"
 						checked={allSelected}
 						indeterminate={someSelected}
 						onchange={(e) => onSelectAll(e.currentTarget.checked)}
@@ -245,7 +245,7 @@
 						{:else}
 							<input
 								type="checkbox"
-								class="checkbox checkbox-sm"
+								class="checkbox checkbox-sm checkbox-primary"
 								checked={selectedIds.has(indexer.id)}
 								onchange={(e) => onSelect(indexer.id, e.currentTarget.checked)}
 							/>
@@ -432,7 +432,7 @@
 						{:else}
 							<input
 								type="checkbox"
-								class="checkbox checkbox-sm"
+								class="checkbox checkbox-sm checkbox-primary"
 								checked={allSelected}
 								indeterminate={someSelected}
 								onchange={(e) => onSelectAll(e.currentTarget.checked)}

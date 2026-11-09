@@ -1,14 +1,15 @@
 import { randomUUID } from 'node:crypto';
 import { and, asc, desc, eq, inArray, ne, sql } from 'drizzle-orm';
-import { db } from '$lib/server/db/index.js';
+import { db } from '#lib/server/db/index.js';
 import {
 	libraries,
 	libraryRootFolders,
+	languageProfiles,
 	movies,
 	rootFolders,
 	series
-} from '$lib/server/db/schema.js';
-import { NotFoundError, ValidationError } from '$lib/errors';
+} from '#lib/server/db/schema.js';
+import { NotFoundError, ValidationError } from '#lib/errors/index.js';
 
 export type LibraryMediaType = 'movie' | 'tv';
 export type LibraryMediaSubType = 'standard' | 'anime';
@@ -36,6 +37,8 @@ export interface LibraryEntity {
 	defaultSearchOnAdd: boolean;
 	defaultWantsSubtitles: boolean;
 	qualityProfileId: string | null;
+	/** Library-wide default language profile; null = inherit the instance default */
+	languageProfileId: string | null;
 	sortOrder: number;
 	scanMode?: string | null;
 	createdAt: string;
@@ -51,6 +54,8 @@ export interface CreateLibraryInput {
 	defaultSearchOnAdd?: boolean;
 	defaultWantsSubtitles?: boolean;
 	qualityProfileId?: string | null;
+	/** Library-wide default language profile; null = inherit the instance default */
+	languageProfileId?: string | null;
 	sortOrder?: number;
 	scanMode?: string;
 	scanConfig?: Record<string, unknown> | null;
@@ -309,6 +314,7 @@ export class LibraryEntityService {
 				defaultSearchOnAdd: libraries.defaultSearchOnAdd,
 				defaultWantsSubtitles: libraries.defaultWantsSubtitles,
 				qualityProfileId: libraries.qualityProfileId,
+				languageProfileId: libraries.languageProfileId,
 				sortOrder: libraries.sortOrder,
 				scanMode: libraries.scanMode,
 				createdAt: libraries.createdAt,
@@ -381,6 +387,7 @@ export class LibraryEntityService {
 				defaultSearchOnAdd: row.defaultSearchOnAdd ?? true,
 				defaultWantsSubtitles: row.defaultWantsSubtitles ?? true,
 				qualityProfileId: row.qualityProfileId ?? null,
+				languageProfileId: row.languageProfileId ?? null,
 				sortOrder: row.sortOrder ?? 0,
 				createdAt: row.createdAt ?? '',
 				updatedAt: row.updatedAt ?? ''
@@ -489,7 +496,8 @@ export class LibraryEntityService {
 			.select({
 				id: rootFolders.id,
 				mediaType: rootFolders.mediaType,
-				mediaSubType: rootFolders.mediaSubType
+				mediaSubType: rootFolders.mediaSubType,
+				isDefault: rootFolders.isDefault
 			})
 			.from(rootFolders)
 			.where(
@@ -544,7 +552,14 @@ export class LibraryEntityService {
 				.values({
 					libraryId: preferredLibraryId,
 					rootFolderId: folder.id,
-					isDefault: false,
+					// Mirror the root folder's own isDefault flag instead of
+					// hardcoding false - this delete+reinsert runs on every
+					// reconcile pass (after nearly every library/root-folder
+					// write) and was unconditionally wiping out whatever
+					// isDefault assignRootFoldersToLibrary had just set,
+					// leaving normalizeLibraryRootFolderState to fall back to
+					// "oldest attachment wins" instead of the real signal.
+					isDefault: folder.isDefault ?? false,
 					createdAt: now
 				})
 				.onConflictDoNothing();
@@ -654,13 +669,18 @@ export class LibraryEntityService {
 			await db
 				.delete(libraryRootFolders)
 				.where(inArray(libraryRootFolders.rootFolderId, rootFolderIds));
+
+			// isDefault here is provisional - the reconcileRootFolderAssignments()
+			// call below runs immediately after and re-derives it from each root
+			// folder's own isDefault flag (the real signal), so there's no need
+			// to compute it here. Plain false is fine as a starting value.
 			await db
 				.insert(libraryRootFolders)
 				.values(
-					rootFolderIds.map((rootFolderId, index) => ({
+					rootFolderIds.map((rootFolderId) => ({
 						libraryId,
 						rootFolderId,
-						isDefault: index === 0,
+						isDefault: false,
 						createdAt: new Date().toISOString()
 					}))
 				)
@@ -736,6 +756,7 @@ export class LibraryEntityService {
 		const mediaSubType = input.mediaSubType ?? 'standard';
 		const rootFolderIds = uniqueStringArray(input.rootFolderIds);
 		await ensureRootFoldersMatchLibrary(rootFolderIds, input.mediaType, mediaSubType);
+		const languageProfileId = await this.resolveLibraryLanguageProfileId(input.languageProfileId);
 
 		const now = new Date().toISOString();
 		const id = randomUUID();
@@ -770,6 +791,7 @@ export class LibraryEntityService {
 			defaultSearchOnAdd: input.defaultSearchOnAdd ?? true,
 			defaultWantsSubtitles: input.defaultWantsSubtitles ?? true,
 			qualityProfileId: input.qualityProfileId || null,
+			languageProfileId,
 			sortOrder: nextSortOrder,
 			scanMode: input.scanMode ?? 'scheduled',
 			scanConfig: input.scanConfig ?? null,
@@ -849,6 +871,11 @@ export class LibraryEntityService {
 		}
 		if (updates.qualityProfileId !== undefined) {
 			updateData.qualityProfileId = updates.qualityProfileId || null;
+		}
+		if (updates.languageProfileId !== undefined) {
+			updateData.languageProfileId = await this.resolveLibraryLanguageProfileId(
+				updates.languageProfileId
+			);
 		}
 		if (updates.sortOrder !== undefined) {
 			updateData.sortOrder = updates.sortOrder;
@@ -930,6 +957,26 @@ export class LibraryEntityService {
 
 		await db.delete(libraryRootFolders).where(eq(libraryRootFolders.libraryId, id));
 		await db.delete(libraries).where(eq(libraries.id, id));
+	}
+
+	/**
+	 * Validate a library language profile reference. Empty/undefined values
+	 * normalize to null (= inherit the instance default); a non-empty value
+	 * must reference an existing language profile.
+	 */
+	private async resolveLibraryLanguageProfileId(
+		value: string | null | undefined
+	): Promise<string | null> {
+		if (!value) return null;
+		const [profile] = await db
+			.select({ id: languageProfiles.id })
+			.from(languageProfiles)
+			.where(eq(languageProfiles.id, value))
+			.limit(1);
+		if (!profile) {
+			throw new ValidationError(`Language profile not found: ${value}`);
+		}
+		return value;
 	}
 
 	private async buildUniqueSlug(

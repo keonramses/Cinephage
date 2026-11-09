@@ -9,18 +9,19 @@
  * - Search-on-add triggering
  */
 
-import { db } from '$lib/server/db/index.js';
-import { rootFolders, languageProfiles, series } from '$lib/server/db/schema.js';
+import { db } from '#lib/server/db/index.js';
+import { rootFolders, series } from '#lib/server/db/schema.js';
 import { eq } from 'drizzle-orm';
-import { tmdb } from '$lib/server/tmdb.js';
-import { qualityFilter } from '$lib/server/quality/index.js';
+import { tmdb } from '#lib/server/tmdb.js';
+import { qualityFilter } from '#lib/server/quality/index.js';
 import { searchOnAdd } from './searchOnAdd.js';
-import { SearchWorker, workerManager } from '$lib/server/workers/index.js';
-import { ValidationError, NotFoundError, ExternalServiceError } from '$lib/errors';
-import { createChildLogger } from '$lib/logging';
+import { SearchWorker, workerManager } from '#lib/server/workers/index.js';
+import { ValidationError, NotFoundError, ExternalServiceError } from '#lib/errors/index.js';
+import { createChildLogger } from '#lib/logging/index.js';
 import { getEffectiveAnimeRootFolderEnforcement } from './anime-root-enforcement-settings.js';
-import { evaluateIndexerSearchAvailability } from '$lib/server/indexers/search/availability.js';
-import { getIndexerManager } from '$lib/server/indexers/IndexerManager.js';
+import { evaluateIndexerSearchAvailability } from '#lib/server/indexers/search/availability.js';
+import { resolveAllowedIndexerIds } from '#lib/server/indexers/search/profile-indexer-filter.js';
+import { getIndexerManager } from '#lib/server/indexers/IndexerManager.js';
 
 const logger = createChildLogger({ logDomain: 'scans' as const });
 
@@ -149,36 +150,6 @@ export async function getEffectiveScoringProfileId(
 }
 
 /**
- * Get the default language profile ID if subtitles are wanted
- */
-export async function getLanguageProfileId(
-	wantsSubtitles: boolean,
-	tmdbId: number
-): Promise<string | null> {
-	if (!wantsSubtitles) {
-		return null;
-	}
-
-	const [defaultLanguageProfile] = await db
-		.select()
-		.from(languageProfiles)
-		.where(eq(languageProfiles.isDefault, true))
-		.limit(1);
-
-	if (!defaultLanguageProfile) {
-		logger.warn(
-			{
-				tmdbId
-			},
-			'[LibraryAddService] No default language profile found for subtitle preferences'
-		);
-		return null;
-	}
-
-	return defaultLanguageProfile.id;
-}
-
-/**
  * Fetch external IDs for a movie from TMDB
  */
 export async function fetchMovieExternalIds(tmdbId: number): Promise<ExternalIds> {
@@ -255,6 +226,7 @@ export async function triggerMovieSearch(params: {
 	const availability = evaluateIndexerSearchAvailability(await indexerManager.getIndexers(), {
 		searchType: 'movie',
 		searchSource: 'automatic',
+		allowedIndexerIds: await resolveAllowedIndexerIds(scoringProfileId),
 		scoringProfileId,
 		getDefinitionCapabilities: (id) => indexerManager.getDefinitionCapabilities(id)
 	});
@@ -338,9 +310,16 @@ export async function triggerSeriesSearch(params: {
 	const { seriesId, tmdbId, title } = params;
 
 	const indexerManager = await getIndexerManager();
+	const seriesRow = await db.query.series.findFirst({
+		where: eq(series.id, seriesId),
+		columns: { scoringProfileId: true }
+	});
+	const seriesProfileId = seriesRow?.scoringProfileId ?? undefined;
 	const availability = evaluateIndexerSearchAvailability(await indexerManager.getIndexers(), {
 		searchType: 'tv',
 		searchSource: 'automatic',
+		allowedIndexerIds: await resolveAllowedIndexerIds(seriesProfileId),
+		scoringProfileId: seriesProfileId,
 		getDefinitionCapabilities: (id) => indexerManager.getDefinitionCapabilities(id)
 	});
 

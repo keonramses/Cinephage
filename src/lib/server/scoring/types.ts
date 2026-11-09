@@ -36,7 +36,8 @@ export type ConditionType =
 	| 'hdr'
 	| 'streaming_service'
 	| 'flag'
-	| 'indexer';
+	| 'indexer'
+	| 'language';
 
 /**
  * A single condition within a custom format definition
@@ -79,8 +80,14 @@ export interface FormatCondition {
 	/** For audio channel conditions */
 	audioChannels?: AudioChannels;
 
-	/** For HDR conditions */
-	hdr?: HdrFormat;
+	/**
+	 * For HDR conditions.
+	 *
+	 * `null` intentionally means "no HDR / SDR" - the format builder stores it
+	 * that way. The parser's HdrFormat no longer carries null so that detected
+	 * sets stay free of sentinel values.
+	 */
+	hdr?: HdrFormat | null;
 
 	/** For streaming service conditions */
 	streamingService?: string;
@@ -90,6 +97,11 @@ export interface FormatCondition {
 
 	/** For indexer conditions (match by indexer name) */
 	indexer?: string;
+
+	/** For language conditions: a canonical language tag ('es', 'pt-BR') or
+	 * the 'multi' / 'orig' pseudo-codes parsed from release names. Matches
+	 * when any parsed language token matches (base-tag fallback). */
+	language?: string;
 }
 
 // =============================================================================
@@ -190,7 +202,17 @@ export interface ReleaseAttributes {
 	resolution: Resolution;
 	source: Source;
 	codec: Codec;
-	hdr: HdrFormat;
+	/**
+	 * Every HDR format detected in the release, best-first.
+	 *
+	 * Requirement and ban matching reads this; scoring collapses it to one
+	 * format so a DV+HDR10+ release is not counted twice.
+	 */
+	hdrFormats: HdrFormat[];
+	/**
+	 * Best detected HDR format (derived from `hdrFormats`), or null for SDR.
+	 */
+	hdr: HdrFormat | null;
 	audioCodec: AudioCodec;
 	audioChannels: AudioChannels;
 	hasAtmos: boolean;
@@ -256,7 +278,7 @@ export interface FormatScore {
 /**
  * Profile category for UI grouping and styling
  */
-export type ProfileCategory = 'quality' | 'efficient' | 'micro' | 'streaming' | 'custom';
+export type ProfileCategory = 'quality' | 'efficient' | 'micro' | 'streaming' | 'anime' | 'custom';
 
 /**
  * A scoring profile that defines how formats are scored
@@ -368,6 +390,13 @@ export interface ScoringProfile {
 	 * Required format entries. AND entries must all match; OR entries need at least one match.
 	 */
 	requiredFormats?: { id: string; op: 'AND' | 'OR' }[];
+
+	/**
+	 * Indexer IDs this profile may search.
+	 * `null`/undefined means every enabled indexer. A non-empty array restricts
+	 * both indexer queries and grabs to those indexers.
+	 */
+	allowedIndexerIds?: string[] | null;
 }
 
 /**

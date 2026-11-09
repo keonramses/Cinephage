@@ -1,5 +1,5 @@
 /**
- * Alternate title refresh helpers — shared caching logic for searchOnAdd
+ * Alternate title refresh helpers - shared caching logic for searchOnAdd
  */
 
 import {
@@ -7,8 +7,8 @@ import {
 	getSeriesSearchTitles,
 	fetchAndStoreMovieAlternateTitles,
 	fetchAndStoreSeriesAlternateTitles
-} from '$lib/server/services/AlternateTitleService.js';
-import { createChildLogger } from '$lib/logging/index.js';
+} from '#lib/server/services/AlternateTitleService.js';
+import { createChildLogger } from '#lib/logging/index.js';
 
 const logger = createChildLogger({ module: 'AltTitlesSearch', logDomain: 'scans' });
 

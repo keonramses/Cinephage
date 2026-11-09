@@ -1,10 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { NamingService } from '$lib/server/library/naming/NamingService';
+import { NamingService } from '#lib/server/library/naming/NamingService.js';
 import { LibraryDestinationPlanner } from './LibraryDestinationPlanner';
 
 describe('LibraryDestinationPlanner', () => {
-	it('applies anime numbering', () => {
-		const plan = new LibraryDestinationPlanner(new NamingService()).planEpisode({
+	it('applies anime numbering', async () => {
+		const plan = await new LibraryDestinationPlanner(new NamingService()).planEpisode({
 			rootPath: '/library',
 			mediaPath: 'One Piece',
 			media: {
@@ -26,8 +26,8 @@ describe('LibraryDestinationPlanner', () => {
 		expect(plan.fileName).toContain('062');
 	});
 
-	it('applies daily numbering', () => {
-		const plan = new LibraryDestinationPlanner(new NamingService()).planEpisode({
+	it('applies daily numbering', async () => {
+		const plan = await new LibraryDestinationPlanner(new NamingService()).planEpisode({
 			rootPath: '/library',
 			mediaPath: 'The Daily Show',
 			media: {
@@ -49,7 +49,7 @@ describe('LibraryDestinationPlanner', () => {
 		expect(plan.fileName).not.toContain('S29E15');
 	});
 
-	it('uses configured season folders only when enabled', () => {
+	it('uses configured season folders only when enabled', async () => {
 		const planner = new LibraryDestinationPlanner(
 			new NamingService({ seasonFolderFormat: 'Series {Season}' })
 		);
@@ -63,11 +63,11 @@ describe('LibraryDestinationPlanner', () => {
 			releaseTitle: 'Show.S03E03.1080p.WEB.h264'
 		};
 
-		expect(planner.planEpisode({ ...input, useSeasonFolders: true }).relativePath).toMatch(
+		expect((await planner.planEpisode({ ...input, useSeasonFolders: true })).relativePath).toMatch(
 			/^Series 3\//
 		);
-		expect(planner.planEpisode({ ...input, useSeasonFolders: false }).relativePath).not.toContain(
-			'/'
-		);
+		expect(
+			(await planner.planEpisode({ ...input, useSeasonFolders: false })).relativePath
+		).not.toContain('/');
 	});
 });

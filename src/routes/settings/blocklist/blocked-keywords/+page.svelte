@@ -1,18 +1,18 @@
 <script lang="ts">
-	import { Loader2, Plus, X, Sparkles, Search, Trash2 } from 'lucide-svelte';
+	import { Loader2, Plus, X, Sparkles, Search, Trash2 } from '@lucide/svelte';
 	import { SvelteSet } from 'svelte/reactivity';
-	import { getSmartListHelpers } from '$lib/api/smartlists.js';
+	import { getSmartListHelpers } from '#lib/api/smartlists.js';
 	import {
 		getBlockedKeywords,
 		addBlockedKeyword,
 		removeBlockedKeyword,
 		seedBlockedKeywords
-	} from '$lib/api/settings.js';
-	import { toasts } from '$lib/stores/toast.svelte';
-	import { formatDisplayDate } from '$lib/utils/format.js';
-	import { SettingsPage } from '$lib/components/ui/settings';
-	import { ConfirmationModal } from '$lib/components/ui/modal';
-	import * as m from '$lib/paraglide/messages.js';
+	} from '#lib/api/settings.js';
+	import { toasts } from '#lib/stores/toast.svelte.js';
+	import { formatDisplayDate } from '#lib/utils/format.js';
+	import { SettingsPage } from '#lib/components/ui/settings/index.js';
+	import { ConfirmationModal } from '#lib/components/ui/modal/index.js';
+	import * as m from '#lib/paraglide/messages.js';
 
 	interface KeywordResult {
 		id: number;
@@ -279,7 +279,7 @@
 								<th class="w-10">
 									<input
 										type="checkbox"
-										class="checkbox checkbox-xs"
+										class="checkbox checkbox-xs checkbox-primary"
 										checked={blockedKeywords.length > 0 &&
 											blockedKeywords.every((k) => selectedIds.has(k.id))}
 										onchange={(e) => handleSelectAll((e.target as HTMLInputElement).checked)}
@@ -297,7 +297,7 @@
 									<td>
 										<input
 											type="checkbox"
-											class="checkbox checkbox-xs"
+											class="checkbox checkbox-xs checkbox-primary"
 											checked={selectedIds.has(kw.id)}
 											onchange={(e) => {
 												if ((e.target as HTMLInputElement).checked) selectedIds.add(kw.id);

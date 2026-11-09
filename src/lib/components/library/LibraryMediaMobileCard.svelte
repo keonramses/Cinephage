@@ -1,6 +1,6 @@
 <script lang="ts">
-	import type { LibraryMovie, LibrarySeries } from '$lib/types/library';
-	import { displayTitle } from '$lib/types/library';
+	import type { LibraryMovie, LibrarySeries } from '#lib/types/library.js';
+	import { displayTitle } from '#lib/types/library.js';
 	import {
 		CheckCircle2,
 		XCircle,
@@ -12,12 +12,12 @@
 		Zap,
 		Search,
 		Download
-	} from 'lucide-svelte';
-	import { formatBytes, getStatusColor } from '$lib/utils/format';
-	import { formatSeriesStatus } from '$lib/utils/format-status.js';
-	import { getPosterUrl } from '$lib/utils/poster-url.js';
+	} from '@lucide/svelte';
+	import { formatBytes, getStatusColor } from '#lib/utils/format.js';
+	import { formatSeriesStatus } from '#lib/utils/format-status.js';
+	import { getPosterUrl } from '#lib/utils/poster-url.js';
 	import { isMovie, isSeries, getItemSize, getQualityBadges } from './mediaTableUtils.ts';
-	import * as m from '$lib/paraglide/messages.js';
+	import * as m from '#lib/paraglide/messages.js';
 
 	interface Props {
 		item: LibraryMovie | LibrarySeries;
@@ -27,11 +27,13 @@
 		downloadingIds: Set<string>;
 		hasStreamerProfile: boolean;
 		onSelectChange: (id: string, selected: boolean) => void;
-		onMonitorToggle: (id: string) => void;
+		onMonitorToggle?: (id: string) => void;
 		onAutoGrab?: (id: string) => void;
 		onManualGrab?: (id: string) => void;
-		onDelete: (id: string) => void;
+		onDelete?: (id: string) => void;
 		onNavigate: () => void;
+		/** Instance default for items with no explicit prefer-original flag. */
+		preferOriginalTitleDefault?: boolean | null;
 	}
 
 	let {
@@ -46,7 +48,8 @@
 		onAutoGrab,
 		onManualGrab,
 		onDelete,
-		onNavigate
+		onNavigate,
+		preferOriginalTitleDefault = false
 	}: Props = $props();
 
 	const itemIsMovie = $derived(isMovie(item));
@@ -71,7 +74,7 @@
 		{#if selectable}
 			<input
 				type="checkbox"
-				class="checkbox checkbox-sm"
+				class="checkbox checkbox-sm checkbox-primary"
 				checked={selected}
 				onchange={(e) => onSelectChange(item.id, e.currentTarget.checked)}
 			/>
@@ -143,7 +146,7 @@
 
 		<div class="min-w-0 flex-1">
 			<span class="line-clamp-2 text-sm font-medium">
-				{displayTitle(item)}
+				{displayTitle(item, preferOriginalTitleDefault)}
 			</span>
 			{#if itemIsMovie && 'collectionName' in item && item.collectionName}
 				<span class="mt-1 badge badge-outline badge-xs">{item.collectionName}</span>
@@ -194,19 +197,21 @@
 	</div>
 
 	<div class="mt-2 flex justify-center gap-1 overflow-x-auto" role="toolbar">
-		<button
-			class="btn shrink-0 gap-1 btn-ghost btn-xs"
-			onclick={() => onMonitorToggle(item.id)}
-			disabled={isLoading}
-		>
-			{#if item.monitored}
-				<EyeOff class="h-3.5 w-3.5" />
-				{m.library_libraryMediaTable_unmonitorButton()}
-			{:else}
-				<Eye class="h-3.5 w-3.5" />
-				{m.library_libraryMediaTable_monitorButton()}
-			{/if}
-		</button>
+		{#if onMonitorToggle}
+			<button
+				class="btn shrink-0 gap-1 btn-ghost btn-xs"
+				onclick={() => onMonitorToggle(item.id)}
+				disabled={isLoading}
+			>
+				{#if item.monitored}
+					<EyeOff class="h-3.5 w-3.5" />
+					{m.library_libraryMediaTable_unmonitorButton()}
+				{:else}
+					<Eye class="h-3.5 w-3.5" />
+					{m.library_libraryMediaTable_monitorButton()}
+				{/if}
+			</button>
+		{/if}
 		{#if onAutoGrab}
 			<button
 				class="btn shrink-0 gap-1 btn-ghost btn-xs"
@@ -227,13 +232,15 @@
 				{m.library_libraryMediaTable_manualButton()}
 			</button>
 		{/if}
-		<button
-			class="btn shrink-0 gap-1 btn-ghost btn-error btn-xs"
-			onclick={() => onDelete(item.id)}
-			disabled={isLoading}
-		>
-			<Trash2 class="h-3.5 w-3.5" />
-			{m.action_delete()}
-		</button>
+		{#if onDelete}
+			<button
+				class="btn shrink-0 gap-1 btn-ghost btn-error btn-xs"
+				onclick={() => onDelete(item.id)}
+				disabled={isLoading}
+			>
+				<Trash2 class="h-3.5 w-3.5" />
+				{m.action_delete()}
+			</button>
+		{/if}
 	</div>
 </div>

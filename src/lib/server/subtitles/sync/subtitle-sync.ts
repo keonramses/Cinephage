@@ -1,5 +1,5 @@
 /**
- * Subtitle Sync Engine — High-Level Orchestrator
+ * Subtitle Sync Engine - High-Level Orchestrator
  *
  * Provides the main entry point for subtitle synchronization.
  * Handles the full pipeline:
@@ -15,6 +15,7 @@
  */
 
 import { readFile, writeFile } from 'node:fs/promises';
+import { applyMediaFileMode } from '#lib/server/filesystem/mkdir-helpers.js';
 
 import type { SyncOptions, SyncResult, TimeDelta, TimeSpan } from './types.js';
 import { NO_PROGRESS } from './types.js';
@@ -24,7 +25,7 @@ import { standardScoring, denormalizeSplitPenalty } from './scoring.js';
 import { alignNosplit } from './align-nosplit.js';
 import { alignWithSplits } from './align-split.js';
 import { extractSpeechSegments, mergeCloseSegments } from './vad.js';
-import { createChildLogger } from '$lib/logging/index.js';
+import { createChildLogger } from '#lib/logging/index.js';
 
 const logger = createChildLogger({ module: 'SubtitleSyncEngine', logDomain: 'subtitles' });
 
@@ -129,7 +130,7 @@ export async function syncSubtitles(options: SyncOptions): Promise<SyncResult> {
 		}
 
 		// Step 5: Run alignment
-		// Force nosplit mode for video references — split-mode DP with dense VAD
+		// Force nosplit mode for video references - split-mode DP with dense VAD
 		// segments causes excessive memory usage and produces worse results.
 		// This matches alass's default behavior for audio-based alignment.
 		const effectiveNoSplits = noSplits || options.referenceType === 'video';
@@ -191,7 +192,12 @@ export async function syncSubtitles(options: SyncOptions): Promise<SyncResult> {
 		// Step 7: Apply deltas and write output
 		const syncedContent = applyDeltas(subtitleContent, perCueDeltas, subtitleFormat);
 		const outputPath = options.outputPath ?? options.subtitlePath;
-		await writeFile(outputPath, syncedContent, 'utf-8');
+		await writeFile(
+			outputPath,
+			syncedContent,
+			options.outputPath ? { encoding: 'utf-8', flag: 'wx' } : 'utf-8'
+		);
+		await applyMediaFileMode(outputPath);
 
 		logger.info(`Synced subtitle written to ${outputPath}`);
 

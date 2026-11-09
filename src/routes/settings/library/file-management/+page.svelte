@@ -1,15 +1,22 @@
 <script lang="ts">
-	import { FolderSync } from 'lucide-svelte';
-	import FolderBrowser from '$lib/components/library/FolderBrowser.svelte';
-	import TagInput from '$lib/components/ui/TagInput.svelte';
-	import { SettingsPage, SettingsSection } from '$lib/components/ui/settings';
-	import * as m from '$lib/paraglide/messages.js';
-	import { toasts } from '$lib/stores/toast.svelte';
-	import { updateFileManagementSettings } from '$lib/api/settings.js';
-	import { invalidateAll } from '$app/navigation';
+	import { untrack } from 'svelte';
+	import { FolderSync } from '@lucide/svelte';
+	import FolderBrowser from '#lib/components/library/FolderBrowser.svelte';
+	import TagInput from '#lib/components/ui/TagInput.svelte';
+	import { SettingsPage, SettingsSection } from '#lib/components/ui/settings/index.js';
+	import * as m from '#lib/paraglide/messages.js';
+	import { toasts } from '#lib/stores/toast.svelte.js';
+	import {
+		fixMediaFilePermissions,
+		getMediaPermissionRepairStatus,
+		updateFileManagementSettings,
+		updateSidecarSettings
+	} from '#lib/api/settings.js';
+	import type { MediaPermissionRepairStatus } from '#lib/api/settings.js';
+	import { refreshAll } from '$app/navigation';
 	import type { PageData } from './$types';
-	import type { ImportMethod } from '$lib/validation/schemas.js';
-	import { DANGEROUS_EXTENSIONS, EXECUTABLE_EXTENSIONS } from '$lib/config/constants.js';
+	import type { ImportMethod } from '#lib/validation/schemas.js';
+	import { DANGEROUS_EXTENSIONS, EXECUTABLE_EXTENSIONS } from '#lib/config/constants.js';
 
 	const BLOCKED_EXTS = new Set<string>([
 		...(DANGEROUS_EXTENSIONS as readonly string[]),
@@ -18,32 +25,56 @@
 
 	let { data }: { data: PageData } = $props();
 
-	// Form fields intentionally capture the initial load value once — $state initializer does not need to re-run on data changes
-	// svelte-ignore state_referenced_locally
-	let importMode = $state<ImportMethod>(data.settings.importMode);
-	// svelte-ignore state_referenced_locally
-	let preferHardlink = $state<boolean>(data.settings.preferHardlink);
-	// svelte-ignore state_referenced_locally
-	let minimumFreeSpaceGb = $state<number>(data.settings.minimumFreeSpaceGb);
-	// svelte-ignore state_referenced_locally
-	let deleteEmptyFolders = $state<boolean>(data.settings.deleteEmptyFolders);
-	// svelte-ignore state_referenced_locally
-	let recycleEnabled = $state<boolean>(data.settings.recycleEnabled);
-	// svelte-ignore state_referenced_locally
-	let extraFileExtensions = $state<string[]>(data.settings.extraFileExtensions);
-
-	// svelte-ignore state_referenced_locally
-	let defaultImportFolder = $state<string>(data.settings.defaultImportFolder ?? '');
+	// Form fields intentionally capture the initial load value once - untrack
+	// keeps the data reads out of the reactive graph inside $state initializers.
+	let importMode = $state<ImportMethod>(untrack(() => data.settings.importMode));
+	let preferHardlink = $state<boolean>(untrack(() => data.settings.preferHardlink));
+	let minimumFreeSpaceGb = $state<number>(untrack(() => data.settings.minimumFreeSpaceGb));
+	let deleteEmptyFolders = $state<boolean>(untrack(() => data.settings.deleteEmptyFolders));
+	let recycleEnabled = $state<boolean>(untrack(() => data.settings.recycleEnabled));
+	let extraFileExtensions = $state<string[]>(untrack(() => data.settings.extraFileExtensions));
+	let defaultImportFolder = $state<string>(untrack(() => data.settings.defaultImportFolder ?? ''));
 	let showFolderBrowser = $state(false);
+
+	// Sidecar files (.nfo + artwork)
+	let sidecar = $state(untrack(() => ({ ...data.sidecarSettings })));
+	// Keyed per-field so toggling one checkbox doesn't disable/flash all the others.
+	let sidecarSaving = $state<Partial<Record<keyof typeof sidecar, boolean>>>({});
+
+	async function saveSidecar(update: Partial<typeof sidecar>) {
+		const keys = Object.keys(update) as (keyof typeof sidecar)[];
+		const previous = { ...sidecar };
+		sidecar = { ...sidecar, ...update };
+		for (const key of keys) sidecarSaving[key] = true;
+		try {
+			await updateSidecarSettings(update);
+			if (update.enabled !== undefined) {
+				toasts.success(
+					update.enabled
+						? m.settings_fileManagement_sidecarEnabled()
+						: m.settings_fileManagement_sidecarDisabled()
+				);
+			}
+		} catch (err) {
+			sidecar = previous;
+			toasts.error(err instanceof Error ? err.message : m.common_failedToSave());
+		} finally {
+			for (const key of keys) sidecarSaving[key] = false;
+		}
+	}
 
 	// Permissions
 	type PermissionsMode = 'default' | 'preserve' | 'custom';
-	// svelte-ignore state_referenced_locally
 	let permissionsMode = $state<PermissionsMode>(
-		data.settings.chmodFile ? 'custom' : data.settings.preservePermissions ? 'preserve' : 'default'
+		untrack(() =>
+			data.settings.chmodFile
+				? 'custom'
+				: data.settings.preservePermissions
+					? 'preserve'
+					: 'default'
+		)
 	);
-	// svelte-ignore state_referenced_locally
-	let chmodInput = $state(data.settings.chmodFile);
+	let chmodInput = $state(untrack(() => data.settings.chmodFile));
 	const chmodError = $derived(
 		permissionsMode === 'custom' && !/^[0-7]{3,4}$/.test(chmodInput)
 			? m.settings_fileManagement_permissionsChmodError()
@@ -61,7 +92,7 @@
 			if (stripped.length > 0) {
 				extraFileExtensions = extraFileExtensions.filter((e) => !BLOCKED_EXTS.has(e.toLowerCase()));
 				toasts.warning(
-					`Removed blocked extensions: ${stripped.join(', ')} — these are dangerous or executable file types that can never be imported.`
+					`Removed blocked extensions: ${stripped.join(', ')} - these are dangerous or executable file types that can never be imported.`
 				);
 			}
 			const preservePermissions = permissionsMode === 'preserve';
@@ -78,7 +109,7 @@
 				autoEnabledPreserveSymlinkFolderIds: data.settings.autoEnabledPreserveSymlinkFolderIds,
 				defaultImportFolder: defaultImportFolder.trim() || undefined
 			})) as { autoEnabledCount?: number; autoRevertedCount?: number } | undefined;
-			await invalidateAll();
+			await refreshAll();
 			toasts.success(m.settings_fileManagement_saved());
 			if (result?.autoEnabledCount) {
 				toasts.warning(
@@ -94,6 +125,43 @@
 			toasts.error(m.settings_fileManagement_failedToSave());
 		} finally {
 			saving = false;
+		}
+	}
+
+	// One-shot repair for library files stuck with owner-only permissions
+	// (issue #617). The server walks the root folders in the background;
+	// poll the status endpoint until it settles so the summary can be shown.
+	let fixingPermissions = $state(false);
+	let permissionRepair = $state<MediaPermissionRepairStatus | null>(null);
+
+	async function runPermissionRepair() {
+		if (fixingPermissions) return;
+		fixingPermissions = true;
+		try {
+			await fixMediaFilePermissions();
+			// Cap the poll at ~5 minutes; the repair keeps running server-side
+			// even if we stop waiting for it here.
+			for (let i = 0; i < 300; i++) {
+				await new Promise((resolve) => setTimeout(resolve, 1000));
+				permissionRepair = await getMediaPermissionRepairStatus();
+				if (!permissionRepair.running) break;
+			}
+			if (permissionRepair?.lastError) {
+				toasts.error(permissionRepair.lastError);
+			} else if (permissionRepair?.lastResult) {
+				toasts.success(
+					m.settings_fileManagement_fixPermissionsDone({
+						dirs: permissionRepair.lastResult.dirsFixed,
+						files: permissionRepair.lastResult.filesFixed
+					})
+				);
+			}
+		} catch (err) {
+			toasts.error(
+				err instanceof Error ? err.message : m.settings_fileManagement_fixPermissionsFailed()
+			);
+		} finally {
+			fixingPermissions = false;
 		}
 	}
 </script>
@@ -296,6 +364,115 @@
 	</SettingsSection>
 
 	<SettingsSection
+		title={m.settings_fileManagement_sidecarSectionTitle()}
+		description={m.settings_fileManagement_sidecarSectionDescription()}
+	>
+		{#snippet actions()}
+			<input
+				type="checkbox"
+				class="toggle toggle-primary"
+				checked={sidecar.enabled}
+				disabled={sidecarSaving.enabled}
+				onchange={(e) => saveSidecar({ enabled: e.currentTarget.checked })}
+				aria-label={m.settings_fileManagement_sidecarSectionTitle()}
+			/>
+		{/snippet}
+
+		{#if sidecar.enabled}
+			<div class="mt-4 flex flex-col gap-3">
+				<label class="flex cursor-pointer items-start gap-3">
+					<input
+						type="checkbox"
+						class="checkbox mt-0.5 checkbox-primary"
+						checked={sidecar.overwriteExisting}
+						disabled={sidecarSaving.overwriteExisting}
+						onchange={(e) => saveSidecar({ overwriteExisting: e.currentTarget.checked })}
+					/>
+					<span>
+						<span class="block text-sm">{m.settings_fileManagement_sidecarOverwriteLabel()}</span>
+						<span class="block text-xs text-base-content/60">
+							{sidecar.overwriteExisting
+								? m.settings_fileManagement_sidecarOverwriteHintOn()
+								: m.settings_fileManagement_sidecarOverwriteHintOff()}
+						</span>
+					</span>
+				</label>
+
+				<label class="flex cursor-pointer items-start gap-3">
+					<input
+						type="checkbox"
+						class="checkbox mt-0.5 checkbox-primary"
+						checked={sidecar.includeArtwork}
+						disabled={sidecarSaving.includeArtwork}
+						onchange={(e) => saveSidecar({ includeArtwork: e.currentTarget.checked })}
+					/>
+					<span>
+						<span class="block text-sm">{m.settings_fileManagement_sidecarArtworkLabel()}</span>
+						<span class="block text-xs text-base-content/60"
+							>{m.settings_fileManagement_sidecarArtworkHint()}</span
+						>
+					</span>
+				</label>
+
+				<p class="text-xs text-base-content/60">
+					{sidecar.includeArtwork
+						? m.settings_fileManagement_sidecarMovieNoteWithArtwork()
+						: m.settings_fileManagement_sidecarMovieNoteNfoOnly()}
+				</p>
+
+				<div class="mt-2">
+					<span class="block text-sm font-medium"
+						>{m.settings_fileManagement_sidecarTvLevelsLabel()}</span
+					>
+					<span class="mb-2 block text-xs text-base-content/60"
+						>{m.settings_fileManagement_sidecarTvLevelsHint()}</span
+					>
+					<div class="flex flex-col gap-2 sm:flex-row sm:gap-6">
+						<label class="flex cursor-pointer items-center gap-2">
+							<input
+								type="checkbox"
+								class="checkbox checkbox-sm checkbox-primary"
+								checked={sidecar.tvSeriesLevel}
+								disabled={sidecarSaving.tvSeriesLevel}
+								onchange={(e) => saveSidecar({ tvSeriesLevel: e.currentTarget.checked })}
+							/>
+							<span class="text-sm">
+								{sidecar.includeArtwork
+									? m.settings_fileManagement_sidecarTvSeriesLabelWithArtwork()
+									: m.settings_fileManagement_sidecarTvSeriesLabelNfoOnly()}
+							</span>
+						</label>
+						<label class="flex cursor-pointer items-center gap-2">
+							<input
+								type="checkbox"
+								class="checkbox checkbox-sm checkbox-primary"
+								checked={sidecar.tvSeasonLevel}
+								disabled={sidecarSaving.tvSeasonLevel}
+								onchange={(e) => saveSidecar({ tvSeasonLevel: e.currentTarget.checked })}
+							/>
+							<span class="text-sm">
+								{sidecar.includeArtwork
+									? m.settings_fileManagement_sidecarTvSeasonLabelWithArtwork()
+									: m.settings_fileManagement_sidecarTvSeasonLabelNfoOnly()}
+							</span>
+						</label>
+						<label class="flex cursor-pointer items-center gap-2">
+							<input
+								type="checkbox"
+								class="checkbox checkbox-sm checkbox-primary"
+								checked={sidecar.tvEpisodeLevel}
+								disabled={sidecarSaving.tvEpisodeLevel}
+								onchange={(e) => saveSidecar({ tvEpisodeLevel: e.currentTarget.checked })}
+							/>
+							<span class="text-sm">{m.settings_fileManagement_sidecarTvEpisodeLabel()}</span>
+						</label>
+					</div>
+				</div>
+			</div>
+		{/if}
+	</SettingsSection>
+
+	<SettingsSection
 		title={m.settings_fileManagement_permissionsSectionTitle()}
 		description={m.settings_fileManagement_permissionsSectionDescription()}
 	>
@@ -378,6 +555,54 @@
 					{/if}
 				</div>
 			</label>
+		</div>
+	</SettingsSection>
+
+	<SettingsSection
+		title={m.settings_fileManagement_fixPermissionsSectionTitle()}
+		description={m.settings_fileManagement_fixPermissionsSectionDescription()}
+	>
+		<div class="flex flex-col gap-3">
+			<div class="flex items-center gap-3">
+				<button
+					type="button"
+					class="btn btn-outline btn-sm"
+					onclick={runPermissionRepair}
+					disabled={fixingPermissions}
+				>
+					{#if fixingPermissions}
+						<span class="loading loading-sm loading-spinner"></span>
+					{/if}
+					{m.settings_fileManagement_fixPermissionsRun()}
+				</button>
+				{#if fixingPermissions}
+					<span class="text-sm text-base-content/60">
+						{m.settings_fileManagement_fixPermissionsRunning()}
+					</span>
+				{/if}
+			</div>
+			{#if permissionRepair?.lastResult}
+				<p class="text-sm text-base-content/70">
+					{m.settings_fileManagement_fixPermissionsSummary({
+						dirs: permissionRepair.lastResult.dirsFixed,
+						files: permissionRepair.lastResult.filesFixed
+					})}
+				</p>
+			{/if}
+			{#if permissionRepair?.lastResult?.errors.length}
+				<div class="text-xs text-base-content/60">
+					<p>
+						{m.settings_fileManagement_fixPermissionsErrors({
+							count: permissionRepair.lastResult.errors.length
+						})}
+					</p>
+					<ul class="list-disc pl-5">
+						{#each permissionRepair.lastResult.errors.slice(0, 5) as error (error)}
+							<li class="break-all">{error}</li>
+						{/each}
+					</ul>
+				</div>
+			{/if}
 		</div>
 	</SettingsSection>
 

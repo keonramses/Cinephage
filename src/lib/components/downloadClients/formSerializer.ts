@@ -4,8 +4,8 @@ import type {
 	DownloadClientMountMode,
 	DownloadPriority,
 	DownloadInitialState
-} from '$lib/types/downloadClient';
-import { isBlankOrRedacted } from '$lib/shared/sensitiveSettings';
+} from '#lib/types/downloadClient.js';
+import { isBlankOrRedacted } from '#lib/shared/sensitiveSettings.js';
 
 export interface NntpServerFormData {
 	name: string;
@@ -36,6 +36,8 @@ export interface DownloadClientFormState {
 	olderPriority: DownloadPriority;
 	initialState: DownloadInitialState;
 	sequentialDownload: boolean;
+	seedRatioLimit?: string;
+	seedTimeLimit?: string;
 	downloadPathLocal: string;
 	downloadPathRemote: string;
 	tempPathLocal: string;
@@ -45,6 +47,8 @@ export interface DownloadClientFormState {
 	implementation: DownloadClientImplementation;
 	apiToken?: string;
 	removeAfterImport?: boolean;
+	allowMovies: boolean;
+	allowTv: boolean;
 }
 
 export function serializeDownloadClientForm(
@@ -81,7 +85,9 @@ export function serializeDownloadClientForm(
 			implementation: formState.implementation,
 			enabled: formState.enabled,
 			priority: formState.priority,
-			removeAfterImport: formState.removeAfterImport ?? false
+			removeAfterImport: formState.removeAfterImport ?? false,
+			allowMovies: formState.allowMovies,
+			allowTv: formState.allowTv
 		};
 		const apiToken = formState.apiToken?.trim();
 		if (!(mode === 'edit' && (isBlankOrRedacted(apiToken) || apiToken === '********')) && apiToken)
@@ -105,8 +111,11 @@ export function serializeDownloadClientForm(
 		recentPriority: formState.recentPriority,
 		olderPriority: formState.olderPriority,
 		initialState: formState.initialState,
-		seedRatioLimit: null,
-		seedTimeLimit: null,
+		// Seeding-goal fields: blank means "no limit pushed". removeAfterImport
+		// defaults to removing (backfilled behavior) when untouched.
+		seedRatioLimit: (formState.seedRatioLimit ?? '').trim() || null,
+		seedTimeLimit: (formState.seedTimeLimit ?? '').trim() ? Number(formState.seedTimeLimit) : null,
+		removeAfterImport: formState.removeAfterImport ?? true,
 		...(formState.implementation === 'qbittorrent'
 			? { sequentialDownload: formState.sequentialDownload }
 			: {}),

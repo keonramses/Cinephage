@@ -1,5 +1,5 @@
 <script lang="ts">
-	import * as m from '$lib/paraglide/messages.js';
+	import * as m from '#lib/paraglide/messages.js';
 
 	type SortField = 'score' | 'seeders' | 'size' | 'age';
 
@@ -40,7 +40,7 @@
 	<label class="label cursor-pointer gap-2">
 		<input
 			type="checkbox"
-			class="checkbox checkbox-sm"
+			class="checkbox checkbox-sm checkbox-primary"
 			checked={showRejected}
 			onchange={(e) => onShowRejectedChange(e.currentTarget.checked)}
 		/>

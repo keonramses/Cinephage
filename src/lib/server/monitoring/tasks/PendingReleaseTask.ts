@@ -11,15 +11,15 @@
  * 4. Clean up expired/superseded entries
  */
 
-import { db } from '$lib/server/db/index.js';
-import { pendingReleases, movies, series, episodes } from '$lib/server/db/schema.js';
+import { db } from '#lib/server/db/index.js';
+import { pendingReleases, movies, series, episodes } from '#lib/server/db/schema.js';
 import { eq, inArray } from 'drizzle-orm';
 import { delayProfileService } from '../specifications/DelaySpecification.js';
 import { blocklistService } from '../specifications/BlocklistSpecification.js';
-import { grabService } from '$lib/server/downloads/GrabService.js';
-import { createChildLogger } from '$lib/logging/index.js';
+import { grabService } from '#lib/server/downloads/GrabService.js';
+import { createChildLogger } from '#lib/logging/index.js';
 import type { TaskResult } from '../MonitoringScheduler.js';
-import type { TaskExecutionContext } from '$lib/server/tasks/TaskExecutionContext.js';
+import type { TaskExecutionContext } from '#lib/server/tasks/TaskExecutionContext.js';
 
 const logger = createChildLogger({ module: 'PendingReleaseTask', logDomain: 'monitoring' });
 
@@ -294,11 +294,17 @@ async function grabPendingRelease(
 		}
 
 		// Build the grab target from stored IDs
-		let target: import('$lib/server/downloads/grab-types.js').GrabTarget;
+		let target: import('#lib/server/downloads/grab-types.js').GrabTarget;
 		if (release.movieId) {
 			target = { type: 'movie', movieId: release.movieId };
 		} else if (release.seriesId && release.episodeIds && release.episodeIds.length > 0) {
-			target = { type: 'episode', episodeId: release.episodeIds[0], seriesId: release.seriesId };
+			// Preserve the FULL delayed scope: collapsing a season/multi-episode
+			// pack to its first episode weakens identity checks and lets sibling
+			// episodes be grabbed concurrently for what is one acquisition.
+			target =
+				release.episodeIds.length === 1
+					? { type: 'episode', episodeId: release.episodeIds[0], seriesId: release.seriesId }
+					: { type: 'series', seriesId: release.seriesId, episodeIds: release.episodeIds };
 		} else if (release.seriesId) {
 			target = { type: 'series', seriesId: release.seriesId, episodeIds: [] };
 		} else {

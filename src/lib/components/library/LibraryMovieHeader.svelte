@@ -1,16 +1,18 @@
 <script lang="ts">
-	import type { LibraryMovie } from '$lib/types/library';
-	import type { MovieDetails, ReleaseDate } from '$lib/types/tmdb';
-	import { getBestQualityFromFiles, displayTitle } from '$lib/types/library';
-	import { pickBestMovieFile } from '$lib/shared/best-file.js';
-	import TmdbImage from '$lib/components/tmdb/TmdbImage.svelte';
-	import CrewList from '$lib/components/tmdb/CrewList.svelte';
-	import WatchProviders from '$lib/components/tmdb/WatchProviders.svelte';
+	import type { LibraryMovie } from '#lib/types/library.js';
+	import type { MovieDetails, ReleaseDate } from '#lib/types/tmdb.js';
+	import { getBestQualityFromFiles, displayTitle } from '#lib/types/library.js';
+	import { pickBestMovieFile } from '#lib/shared/best-file.js';
+	import TmdbImage from '#lib/components/tmdb/TmdbImage.svelte';
+	import CrewList from '#lib/components/tmdb/CrewList.svelte';
+	import WatchProviders from '#lib/components/tmdb/WatchProviders.svelte';
 	import MonitorToggle from './MonitorToggle.svelte';
 	import StatusIndicator from './StatusIndicator.svelte';
 	import QualityBadge from './QualityBadge.svelte';
 	import ScoreBadge from './ScoreBadge.svelte';
-	import { getMovieAvailabilityLevel } from '$lib/utils/movieAvailability';
+	import SubtitleRequirementBadge from './SubtitleRequirementBadge.svelte';
+	import type { SubtitleRequirementProgress } from '#lib/utils/subtitle-status-display.js';
+	import { getMovieAvailabilityLevel } from '#lib/utils/movieAvailability.js';
 	import {
 		Search,
 		Download,
@@ -24,19 +26,20 @@
 		MoreHorizontal,
 		ArrowLeft,
 		Eye,
-		EyeOff
-	} from 'lucide-svelte';
-	import * as m from '$lib/paraglide/messages.js';
-	import { formatBytes, formatLanguage, formatDisplayDateShort } from '$lib/utils/format.js';
-	import { resolvePath } from '$lib/utils/routing.js';
-	import { ConfirmationModal } from '$lib/components/ui/modal';
-	import { toasts } from '$lib/stores/toast.svelte';
-	import { blockMedia } from '$lib/api/settings.js';
+		EyeOff,
+		Replace
+	} from '@lucide/svelte';
+	import * as m from '#lib/paraglide/messages.js';
+	import { formatBytes, formatLanguage, formatDisplayDateShort } from '#lib/utils/format.js';
+	import { resolvePath } from '#lib/utils/routing.js';
+	import { ConfirmationModal } from '#lib/components/ui/modal/index.js';
+	import { toasts } from '#lib/stores/toast.svelte.js';
+	import { blockMedia } from '#lib/api/settings.js';
 	import { SvelteMap } from 'svelte/reactivity';
-	import { TMDB } from '$lib/config/constants.js';
-	import { extractReleaseDates } from '$lib/utils/extractReleaseDates.js';
-	import { getSmartReleaseLine } from '$lib/utils/smartReleaseLine.js';
-	import { formatReleaseLine } from '$lib/utils/releaseLineText.js';
+	import { TMDB } from '#lib/config/constants.js';
+	import { extractReleaseDates } from '#lib/utils/extractReleaseDates.js';
+	import { getSmartReleaseLine } from '#lib/utils/smartReleaseLine.js';
+	import { formatReleaseLine } from '#lib/utils/releaseLineText.js';
 
 	const SOURCE_LABELS: Record<string, string> = {
 		bluray: 'Bluray',
@@ -86,13 +89,20 @@
 		autoSearchResult?: AutoSearchResult | null;
 		scoreInfo?: ScoreInfo | null;
 		scoreLoading?: boolean;
+		/** Requirement-aware subtitle progress from the movie loader (null when no effective profile). */
+		subtitleProgress?: SubtitleRequirementProgress | null;
+		/** Instance default for items with no explicit prefer-original flag. */
+		preferOriginalTitleDefault?: boolean | null;
 		onMonitorToggle?: (newValue: boolean) => void;
 		onAutoSearch?: () => void;
 		onSearch?: () => void;
 		onImport?: () => void;
 		onEdit?: () => void;
 		onDelete?: () => void;
+		onChangeMatch?: () => void;
 		onScoreClick?: () => void;
+		/** Viewer mode: hide acquisition/edit controls, keep the informational header. */
+		readOnly?: boolean;
 	}
 
 	let {
@@ -108,13 +118,17 @@
 		autoSearchResult: _autoSearchResult = null,
 		scoreInfo = null,
 		scoreLoading = false,
+		subtitleProgress = null,
+		preferOriginalTitleDefault = false,
 		onMonitorToggle,
 		onAutoSearch,
 		onSearch,
 		onImport,
 		onEdit,
 		onDelete,
-		onScoreClick
+		onChangeMatch,
+		onScoreClick,
+		readOnly = false
 	}: Props = $props();
 
 	let showBlockConfirm = $state(false);
@@ -279,60 +293,74 @@
 			>
 		</a>
 		<div class="flex shrink-0 items-center gap-1 sm:gap-2">
-			<div class="hidden sm:block">
-				<MonitorToggle monitored={movie.monitored ?? false} onToggle={onMonitorToggle} size="md" />
-			</div>
-			<button
-				class="btn hidden gap-1.5 btn-primary btn-sm sm:flex"
-				onclick={onAutoSearch}
-				disabled={autoSearching}
-			>
-				{#if autoSearching}
-					<span class="loading loading-xs loading-spinner"></span>
-				{:else}
-					<Zap size={14} />
-				{/if}
-				{m.library_movieHeader_autoGrab()}
-			</button>
-			<button class="btn hidden gap-1.5 btn-ghost btn-sm sm:flex" onclick={onSearch}>
-				<Search size={14} />
-				{m.library_movieHeader_manual()}
-			</button>
-			{#if onImport}
-				<button class="btn hidden gap-1.5 btn-ghost btn-sm sm:flex" onclick={onImport}>
-					<Download size={14} />
-					{m.action_import()}
-				</button>
-			{/if}
-			<div class="dropdown dropdown-end hidden sm:block">
-				<button tabindex="0" class="btn btn-ghost btn-sm">
-					<MoreHorizontal size={18} />
-				</button>
-				<!-- svelte-ignore a11y_no_noninteractive_tabindex -->
-				<ul
-					tabindex="0"
-					class="menu dropdown-content z-50 w-52 rounded-box border border-base-content/10 bg-base-200 p-2 shadow-lg"
+			{#if !readOnly}
+				<div class="hidden sm:block">
+					<MonitorToggle
+						monitored={movie.monitored ?? false}
+						onToggle={onMonitorToggle}
+						size="md"
+					/>
+				</div>
+				<button
+					class="btn hidden gap-1.5 btn-primary btn-sm sm:flex"
+					onclick={onAutoSearch}
+					disabled={autoSearching}
 				>
-					<li class="hidden sm:flex">
-						<button onclick={onEdit}>
-							<Settings size={16} />
-							{m.action_edit()}
-						</button>
-					</li>
-					<li>
-						<button class="text-error" onclick={onDelete}>
-							<Trash2 size={16} />
-							{m.action_delete()}
-						</button>
-					</li>
-					<li>
-						<button class="text-error" onclick={() => (showBlockConfirm = true)}>
-							<Ban size={16} />
-							{m.library_blockMediaTooltip()}
-						</button>
-					</li>
-				</ul>
-			</div>
+					{#if autoSearching}
+						<span class="loading loading-xs loading-spinner"></span>
+					{:else}
+						<Zap size={14} />
+					{/if}
+					{m.library_movieHeader_autoGrab()}
+				</button>
+				<button class="btn hidden gap-1.5 btn-ghost btn-sm sm:flex" onclick={onSearch}>
+					<Search size={14} />
+					{m.library_movieHeader_manual()}
+				</button>
+				{#if onImport}
+					<button class="btn hidden gap-1.5 btn-ghost btn-sm sm:flex" onclick={onImport}>
+						<Download size={14} />
+						{m.action_import()}
+					</button>
+				{/if}
+				<div class="dropdown dropdown-end hidden sm:block">
+					<button tabindex="0" class="btn btn-ghost btn-sm">
+						<MoreHorizontal size={18} />
+					</button>
+					<!-- svelte-ignore a11y_no_noninteractive_tabindex -->
+					<ul
+						tabindex="0"
+						class="menu dropdown-content z-50 w-52 rounded-box border border-base-content/10 bg-base-200 p-2 shadow-lg"
+					>
+						<li class="hidden sm:flex">
+							<button onclick={onEdit}>
+								<Settings size={16} />
+								{m.action_edit()}
+							</button>
+						</li>
+						{#if onChangeMatch}
+							<li>
+								<button onclick={onChangeMatch}>
+									<Replace size={16} />
+									{m.library_changeMatch_menuLabel()}
+								</button>
+							</li>
+						{/if}
+						<li>
+							<button class="text-error" onclick={onDelete}>
+								<Trash2 size={16} />
+								{m.action_delete()}
+							</button>
+						</li>
+						<li>
+							<button class="text-error" onclick={() => (showBlockConfirm = true)}>
+								<Ban size={16} />
+								{m.library_blockMediaTooltip()}
+							</button>
+						</li>
+					</ul>
+				</div>
+			{/if}
 		</div>
 	</div>
 
@@ -481,28 +509,30 @@
 							class="h-auto w-full object-cover"
 						/>
 					</div>
-					<button
-						class="flex w-full items-center justify-center gap-1.5 rounded-lg py-1.5 text-xs font-medium transition-colors
-							{movie.monitored
-							? 'bg-success/10 text-success hover:bg-success/20'
-							: 'bg-base-content/5 text-base-content/40 hover:bg-base-content/10'}"
-						onclick={() => onMonitorToggle?.(!movie.monitored)}
-					>
-						{#if movie.monitored}
-							<Eye size={13} />
-							Monitored
-						{:else}
-							<EyeOff size={13} />
-							Unmonitored
-						{/if}
-					</button>
+					{#if !readOnly}
+						<button
+							class="flex w-full items-center justify-center gap-1.5 rounded-lg py-1.5 text-xs font-medium transition-colors
+								{movie.monitored
+								? 'bg-success/10 text-success hover:bg-success/20'
+								: 'bg-base-content/5 text-base-content/40 hover:bg-base-content/10'}"
+							onclick={() => onMonitorToggle?.(!movie.monitored)}
+						>
+							{#if movie.monitored}
+								<Eye size={13} />
+								Monitored
+							{:else}
+								<EyeOff size={13} />
+								Unmonitored
+							{/if}
+						</button>
+					{/if}
 				</div>
 
 				<!-- Main Info -->
 				<div class="flex min-w-0 flex-1 flex-col gap-4">
 					<div class="min-w-0">
 						<h1 class="text-2xl font-bold md:text-3xl">
-							{displayTitle(movie)}
+							{displayTitle(movie, preferOriginalTitleDefault)}
 							{#if movie.year}
 								<span class="font-normal text-base-content/60">({movie.year})</span>
 							{/if}
@@ -627,6 +657,9 @@
 									/>
 								{/if}
 							{/if}
+							{#if subtitleProgress}
+								<SubtitleRequirementBadge progress={subtitleProgress} size="md" showCutoff={true} />
+							{/if}
 						</div>
 						<div
 							class="flex w-full items-center gap-1 overflow-x-auto border-t border-base-content/10 pt-2 pb-0.5 sm:w-auto sm:shrink-0 sm:overflow-x-visible sm:border-0 sm:pt-0 sm:pb-0"
@@ -693,97 +726,107 @@
 	confirmVariant="error"
 />
 
-<!-- Mobile action bar -->
-<div
-	class="fixed right-0 bottom-0 left-0 z-40 border-t border-base-content/6 bg-base-100/75 backdrop-blur-xl sm:hidden"
-	style="padding-bottom: env(safe-area-inset-bottom)"
->
-	<div class="flex items-stretch justify-around">
-		<!-- Monitor -->
-		<button
-			class="flex flex-1 flex-col items-center gap-1 py-3 transition-colors
+<!-- Mobile action bar (admin only: every entry mutates or acquires) -->
+{#if !readOnly}
+	<div
+		class="fixed right-0 bottom-0 left-0 z-40 border-t border-base-content/6 bg-base-100/75 backdrop-blur-xl sm:hidden"
+		style="padding-bottom: env(safe-area-inset-bottom)"
+	>
+		<div class="flex items-stretch justify-around">
+			<!-- Monitor -->
+			<button
+				class="flex flex-1 flex-col items-center gap-1 py-3 transition-colors
 				{movie.monitored ? 'text-success' : 'text-base-content/55'}"
-			onclick={() => onMonitorToggle?.(!movie.monitored)}
-		>
-			{#if movie.monitored}
-				<Eye size={20} />
-			{:else}
-				<EyeOff size={20} />
-			{/if}
-			<span class="text-[10px] tracking-wide">{movie.monitored ? 'Monitored' : 'Off'}</span>
-		</button>
+				onclick={() => onMonitorToggle?.(!movie.monitored)}
+			>
+				{#if movie.monitored}
+					<Eye size={20} />
+				{:else}
+					<EyeOff size={20} />
+				{/if}
+				<span class="text-[10px] tracking-wide">{movie.monitored ? 'Monitored' : 'Off'}</span>
+			</button>
 
-		<!-- Auto-grab -->
-		<button
-			class="flex flex-1 flex-col items-center gap-1 py-3 transition-colors
+			<!-- Auto-grab -->
+			<button
+				class="flex flex-1 flex-col items-center gap-1 py-3 transition-colors
 				{autoSearching ? 'text-primary/40' : 'text-primary'}"
-			onclick={onAutoSearch}
-			disabled={autoSearching}
-		>
-			{#if autoSearching}
-				<span class="loading loading-xs loading-spinner"></span>
-			{:else}
-				<Zap size={20} />
-			{/if}
-			<span class="text-[10px] tracking-wide">{m.library_movieHeader_autoGrab()}</span>
-		</button>
+				onclick={onAutoSearch}
+				disabled={autoSearching}
+			>
+				{#if autoSearching}
+					<span class="loading loading-xs loading-spinner"></span>
+				{:else}
+					<Zap size={20} />
+				{/if}
+				<span class="text-[10px] tracking-wide">{m.library_movieHeader_autoGrab()}</span>
+			</button>
 
-		<!-- Manual -->
-		<button
-			class="flex flex-1 flex-col items-center gap-1 py-3 text-base-content/55 transition-colors active:text-base-content/90"
-			onclick={onSearch}
-		>
-			<Search size={20} />
-			<span class="text-[10px] tracking-wide">{m.library_movieHeader_manual()}</span>
-		</button>
-
-		{#if onImport}
-			<!-- Import -->
+			<!-- Manual -->
 			<button
 				class="flex flex-1 flex-col items-center gap-1 py-3 text-base-content/55 transition-colors active:text-base-content/90"
-				onclick={onImport}
+				onclick={onSearch}
 			>
-				<Download size={20} />
-				<span class="text-[10px] tracking-wide">{m.action_import()}</span>
+				<Search size={20} />
+				<span class="text-[10px] tracking-wide">{m.library_movieHeader_manual()}</span>
 			</button>
-		{/if}
 
-		<!-- Edit -->
-		<button
-			class="flex flex-1 flex-col items-center gap-1 py-3 text-base-content/55 transition-colors active:text-base-content/90"
-			onclick={onEdit}
-		>
-			<Settings size={20} />
-			<span class="text-[10px] tracking-wide">{m.action_edit()}</span>
-		</button>
+			{#if onImport}
+				<!-- Import -->
+				<button
+					class="flex flex-1 flex-col items-center gap-1 py-3 text-base-content/55 transition-colors active:text-base-content/90"
+					onclick={onImport}
+				>
+					<Download size={20} />
+					<span class="text-[10px] tracking-wide">{m.action_import()}</span>
+				</button>
+			{/if}
 
-		<!-- Overflow -->
-		<div class="dropdown dropdown-end dropdown-top flex flex-1">
+			<!-- Edit -->
 			<button
-				tabindex="0"
-				class="flex flex-1 flex-col items-center gap-1 py-3 text-error/80 transition-colors active:text-error"
+				class="flex flex-1 flex-col items-center gap-1 py-3 text-base-content/55 transition-colors active:text-base-content/90"
+				onclick={onEdit}
 			>
-				<MoreHorizontal size={20} />
-				<span class="text-[10px] tracking-wide">More</span>
+				<Settings size={20} />
+				<span class="text-[10px] tracking-wide">{m.action_edit()}</span>
 			</button>
-			<!-- svelte-ignore a11y_no_noninteractive_tabindex -->
-			<ul
-				tabindex="0"
-				class="menu dropdown-content z-50 mb-2 w-52 rounded-box border border-base-content/10 bg-base-200 p-2 shadow-lg"
-			>
-				<li>
-					<button class="text-error" onclick={onDelete}>
-						<Trash2 size={16} />
-						{m.action_delete()}
-					</button>
-				</li>
-				<li>
-					<button class="text-error" onclick={() => (showBlockConfirm = true)}>
-						<Ban size={16} />
-						{m.library_blockMediaTooltip()}
-					</button>
-				</li>
-			</ul>
+
+			<!-- Overflow -->
+			<div class="dropdown dropdown-end dropdown-top flex flex-1">
+				<button
+					tabindex="0"
+					class="flex flex-1 flex-col items-center gap-1 py-3 text-error/80 transition-colors active:text-error"
+				>
+					<MoreHorizontal size={20} />
+					<span class="text-[10px] tracking-wide">More</span>
+				</button>
+				<!-- svelte-ignore a11y_no_noninteractive_tabindex -->
+				<ul
+					tabindex="0"
+					class="menu dropdown-content z-50 mb-2 w-52 rounded-box border border-base-content/10 bg-base-200 p-2 shadow-lg"
+				>
+					{#if onChangeMatch}
+						<li>
+							<button onclick={onChangeMatch}>
+								<Replace size={16} />
+								{m.library_changeMatch_menuLabel()}
+							</button>
+						</li>
+					{/if}
+					<li>
+						<button class="text-error" onclick={onDelete}>
+							<Trash2 size={16} />
+							{m.action_delete()}
+						</button>
+					</li>
+					<li>
+						<button class="text-error" onclick={() => (showBlockConfirm = true)}>
+							<Ban size={16} />
+							{m.library_blockMediaTooltip()}
+						</button>
+					</li>
+				</ul>
+			</div>
 		</div>
 	</div>
-</div>
+{/if}

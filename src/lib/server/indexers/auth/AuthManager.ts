@@ -11,8 +11,8 @@ import { SelectorEngine } from '../engine/SelectorEngine';
 import { CookieStore } from './CookieStore';
 import { decodeBuffer } from '../http/EncodingUtils';
 import { isCloudflareProtected, CloudflareProtectedError } from '../http/CloudflareDetection';
-import { captchaSolverSettingsService, getCaptchaSolver } from '$lib/server/captcha';
-import { createChildLogger } from '$lib/logging';
+import { captchaSolverSettingsService, getCaptchaSolver } from '#lib/server/captcha/index.js';
+import { createChildLogger } from '#lib/logging/index.js';
 
 const authLogger = createChildLogger({ logDomain: 'indexers' as const });
 
@@ -654,7 +654,7 @@ export class AuthManager {
 	 * Tries a plain fetch first (with manual redirect following so session cookies
 	 * from 302 responses are captured). If the response looks like a Cloudflare
 	 * challenge and the captcha solver (Camoufox browser) is available, retries
-	 * through the browser — which both passes the challenge and returns the
+	 * through the browser - which both passes the challenge and returns the
 	 * session cookies set by the site.
 	 */
 	private async requestWithCloudflareFallback(

@@ -3,14 +3,51 @@
  * Handles client configuration, testing, and download operations.
  */
 
-import { db } from '$lib/server/db';
-import { downloadClients as downloadClientsTable } from '$lib/server/db/schema';
+import { db } from '#lib/server/db/index.js';
+import { downloadClients as downloadClientsTable } from '#lib/server/db/schema.js';
 import { eq } from 'drizzle-orm';
 import { randomUUID } from 'node:crypto';
-import { createChildLogger } from '$lib/logging';
-import { decryptDebridToken, encryptDebridToken } from '$lib/server/crypto/debridTokenCrypto';
+import { createChildLogger } from '#lib/logging/index.js';
+import { decryptDebridToken } from '#lib/server/crypto/debridTokenCrypto.js';
+import {
+	decryptCredential,
+	encryptCredential,
+	isEncryptedCredential
+} from '#lib/server/crypto/credentialsCrypto.js';
 
 const logger = createChildLogger({ logDomain: 'imports' as const });
+
+/** AAD purposes for the two credential columns this manager owns. */
+const DL_PASSWORD_PURPOSE = 'dl-client-password';
+const DEBRID_TOKEN_PURPOSE = 'debrid-token';
+
+function encryptStoredPassword(clientId: string, password: string): string {
+	return encryptCredential(DL_PASSWORD_PURPOSE, clientId, password);
+}
+
+function decryptStoredPassword(clientId: string, stored: string | null | undefined): string | null {
+	if (!stored) return null;
+	if (isEncryptedCredential(stored)) {
+		return decryptCredential(DL_PASSWORD_PURPOSE, clientId, stored, `download-client:${clientId}`);
+	}
+	return stored; // plaintext tolerance for rows that raced the migration
+}
+
+function encryptStoredDebridToken(clientId: string, token: string): string {
+	return encryptCredential(DEBRID_TOKEN_PURPOSE, clientId, token);
+}
+
+function decryptStoredDebridToken(
+	clientId: string,
+	stored: string | null | undefined
+): string | null {
+	if (!stored) return null;
+	if (isEncryptedCredential(stored)) {
+		return decryptCredential(DEBRID_TOKEN_PURPOSE, clientId, stored, `download-client:${clientId}`);
+	}
+	// Legacy `iv:tag:ct` blobs from debridTokenCrypto (pre-migration 161).
+	return decryptDebridToken(stored);
+}
 
 import type { IDownloadClient, DownloadClientConfig } from './core/interfaces';
 import type {
@@ -19,7 +56,7 @@ import type {
 	ConnectionTestResult,
 	DownloadClientImplementation,
 	DownloadClientHealth
-} from '$lib/types/downloadClient';
+} from '#lib/types/downloadClient.js';
 import { QBittorrentClient } from './qbittorrent/QBittorrentClient';
 import { TransmissionClient } from './transmission/TransmissionClient';
 import { DelugeClient } from './deluge/DelugeClient';
@@ -222,14 +259,14 @@ export class DownloadClientManager {
 		const client = this.rowToClient(rows[0]);
 		return {
 			...client,
-			password: rows[0].password
+			password: decryptStoredPassword(id, rows[0].password)
 		};
 	}
 
 	private async loadStoredDebridToken(id: string): Promise<StoredDebridTokenResult> {
 		const rows = await this.selectClientRowsById(id);
 		const encryptedToken = rows[0]?.apiToken;
-		const apiToken = encryptedToken ? decryptDebridToken(encryptedToken) : null;
+		const apiToken = decryptStoredDebridToken(id, encryptedToken);
 
 		return apiToken
 			? { success: true, apiToken }
@@ -274,7 +311,8 @@ export class DownloadClientManager {
 		}
 
 		// Encrypt the debrid API token before storing.
-		const apiToken = isDebrid && input.apiToken ? encryptDebridToken(input.apiToken) : null;
+		const apiToken =
+			isDebrid && input.apiToken ? encryptStoredDebridToken(id, input.apiToken) : null;
 
 		await db.insert(downloadClientsTable).values({
 			id,
@@ -287,9 +325,11 @@ export class DownloadClientManager {
 			urlBase: isDebrid ? null : (input.urlBase ?? null),
 			mountMode: isDebrid ? null : this.normalizeMountMode(input.mountMode),
 			username: isDebrid ? null : input.username,
-			password: isDebrid ? null : input.password,
+			password: isDebrid || !input.password ? null : encryptStoredPassword(id, input.password),
 			apiToken,
-			removeAfterImport: isDebrid ? (input.removeAfterImport ?? false) : false,
+			removeAfterImport: input.removeAfterImport ?? false,
+			allowMovies: isDebrid ? (input.allowMovies ?? true) : true,
+			allowTv: isDebrid ? (input.allowTv ?? true) : true,
 			movieCategory: isDebrid ? 'movies' : (input.movieCategory ?? 'movies'),
 			tvCategory: isDebrid ? 'tv' : (input.tvCategory ?? 'tv'),
 			recentPriority: isDebrid ? 'normal' : (input.recentPriority ?? 'normal'),
@@ -327,6 +367,15 @@ export class DownloadClientManager {
 			throw new Error(`Download client not found: ${id}`);
 		}
 
+		// Resolve against the stored values too, not just this request's payload -
+		// a request that only turns off allowTv while allowMovies is already false
+		// in the DB would otherwise slip past the schema's same-request check.
+		const nextAllowMovies = updates.allowMovies ?? existing.allowMovies;
+		const nextAllowTv = updates.allowTv ?? existing.allowTv;
+		if (nextAllowMovies === false && nextAllowTv === false) {
+			throw new Error('At least one content type (Movies or TV Shows) must be enabled');
+		}
+
 		const updateData: Record<string, unknown> = {
 			updatedAt: new Date().toISOString()
 		};
@@ -347,17 +396,19 @@ export class DownloadClientManager {
 		// Only update password if explicitly provided with a non-empty value
 		// (null or empty string means "keep existing password")
 		if (updates.password !== undefined && updates.password !== null && updates.password !== '') {
-			updateData.password = updates.password;
+			updateData.password = encryptStoredPassword(id, updates.password);
 		}
 		// Only update apiToken if explicitly provided with a non-empty value.
 		// If apiToken is not provided (undefined/null/empty), preserve the existing
-		// encrypted token — same pattern as password.
+		// encrypted token - same pattern as password.
 		if (updates.apiToken !== undefined && updates.apiToken !== null && updates.apiToken !== '') {
-			updateData.apiToken = encryptDebridToken(updates.apiToken);
+			updateData.apiToken = encryptStoredDebridToken(id, updates.apiToken);
 		}
 		if (updates.removeAfterImport !== undefined) {
 			updateData.removeAfterImport = updates.removeAfterImport;
 		}
+		if (updates.allowMovies !== undefined) updateData.allowMovies = updates.allowMovies;
+		if (updates.allowTv !== undefined) updateData.allowTv = updates.allowTv;
 		if (updates.movieCategory !== undefined) updateData.movieCategory = updates.movieCategory;
 		if (updates.tvCategory !== undefined) updateData.tvCategory = updates.tvCategory;
 		if (updates.recentPriority !== undefined) updateData.recentPriority = updates.recentPriority;
@@ -604,6 +655,14 @@ export class DownloadClientManager {
 			implementation: config.implementation,
 			sequentialDownload:
 				config.implementation === 'qbittorrent' ? (config.sequentialDownload ?? false) : false,
+			// rTorrent evaluates seed goals app-side (see RTorrentClient); the
+			// row's decimal string is parsed once here.
+			seedRatioLimit:
+				config.implementation === 'rtorrent' && config.seedRatioLimit
+					? parseFloat(config.seedRatioLimit)
+					: undefined,
+			seedTimeLimit:
+				config.implementation === 'rtorrent' ? (config.seedTimeLimit ?? undefined) : undefined,
 			// For SABnzbd, the API key is stored in the password field
 			apiKey:
 				this.normalizeImplementation(config.implementation) === 'sabnzbd'
@@ -677,17 +736,21 @@ export class DownloadClientManager {
 	 *
 	 * Debrid adapters intentionally do not implement IDownloadClient, so they
 	 * cannot use getClientForProtocol(). The optional ID is used by retry paths
-	 * that must stay on the queue row's original provider.
+	 * that must stay on the queue row's original provider. `mediaType`, when
+	 * given, excludes clients that have been restricted away from that content
+	 * type (e.g. a client set to movies-only is skipped for a TV acquisition).
 	 */
 	async getDebridClientForAcquisition(
-		preferredClientId?: string
+		preferredClientId?: string,
+		mediaType?: 'movie' | 'tv'
 	): Promise<{ client: DownloadClient; adapter: DebridAdapter } | undefined> {
 		const clients = (await this.getClients())
 			.filter(
 				(client) =>
 					client.enabled &&
 					DEBRID_IMPLEMENTATIONS.has(client.implementation) &&
-					(!preferredClientId || client.id === preferredClientId)
+					(!preferredClientId || client.id === preferredClientId) &&
+					(!mediaType || (mediaType === 'movie' ? client.allowMovies : client.allowTv) !== false)
 			)
 			.sort((a, b) => a.priority - b.priority || a.id.localeCompare(b.id));
 
@@ -936,6 +999,8 @@ export class DownloadClientManager {
 			hasPassword: !!row.password,
 			hasApiToken: !!row.apiToken,
 			removeAfterImport: !!row.removeAfterImport,
+			allowMovies: row.allowMovies ?? true,
+			allowTv: row.allowTv ?? true,
 			movieCategory: row.movieCategory ?? 'movies',
 			tvCategory: row.tvCategory ?? 'tv',
 			recentPriority: (row.recentPriority as 'normal' | 'high' | 'force') ?? 'normal',

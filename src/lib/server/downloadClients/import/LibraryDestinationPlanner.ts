@@ -1,14 +1,15 @@
 import { basename, isAbsolute, join, relative, resolve, sep } from 'node:path';
-import { ReleaseParser } from '$lib/server/indexers/parser/ReleaseParser';
+import { ReleaseParser } from '#lib/server/indexers/parser/ReleaseParser.js';
+import { resolveLocalizedTitlesForFormats } from '#lib/server/library/naming/localization.js';
 import {
 	releaseToNamingInfo,
 	type MediaNamingInfo
-} from '$lib/server/library/naming/NamingService';
+} from '#lib/server/library/naming/NamingService.js';
 
 interface NamingBoundary {
 	generateMovieFileName(info: MediaNamingInfo): string;
 	generateEpisodeFileName(info: MediaNamingInfo): string;
-	generateSeasonFolderName(seasonNumber: number): string;
+	generateSeasonFolderName(seasonNumber: number, series?: Partial<MediaNamingInfo>): string;
 }
 
 interface MoviePlanInput {
@@ -64,8 +65,9 @@ export class LibraryDestinationPlanner {
 
 	constructor(private readonly naming: NamingBoundary) {}
 
-	planMovie(input: MoviePlanInput): LibraryDestinationPlan {
+	async planMovie(input: MoviePlanInput): Promise<LibraryDestinationPlan> {
 		const parsed = this.parser.parse(input.releaseTitle);
+		const localizedTitles = await resolveLocalizedTitlesForFormats('movie', input.media.tmdbId);
 		const fileName = this.safeSegment(
 			this.naming.generateMovieFileName({
 				title: input.media.title,
@@ -74,6 +76,7 @@ export class LibraryDestinationPlanner {
 				tmdbId: input.media.tmdbId,
 				imdbId: input.media.imdbId ?? undefined,
 				collectionName: input.media.collectionName ?? undefined,
+				localizedTitles,
 				...releaseToNamingInfo(parsed, input.sourcePath)
 			})
 		);
@@ -85,28 +88,35 @@ export class LibraryDestinationPlanner {
 		};
 	}
 
-	planEpisode(input: EpisodePlanInput): LibraryDestinationPlan {
+	async planEpisode(input: EpisodePlanInput): Promise<LibraryDestinationPlan> {
 		const parsed = this.parser.parse(input.releaseTitle);
-		const fileName = this.safeSegment(
-			this.naming.generateEpisodeFileName({
-				...releaseToNamingInfo(parsed, input.sourcePath),
-				title: input.media.title,
-				originalTitle: input.media.originalTitle ?? undefined,
-				year: input.media.year ?? undefined,
-				tmdbId: input.media.tmdbId ?? undefined,
-				tvdbId: input.media.tvdbId ?? undefined,
-				imdbId: input.media.imdbId ?? undefined,
-				seasonNumber: input.seasonNumber,
-				episodeNumbers: input.episodeNumbers,
-				episodeTitle: input.episodeTitle,
-				absoluteNumber: input.absoluteNumber,
-				airDate: input.airDate,
-				isAnime: input.media.seriesType === 'anime',
-				isDaily: input.media.seriesType === 'daily'
-			})
+		const localizedTitles = await resolveLocalizedTitlesForFormats(
+			'series',
+			input.media.tmdbId ?? undefined
 		);
+		const episodeInfo: MediaNamingInfo = {
+			...releaseToNamingInfo(parsed, input.sourcePath),
+			title: input.media.title,
+			originalTitle: input.media.originalTitle ?? undefined,
+			year: input.media.year ?? undefined,
+			tmdbId: input.media.tmdbId ?? undefined,
+			tvdbId: input.media.tvdbId ?? undefined,
+			imdbId: input.media.imdbId ?? undefined,
+			localizedTitles,
+			seasonNumber: input.seasonNumber,
+			episodeNumbers: input.episodeNumbers,
+			episodeTitle: input.episodeTitle,
+			absoluteNumber: input.absoluteNumber,
+			airDate: input.airDate,
+			isAnime: input.media.seriesType === 'anime',
+			isDaily: input.media.seriesType === 'daily'
+		};
+		const fileName = this.safeSegment(this.naming.generateEpisodeFileName(episodeInfo));
 		const relativePath = input.useSeasonFolders
-			? join(this.safeSegment(this.naming.generateSeasonFolderName(input.seasonNumber)), fileName)
+			? join(
+					this.safeSegment(this.naming.generateSeasonFolderName(input.seasonNumber, episodeInfo)),
+					fileName
+				)
 			: fileName;
 
 		return {

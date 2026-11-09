@@ -1,6 +1,6 @@
 import type { DecisionStage, StageResult } from '../../types.js';
 import type { GrabDecisionContext } from './types.js';
-import { getFormat } from '$lib/server/scoring/formats/index.js';
+import { getFormat } from '#lib/server/scoring/formats/index.js';
 
 export class RequiredFormatsStage implements DecisionStage<GrabDecisionContext> {
 	name = 'requiredFormats';
@@ -25,7 +25,7 @@ export class RequiredFormatsStage implements DecisionStage<GrabDecisionContext> 
 
 		const missing = [...missingAnd];
 		if (!orSatisfied) {
-			// None of the OR formats matched — report all of them as missing
+			// None of the OR formats matched - report all of them as missing
 			missing.push(...orEntries);
 		}
 

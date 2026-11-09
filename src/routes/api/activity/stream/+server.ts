@@ -1,12 +1,12 @@
 import type { RequestHandler } from './$types';
-import { createSSEStream } from '$lib/server/sse';
-import { downloadMonitor } from '$lib/server/downloadClients/monitoring';
-import { mediaResolver } from '$lib/server/activity';
-import { activityStreamEvents } from '$lib/server/activity/ActivityStreamEvents';
-import type { UnifiedActivity, ActivityStatus } from '$lib/types/activity';
-import type { ActivityRefreshEvent } from '$lib/types/sse/events/activity-events.js';
-import { createChildLogger } from '$lib/logging';
-import { mapQueueStatus, projectQueueActivity } from '$lib/server/activity/projectors';
+import { createSSEStream } from '#lib/server/sse.js';
+import { downloadMonitor } from '#lib/server/downloadClients/monitoring/index.js';
+import { mediaResolver } from '#lib/server/activity/index.js';
+import { activityStreamEvents } from '#lib/server/activity/ActivityStreamEvents.js';
+import type { UnifiedActivity, ActivityStatus } from '#lib/types/activity.js';
+import type { ActivityRefreshEvent } from '#lib/types/sse/events/activity-events.js';
+import { createChildLogger } from '#lib/logging/index.js';
+import { mapQueueStatus, projectQueueActivity } from '#lib/server/activity/projectors.js';
 
 const logger = createChildLogger({ module: 'ActivityStreamApi', logDomain: 'monitoring' });
 
@@ -133,7 +133,7 @@ export const GET: RequestHandler = async () => {
 				const statusChanged = prevStatus === undefined || prevStatus !== queueItem.status;
 
 				if (statusChanged) {
-					// Status actually changed — send the full activity payload so
+					// Status actually changed - send the full activity payload so
 					// the client can update all fields (timeline, status, etc.)
 					const activity = await queueItemToActivity(queueItem);
 					lastSentStatus.set(queueItem.id, queueItem.status);
@@ -143,7 +143,7 @@ export const GET: RequestHandler = async () => {
 					return;
 				}
 
-				// Progress-only update — throttle to avoid flooding the client.
+				// Progress-only update - throttle to avoid flooding the client.
 				const now = Date.now();
 				const lastSent = lastProgressSentAt.get(queueItem.id) ?? 0;
 
@@ -154,12 +154,12 @@ export const GET: RequestHandler = async () => {
 				};
 
 				if (now - lastSent >= PROGRESS_THROTTLE_MS) {
-					// Enough time passed — send immediately
+					// Enough time passed - send immediately
 					send('activity:progress', progressData);
 					lastProgressSentAt.set(queueItem.id, now);
 					pendingProgress.delete(queueItem.id);
 				} else {
-					// Too soon — buffer and schedule a flush
+					// Too soon - buffer and schedule a flush
 					pendingProgress.set(queueItem.id, progressData);
 					scheduleProgressFlush();
 				}

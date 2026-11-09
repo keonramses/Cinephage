@@ -16,10 +16,11 @@ import { parseSize } from '../types';
 import { TemplateEngine } from '../engine/TemplateEngine';
 import { FilterEngine } from '../engine/FilterEngine';
 import { SelectorEngine, type JsonValue } from '../engine/SelectorEngine';
-import { createChildLogger } from '$lib/logging';
+import { createChildLogger } from '#lib/logging/index.js';
+import { normalizeLanguageTag } from '#lib/server/languages/normalize.js';
 
 const logger = createChildLogger({ logDomain: 'indexers' as const });
-import { extractInfoHash } from '$lib/server/downloadClients/utils/hashUtils';
+import { extractInfoHash } from '#lib/server/downloadClients/utils/hashUtils.js';
 
 export interface ParseResult {
 	releases: ReleaseResult[];
@@ -72,6 +73,14 @@ export class ResponseParser {
 
 		try {
 			if (responseType === 'json') {
+				// An indexer occasionally returns HTTP 200 with an empty body (a
+				// remote-side hiccup, not a bad request - the HTTP layer already
+				// throws on any non-2xx status before this ever runs). JSON.parse('')
+				// throws the cryptic "Unexpected end of JSON input", which reads like
+				// a Cinephage parsing bug rather than what it actually is.
+				if (content.trim().length === 0) {
+					throw new Error('Indexer returned an empty response body');
+				}
 				const parsed = this.selectorEngine.parseJson(content);
 				const results = this.parseJsonResponse(parsed, context);
 				releases.push(...results);
@@ -118,14 +127,20 @@ export class ResponseParser {
 
 	/**
 	 * Determine response type from path config or content.
+	 *
+	 * The Cardigann convention (used by most bundled definitions) declares
+	 * `response.type` as a sibling of `paths`/`rows`/`fields` on the shared
+	 * search block, not per-path - so a per-path override is checked first,
+	 * then the search-block-level declaration, before falling back to
+	 * content-sniffing for definitions that don't declare either.
 	 */
 	private getResponseType(
 		searchPath: SearchPathBlock | undefined,
 		content: string
 	): 'json' | 'html' | 'xml' {
-		// Check path-specific response type
-		if (searchPath?.response?.type) {
-			return searchPath.response.type;
+		const declaredType = searchPath?.response?.type ?? this.definition.search?.response?.type;
+		if (declaredType) {
+			return declaredType;
 		}
 
 		// Auto-detect from content
@@ -522,7 +537,11 @@ export class ResponseParser {
 			'rageid',
 			'tvmazeid',
 			'traktid',
-			'doubanid'
+			'doubanid',
+			'language',
+			'languages',
+			'subs',
+			'subtitles'
 		];
 		if (optionalFields.includes(lowerName)) {
 			return true;
@@ -613,7 +632,14 @@ export class ResponseParser {
 		// Optional fields
 		const magnetUrl = values['magnet'] || values['magneturl'] || values['magneturi'];
 		if (magnetUrl) {
-			result.magnetUrl = magnetUrl; // Magnet URLs are already absolute
+			// The value comes from an indexer (possibly a user-installed custom
+			// definition) and is rendered straight into an href. `downloadUrl`
+			// and `commentsUrl` are scheme-checked by makeAbsoluteUrl; this field
+			// was not, so `javascript:` could reach the anchor.
+			const safeMagnet = this.makeAbsoluteUrl(magnetUrl, baseUrl);
+			if (safeMagnet) {
+				result.magnetUrl = safeMagnet;
+			}
 		}
 
 		// Get infohash from field or auto-extract from magnet URI
@@ -699,7 +725,38 @@ export class ResponseParser {
 			if (!isNaN(tvdbId)) result.tvdbId = tvdbId;
 		}
 
+		// Structured language attrs (torznab/newznab `language`/`subs`) - the
+		// indexer asserts these; title-token parsing stays on `parsed.languages`.
+		const audioLanguages = this.parseLanguageList(values['language'] ?? values['languages']);
+		if (audioLanguages.length > 0) {
+			result.languages = audioLanguages;
+		}
+		const subtitleLanguages = this.parseLanguageList(values['subs'] ?? values['subtitles']);
+		if (subtitleLanguages.length > 0) {
+			result.subtitleLanguages = subtitleLanguages;
+		}
+
 		return result;
+	}
+
+	/**
+	 * Parse a possibly multi-valued language attribute ("English, Spanish",
+	 * "en;es") into canonical tags. Unknown tokens are dropped, not guessed.
+	 */
+	private parseLanguageList(value: string | null | undefined): string[] {
+		if (!value) return [];
+		const seen = new Set<string>();
+		const out: string[] = [];
+		for (const token of value.split(/[,;|/]/)) {
+			// Full ISO-aware normalizer: valid codes outside the curated list
+			// (fil, ceb, ...) must not be silently dropped here while the title
+			// parser and audio ranking accept them.
+			const canonical = normalizeLanguageTag(token.trim());
+			if (canonical === 'und' || seen.has(canonical)) continue;
+			seen.add(canonical);
+			out.push(canonical);
+		}
+		return out;
 	}
 
 	/**
@@ -847,7 +904,11 @@ export class ResponseParser {
 	}
 
 	/**
-	 * Make URL absolute using base URL.
+	 * Make URL absolute using base URL. Only http(s) and magnet survive
+	 * verbatim; everything else is resolved against the indexer base, and the
+	 * result is scheme-checked - scraped content is untrusted, and a
+	 * `javascript:`/`data:` value that survives parsing would be rendered as a
+	 * clickable link in the search UI.
 	 */
 	private makeAbsoluteUrl(url: string, baseUrl: string): string {
 		if (!url) return url;
@@ -856,9 +917,13 @@ export class ResponseParser {
 		}
 
 		try {
-			return new URL(url, baseUrl).toString();
+			const resolved = new URL(url, baseUrl);
+			if (resolved.protocol !== 'http:' && resolved.protocol !== 'https:') {
+				return '';
+			}
+			return resolved.toString();
 		} catch {
-			return url;
+			return '';
 		}
 	}
 }

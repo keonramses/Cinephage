@@ -1,10 +1,11 @@
 <script lang="ts">
 	import { goto } from '$app/navigation';
-	import { User, Lock, AlertCircle, Eye, EyeOff } from 'lucide-svelte';
-	import { authClient } from '$lib/auth/client.js';
-	import * as m from '$lib/paraglide/messages.js';
+	import { User, Lock, AlertCircle, Eye, EyeOff } from '@lucide/svelte';
+	import { authClient } from '#lib/auth/client.js';
+	import { ensureVersionPrefix } from '#lib/version.js';
+	import * as m from '#lib/paraglide/messages.js';
 
-	const GITHUB_URL = 'https://github.com/MoldyTaint/Cinephage';
+	const GITHUB_URL = 'https://github.com/Cinephage/Cinephage';
 	const DISCORD_URL = 'https://discord.gg/scGCBTSWEt';
 
 	let { data } = $props();
@@ -28,12 +29,20 @@
 			});
 
 			if (result.error) {
-				error = result.error.message || m.login_invalidCredentials();
+				// A 429 here is the rate limiter (5 attempts / 15 min), not a bad
+				// password, surfacing it as "Invalid username or password" hides
+				// the actual cause and reads as if the correct password just
+				// stopped working (GitHub issue #596).
+				error =
+					result.error.status === 429
+						? m.login_rateLimited()
+						: result.error.message || m.login_invalidCredentials();
 				return;
 			}
 
-			// Redirect to dashboard on success
-			goto('/');
+			// Refresh all server load data (root layout now carries user
+			// identity) before entering the app.
+			await goto('/', { refreshAll: true });
 		} catch (e) {
 			error = e instanceof Error ? e.message : m.login_unexpectedError();
 		} finally {
@@ -123,7 +132,7 @@
 				<!-- Remember Me -->
 				<div class="form-control">
 					<label class="label cursor-pointer justify-start gap-2">
-						<input type="checkbox" class="checkbox" bind:checked={rememberMe} />
+						<input type="checkbox" class="checkbox checkbox-primary" bind:checked={rememberMe} />
 						<span class="label-text">{m.login_rememberMe()}</span>
 					</label>
 				</div>
@@ -143,7 +152,7 @@
 			</form>
 
 			<div class="mt-6 flex items-center justify-center gap-4 text-xs text-base-content/40">
-				<span>v{data.version}</span>
+				<span>{ensureVersionPrefix(data.version)}</span>
 				<a
 					href={DISCORD_URL}
 					target="_blank"

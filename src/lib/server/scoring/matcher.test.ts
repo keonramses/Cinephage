@@ -10,12 +10,14 @@ import {
 	evaluateFormat,
 	matchFormats,
 	matchesFormat,
+	extractAttributes,
 	clearPatternCache
 } from './matcher';
 import type { ReleaseAttributes, CustomFormat, FormatCondition } from './types';
 
 // Helper to create a test release with defaults
 function createRelease(overrides: Partial<ReleaseAttributes> = {}): ReleaseAttributes {
+	const hdr = overrides.hdr === undefined ? 'dolby-vision' : overrides.hdr;
 	return {
 		title: 'Movie.2024.2160p.UHD.BluRay.REMUX.DV.HDR.TrueHD.Atmos.7.1-GROUP',
 		cleanTitle: 'Movie',
@@ -23,7 +25,8 @@ function createRelease(overrides: Partial<ReleaseAttributes> = {}): ReleaseAttri
 		resolution: '2160p',
 		source: 'bluray',
 		codec: 'h265',
-		hdr: 'dolby-vision',
+		hdr,
+		hdrFormats: overrides.hdrFormats ?? (hdr ? [hdr] : []),
 		audioCodec: 'truehd',
 		audioChannels: '7.1',
 		hasAtmos: true,
@@ -278,6 +281,21 @@ describe('Matcher', () => {
 				const result = evaluateCondition(condition, release);
 				expect(result.matches).toBe(false);
 			});
+
+			it('matches a format present alongside a better one (#640)', () => {
+				// DV is the headline format, but the release really is HDR10+ too.
+				const release = createRelease({ hdrFormats: ['dolby-vision', 'hdr10+'] });
+				const condition = createCondition({ type: 'hdr', hdr: 'hdr10+' });
+
+				expect(evaluateCondition(condition, release).matches).toBe(true);
+			});
+
+			it('does not match SDR when any HDR format was detected (#640)', () => {
+				const release = createRelease({ hdr: 'dolby-vision', hdrFormats: ['dolby-vision'] });
+				const condition = createCondition({ type: 'hdr', hdr: null });
+
+				expect(evaluateCondition(condition, release).matches).toBe(false);
+			});
 		});
 
 		describe('streaming_service', () => {
@@ -472,6 +490,49 @@ describe('Matcher', () => {
 	// =========================================================================
 	// Format Matching
 	// =========================================================================
+	describe('language', () => {
+		it('matches a language tag with base-tag fallback', () => {
+			const condition = createCondition({ type: 'language', language: 'en' });
+			const release = createRelease({ languages: ['eng'] });
+			expect(evaluateCondition(condition, release).matches).toBe(true);
+		});
+
+		it('matches a region-tagged preference against a base token', () => {
+			const condition = createCondition({ type: 'language', language: 'pt-BR' });
+			const release = createRelease({ languages: ['pt'] });
+			expect(evaluateCondition(condition, release).matches).toBe(true);
+		});
+
+		it('matches the multi pseudo-code', () => {
+			const condition = createCondition({ type: 'language', language: 'multi' });
+			expect(
+				evaluateCondition(
+					createCondition({ type: 'language', language: 'multi' }),
+					createRelease({ languages: ['multi', 'fr'] })
+				).matches
+			).toBe(true);
+			expect(evaluateCondition(condition, createRelease({ languages: ['fr'] })).matches).toBe(
+				false
+			);
+		});
+
+		it('does not match when the wanted language is absent', () => {
+			const condition = createCondition({ type: 'language', language: 'es' });
+			const release = createRelease({ languages: ['it', 'de'] });
+			expect(evaluateCondition(condition, release).matches).toBe(false);
+		});
+
+		it('supports negation (must NOT match)', () => {
+			const condition = createCondition({
+				type: 'language',
+				language: 'de',
+				negate: true
+			});
+			const release = createRelease({ languages: ['de'] });
+			expect(evaluateCondition(condition, release).matches).toBe(false);
+		});
+	});
+
 	describe('matchFormats', () => {
 		it('returns all matching formats', () => {
 			const formats = [
@@ -585,6 +646,54 @@ describe('Matcher', () => {
 			// Second call with same pattern should use cache
 			const result = evaluateCondition(condition, createRelease({ title: 'CACHED_PATTERN' }));
 			expect(result.matches).toBe(true);
+		});
+	});
+
+	describe('Language attribute bridging (honest parser output)', () => {
+		it('passes empty parsed languages through untouched', () => {
+			// The parser yields [] for untagged releases (no English assertion);
+			// the scoring bridge must preserve that instead of inventing values.
+			const attrs = extractAttributes({
+				originalTitle: 'Movie.2023.1080p.BluRay.x264-GROUP',
+				cleanTitle: 'Movie',
+				year: 2023,
+				resolution: '1080p',
+				source: 'bluray',
+				codec: 'h264',
+				hdr: null,
+				audioCodec: 'unknown',
+				audioChannels: 'unknown',
+				hasAtmos: false,
+				languages: [],
+				isRemux: false,
+				isRepack: false,
+				isProper: false,
+				is3d: false
+			});
+
+			expect(attrs.languages).toEqual([]);
+		});
+
+		it('passes the multi marker through without expanding it to English', () => {
+			const attrs = extractAttributes({
+				originalTitle: 'Movie.2023.MULTI.1080p.BluRay.x264-GROUP',
+				cleanTitle: 'Movie',
+				year: 2023,
+				resolution: '1080p',
+				source: 'bluray',
+				codec: 'h264',
+				hdr: null,
+				audioCodec: 'unknown',
+				audioChannels: 'unknown',
+				hasAtmos: false,
+				languages: ['multi'],
+				isRemux: false,
+				isRepack: false,
+				isProper: false,
+				is3d: false
+			});
+
+			expect(attrs.languages).toEqual(['multi']);
 		});
 	});
 });

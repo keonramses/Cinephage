@@ -6,9 +6,9 @@
  * movie clearly cannot be in multi-quality mode (null/<2 desired qualities).
  */
 import { eq } from 'drizzle-orm';
-import { db } from '$lib/server/db';
-import { scoringProfiles } from '$lib/server/db/schema';
-import type { Resolution } from '$lib/server/indexers/parser/types.js';
+import { db } from '#lib/server/db/index.js';
+import { scoringProfiles } from '#lib/server/db/schema.js';
+import type { Resolution } from '#lib/server/indexers/parser/types.js';
 import { effectiveBuckets, isMultiQualityMode } from './buckets.js';
 
 export interface MovieMultiQualityContext {
@@ -38,7 +38,7 @@ export async function resolveMovieMultiQuality(
 		minResolution = profile?.minResolution ?? null;
 		maxResolution = profile?.maxResolution ?? null;
 	} else {
-		// No explicit profile means "use the default scoring profile" — apply
+		// No explicit profile means "use the default scoring profile" - apply
 		// its resolution bounds so null-profile movies get the same bucket
 		// clamping as movies with an explicitly assigned profile. A missing
 		// default row degrades gracefully to unconstrained buckets.

@@ -2,7 +2,7 @@
  * Multi-quality bucket helpers.
  *
  * Supports maintaining multiple resolution "tiers" of the same movie (e.g. a
- * 2160p file AND a 1080p file). All functions here are pure — they operate on
+ * 2160p file AND a 1080p file). All functions here are pure - they operate on
  * arrays/values passed in, so DB-coupled callers fetch files then delegate here.
  *
  * Activation rule: a movie is in "multi-quality mode" when it has
@@ -10,7 +10,7 @@
  * resolutions clamped to the scoring profile's min/max range). With fewer,
  * existing single-quality behavior is preserved exactly.
  */
-import { RESOLUTION_ORDER, type Resolution } from '$lib/server/indexers/parser/types.js';
+import { RESOLUTION_ORDER, type Resolution } from '#lib/server/indexers/parser/types.js';
 
 /** Minimum effective buckets to activate multi-quality behavior. */
 export const MULTI_QUALITY_MIN_BUCKETS = 2;
@@ -158,7 +158,7 @@ export function fileIdsToReplace(
 }
 
 /**
- * IDs of existing files that are "redundant" — they don't fit the movie's
+ * IDs of existing files that are "redundant" - they don't fit the movie's
  * desired-quality tiers. Used to surface cleanup opportunities (insight) and
  * to power opt-in removal on desiredQualities changes. Never auto-deleted.
  *

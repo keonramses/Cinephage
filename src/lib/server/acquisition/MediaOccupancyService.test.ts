@@ -8,11 +8,11 @@ import {
 	movieFiles,
 	movies,
 	series
-} from '$lib/server/db/schema.js';
+} from '#lib/server/db/schema.js';
 
 const testDb = createTestDb();
 
-vi.mock('$lib/server/db/index.js', () => ({
+vi.mock('#lib/server/db/index.js', () => ({
 	get db() {
 		return testDb.db;
 	},
@@ -26,6 +26,8 @@ const { mediaOccupancyService } = await import('./MediaOccupancyService.js');
 
 function resetDb() {
 	testDb.sqlite.exec(`
+		DELETE FROM acquisition_reservations;
+		DELETE FROM acquisition_intents;
 		DELETE FROM download_queue;
 		DELETE FROM episode_files;
 		DELETE FROM movie_files;

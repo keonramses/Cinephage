@@ -2,7 +2,7 @@
  * Integration tests for handleBlockedExtensionDownloads file-level exclusion.
  *
  * Context (2026-08-27 live audit): a RARBG release bundles RARBG_DO_NOT_MIRROR.exe.
- * The old behavior removed the ENTIRE torrent + blocklisted the release — so public
+ * The old behavior removed the ENTIRE torrent + blocklisted the release - so public
  * releases with bundled junk executables (extremely common) always died seconds
  * after grab. Security goal is that the dangerous file never reaches disk; that is
  * equally achieved by excluding the FILE via client-side file priority, keeping the
@@ -13,12 +13,12 @@ import { describe, it, expect, beforeAll, beforeEach, afterAll, vi } from 'vites
 import { randomUUID } from 'node:crypto';
 import { eq } from 'drizzle-orm';
 import { createTestDb, destroyTestDb, clearTestDb } from '../../../../test/db-helper';
-import { downloadClients, downloadQueue } from '$lib/server/db/schema';
+import { downloadClients, downloadQueue } from '#lib/server/db/schema.js';
 import type { DownloadFileInfo } from '../core/interfaces';
 
 const testDb = createTestDb();
 
-vi.mock('$lib/server/db', () => ({
+vi.mock('#lib/server/db/index.js', () => ({
 	get db() {
 		return testDb.db;
 	},
@@ -28,7 +28,7 @@ vi.mock('$lib/server/db', () => ({
 	initializeDatabase: vi.fn().mockResolvedValue(undefined)
 }));
 
-vi.mock('$lib/server/db/index.js', () => ({
+vi.mock('#lib/server/db/index.js', () => ({
 	get db() {
 		return testDb.db;
 	},
@@ -38,7 +38,7 @@ vi.mock('$lib/server/db/index.js', () => ({
 	initializeDatabase: vi.fn().mockResolvedValue(undefined)
 }));
 
-vi.mock('$lib/server/settings/blocked-extensions.js', () => ({
+vi.mock('#lib/server/settings/blocked-extensions.js', () => ({
 	resolveBlockedExtensionsForQueueItem: vi.fn().mockResolvedValue([])
 }));
 
@@ -119,7 +119,7 @@ beforeEach(async () => {
 	});
 });
 
-describe('blocked extension handling — file exclusion instead of torrent removal', () => {
+describe('blocked extension handling - file exclusion instead of torrent removal', () => {
 	it('excludes the dangerous file and keeps the download when media files exist', async () => {
 		filesForTest = [
 			{ index: 0, name: 'Dawn.of.the.Planet.of.the.Apes.2014/RARBG_DO_NOT_MIRROR.exe', size: 100 },

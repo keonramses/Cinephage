@@ -30,7 +30,7 @@ import {
 
 const testDb: TestDatabase = createTestDb();
 
-vi.mock('$lib/server/db', () => ({
+vi.mock('#lib/server/db/index.js', () => ({
 	get db() {
 		return testDb.db;
 	},
@@ -50,7 +50,7 @@ describe('my service', () => {
 });
 ```
 
-**Note:** Vitest hoists `vi.mock` calls to the top of the file before imports resolve. Mock factories can only reference variables declared with `vi.hoisted()`. The DB mock must be inlined — imported helper functions cannot be called inside `vi.mock` factories.
+**Note:** Vitest hoists `vi.mock` calls to the top of the file before imports resolve. Mock factories can only reference variables declared with `vi.hoisted()`. The DB mock must be inlined - imported helper functions cannot be called inside `vi.mock` factories.
 
 ### Tests with logging mocks
 
@@ -65,7 +65,7 @@ const mockLogger = vi.hoisted(() => ({
 	child: vi.fn().mockReturnThis()
 }));
 
-vi.mock('$lib/logging', () => ({
+vi.mock('#lib/logging/index.js', () => ({
 	logger: mockLogger,
 	createChildLogger: vi.fn(() => mockLogger)
 }));
@@ -118,10 +118,10 @@ vi.mock('./constants.js', () => ({ MAX_RETRIES: 3 }));
 
 - `clearTestDb(testDb)` clears all common tables (scoringProfiles, customFormats, blockedMedia, downloadClients, movies, movieFiles, series, seasons, episodes, episodeFiles, downloadQueue). Use it in `beforeEach`.
 - `destroyTestDb(testDb)` closes the connection. Use it in `afterAll`.
-- Never mock `$lib/server/db` when a real in-memory DB works for your test.
+- Never mock `#lib/server/db/index.js` when a real in-memory DB works for your test.
 
 ### File naming
 
-- `*.test.ts` — server/logic tests (Node environment)
-- `*.svelte.test.ts` — future: browser component tests
-- `*.ssr.test.ts` — future: server-side rendering tests
+- `*.test.ts` - server/logic tests (Node environment)
+- `*.svelte.test.ts` - future: browser component tests
+- `*.ssr.test.ts` - future: server-side rendering tests

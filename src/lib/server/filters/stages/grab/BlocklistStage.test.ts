@@ -4,7 +4,7 @@ import { makeGrabDecisionContext } from '../../../../../test/fixtures/filters.js
 
 const mockIsBlocklisted = vi.hoisted(() => vi.fn());
 
-vi.mock('$lib/server/blocklist/BlocklistService.js', () => ({
+vi.mock('#lib/server/blocklist/BlocklistService.js', () => ({
 	blocklistService: { isBlocklisted: mockIsBlocklisted }
 }));
 
@@ -20,9 +20,22 @@ describe('BlocklistStage', () => {
 			expect(stage.isEnabled(makeGrabDecisionContext())).toBe(true);
 		});
 
-		it('returns false when force is true', () => {
+		it('stays enabled for manual force grabs (hard stage)', () => {
 			const ctx = makeGrabDecisionContext({
-				options: { force: true, skipBlocklist: false, allowSidegrade: false, isAutomatic: true }
+				options: { force: true, skipBlocklist: false, allowSidegrade: false, isAutomatic: false }
+			});
+			expect(stage.isEnabled(ctx)).toBe(true);
+		});
+
+		it('returns false only for an explicit hard override', () => {
+			const ctx = makeGrabDecisionContext({
+				options: {
+					force: true,
+					skipBlocklist: false,
+					allowSidegrade: false,
+					isAutomatic: false,
+					overrideHardStages: true
+				}
 			});
 			expect(stage.isEnabled(ctx)).toBe(false);
 		});

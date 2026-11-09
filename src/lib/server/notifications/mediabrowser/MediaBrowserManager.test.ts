@@ -1,7 +1,7 @@
 /**
  * MediaBrowserManager tests
  *
- * Focus: deleteMediaItemByTmdb behavior —
+ * Focus: deleteMediaItemByTmdb behavior -
  * - retries once after a transient failure (live-observed Jellyfin HTTP 500
  *   when its own scanner raced the delete) before giving up,
  * - never throws (best-effort by design),
@@ -29,7 +29,7 @@ const dbState = vi.hoisted(() => ({
 	syncedRows: [] as Array<Record<string, unknown>>
 }));
 
-vi.mock('$lib/server/db', () => ({
+vi.mock('#lib/server/db/index.js', () => ({
 	db: {
 		select: vi.fn(() => {
 			const chain = {
@@ -128,7 +128,7 @@ describe('deleteMediaItemByTmdb', () => {
 		expect(mocks.deleteItem).not.toHaveBeenCalled();
 	});
 
-	it('skips Plex servers entirely — no per-item delete API', async () => {
+	it('skips Plex servers entirely - no per-item delete API', async () => {
 		dbState.enabledServers = [makeServer({ id: 'plex-1', serverType: 'plex' })];
 		mocks.deleteItem.mockResolvedValue(true);
 		const manager = new MediaBrowserManager();

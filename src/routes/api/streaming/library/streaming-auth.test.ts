@@ -22,11 +22,11 @@ import {
 	clearTestDb,
 	type TestDatabase
 } from '../../../../test/db-helper';
-import { rootFolders, movies, movieFiles } from '$lib/server/db/schema';
+import { rootFolders, movies, movieFiles } from '#lib/server/db/schema.js';
 
 const testDb: TestDatabase = createTestDb();
 
-vi.mock('$lib/server/db/index.js', () => ({
+vi.mock('#lib/server/db/index.js', () => ({
 	get db() {
 		return testDb.db;
 	}
@@ -42,14 +42,14 @@ const mockLogger = vi.hoisted(() => ({
 	trace: vi.fn()
 }));
 
-vi.mock('$lib/logging', () => ({
+vi.mock('#lib/logging/index.js', () => ({
 	logger: mockLogger,
 	createChildLogger: vi.fn(() => mockLogger),
 	createRequestLogger: vi.fn(() => mockLogger),
 	runWithLogContext: vi.fn((_ctx: unknown, fn: () => unknown) => fn())
 }));
 
-vi.mock('$lib/server/filesystem/path-guard.js', () => ({
+vi.mock('#lib/server/filesystem/path-guard.js', () => ({
 	isPathInsideManagedRoot: vi.fn().mockResolvedValue(true)
 }));
 
@@ -59,7 +59,7 @@ const BAD_KEY = 'cinephage_bad_key';
 
 const verifyApiKeyMock = vi.fn();
 
-vi.mock('$lib/server/auth/index.js', () => ({
+vi.mock('#lib/server/auth/index.js', () => ({
 	auth: {
 		api: {
 			verifyApiKey: verifyApiKeyMock
@@ -69,48 +69,52 @@ vi.mock('$lib/server/auth/index.js', () => ({
 	repairCurrentUserAdminRole: vi.fn()
 }));
 
-vi.mock('$lib/server/auth/session-helpers.js', () => ({
+vi.mock('#lib/server/auth/session-helpers.js', () => ({
 	createSupportId: vi.fn(() => 'test-support-id'),
 	setAuthenticatedLocals: vi.fn(),
-	clearAuthenticatedLocals: vi.fn()
+	clearAuthenticatedLocals: vi.fn(),
+	// hooks.server.ts calls this unconditionally on every response (issue
+	// #596's local-HTTP Secure-cookie strip); these tests never set cookies,
+	// so a pass-through is the correct fake.
+	stripSecureCookiesForLocalHttp: vi.fn((_event: unknown, response: Response) => response)
 }));
 
-vi.mock('$lib/server/services/initializer.js', () => ({
+vi.mock('#lib/server/services/initializer.js', () => ({
 	ensureServicesInitialized: vi.fn().mockResolvedValue(undefined)
 }));
 
-vi.mock('$lib/server/services/shutdown.js', () => ({}));
+vi.mock('#lib/server/services/shutdown.js', () => ({}));
 
-vi.mock('$lib/server/rate-limit.js', () => ({
+vi.mock('#lib/server/rate-limit.js', () => ({
 	// Must return null/undefined to signal "not rate limited"; a truthy value
 	// is treated as a rate-limit Response and returned early.
 	checkApiRateLimit: vi.fn().mockReturnValue(null),
 	applyRateLimitHeaders: vi.fn((_, response) => response)
 }));
 
-vi.mock('$lib/server/security/headers.js', () => ({
+vi.mock('#lib/server/security/headers.js', () => ({
 	SECURITY_HEADERS: {},
 	BASE_SECURITY_HEADERS: {}
 }));
 
-vi.mock('$lib/server/utils/origin.js', () => ({
+vi.mock('#lib/server/utils/origin.js', () => ({
 	isTrustedOrigin: vi.fn().mockReturnValue(true)
 }));
 
-vi.mock('$lib/server/hooks/error-handler.js', () => ({
+vi.mock('#lib/server/hooks/error-handler.js', () => ({
 	handleError: vi.fn()
 }));
 
-vi.mock('$lib/paraglide/server.js', () => ({
+vi.mock('#lib/paraglide/server.js', () => ({
 	paraglideMiddleware: vi.fn(
 		(request: Request, resolve: (args: { request: Request; locale: string }) => unknown) =>
 			resolve({ request, locale: 'en' })
 	)
 }));
 
-vi.mock('$app/environment', () => ({ building: false }));
+vi.mock('$app/env', () => ({ building: false }));
 
-vi.mock('$lib/auth/config.js', () => ({ AUTH_BASE_PATH: '/api/auth' }));
+vi.mock('#lib/auth/config.js', () => ({ AUTH_BASE_PATH: '/api/auth' }));
 
 // sequence() normally requires the SvelteKit server async-local request store.
 // Replace it with a simple sequential compose so handle() works outside the
@@ -239,11 +243,11 @@ async function callViaHooks(method: string, apiKey: string | null): Promise<Resp
 
 	return handle({
 		event,
-		resolve: (evt) => handler(evt as any)
+		resolve: async (evt) => handler(evt as any)
 	});
 }
 
-describe('streaming library auth — Media Streaming API Key', () => {
+describe('streaming library auth - Media Streaming API Key', () => {
 	it('GET: accepts a valid streaming key and returns 200', async () => {
 		const res = await callViaHooks('GET', STREAMING_KEY);
 		expect(res.status).toBe(200);
@@ -257,7 +261,7 @@ describe('streaming library auth — Media Streaming API Key', () => {
 	});
 });
 
-describe('streaming library auth — Main API Key', () => {
+describe('streaming library auth - Main API Key', () => {
 	it('GET: accepts the main key (full-access fallback) and returns 200', async () => {
 		const res = await callViaHooks('GET', MAIN_KEY);
 		expect(res.status).toBe(200);
@@ -268,7 +272,7 @@ describe('streaming library auth — Main API Key', () => {
 		expect(res.status).toBe(200);
 	});
 
-	it('verifyApiKey is called twice for the main key — streaming check then full-access fallback', async () => {
+	it('verifyApiKey is called twice for the main key - streaming check then full-access fallback', async () => {
 		await callViaHooks('GET', MAIN_KEY);
 		expect(verifyApiKeyMock).toHaveBeenCalledTimes(2);
 		const [first, second] = verifyApiKeyMock.mock.calls;
@@ -277,7 +281,7 @@ describe('streaming library auth — Main API Key', () => {
 	});
 });
 
-describe('streaming library auth — rejected requests', () => {
+describe('streaming library auth - rejected requests', () => {
 	it('GET: returns 401 when no API key is provided', async () => {
 		const res = await callViaHooks('GET', null);
 		expect(res.status).toBe(401);

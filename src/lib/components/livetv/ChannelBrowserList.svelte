@@ -1,7 +1,7 @@
 <script lang="ts">
-	import { Loader2, Tv, Radio, List, Plus, Check } from 'lucide-svelte';
-	import type { LiveTvProviderType, CachedChannel } from '$lib/types/livetv';
-	import * as m from '$lib/paraglide/messages.js';
+	import { Loader2, Tv, Radio, List, Plus, Check } from '@lucide/svelte';
+	import type { LiveTvProviderType, CachedChannel } from '#lib/types/livetv.js';
+	import * as m from '#lib/paraglide/messages.js';
 
 	interface Props {
 		channels: CachedChannel[];
@@ -73,6 +73,8 @@
 					icon: List,
 					label: m.livetv_channelBrowserModal_providerM3u()
 				};
+			case 'cinephage-live':
+				return { class: 'badge-info', icon: Tv, label: 'Cinephage Live' };
 			default:
 				return { class: 'badge-ghost', icon: Tv, label: type };
 		}
@@ -111,7 +113,7 @@
 						{#if !isBackupMode}
 							<input
 								type="checkbox"
-								class="checkbox mt-1 checkbox-sm"
+								class="checkbox mt-1 checkbox-sm checkbox-primary"
 								checked={isSelected}
 								disabled={inLineup}
 								onchange={() => onToggleSelection(channel.id)}
@@ -125,7 +127,7 @@
 							</div>
 						{/if}
 						<div class="min-w-0 flex-1">
-							<div class="text-sm font-medium break-words sm:text-base" title={channel.name}>
+							<div class="text-sm font-medium wrap-break-word sm:text-base" title={channel.name}>
 								{channel.name}
 							</div>
 							<div class="mt-1 text-xs text-base-content/60">
@@ -195,7 +197,7 @@
 							<th class="w-10">
 								<input
 									type="checkbox"
-									class="checkbox checkbox-sm"
+									class="checkbox checkbox-sm checkbox-primary"
 									checked={allVisibleSelected}
 									indeterminate={someVisibleSelected}
 									disabled={selectableChannels.length === 0}
@@ -223,7 +225,7 @@
 								<td>
 									<input
 										type="checkbox"
-										class="checkbox checkbox-sm"
+										class="checkbox checkbox-sm checkbox-primary"
 										checked={isSelected}
 										disabled={inLineup}
 										onchange={() => onToggleSelection(channel.id)}
@@ -244,7 +246,7 @@
 										</div>
 									{/if}
 									<div>
-										<p class="max-w-xs font-medium break-words" title={channel.name}>
+										<p class="max-w-xs font-medium wrap-break-word" title={channel.name}>
 											{channel.name}
 										</p>
 										{#if channel.number}

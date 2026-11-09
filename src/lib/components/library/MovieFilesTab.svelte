@@ -1,9 +1,10 @@
 <script lang="ts">
-	import * as m from '$lib/paraglide/messages.js';
-	import type { MovieFile } from '$lib/types/library';
+	import * as m from '#lib/paraglide/messages.js';
+	import type { MovieFile } from '#lib/types/library.js';
 	import FileCard from './FileCard.svelte';
-	import { FileX, Search } from 'lucide-svelte';
-	import { formatBytes } from '$lib/utils/format.js';
+	import { FileX, Search } from '@lucide/svelte';
+	import { formatBytes } from '#lib/utils/format.js';
+	import type { SubtitleRequirementProgress } from '#lib/utils/subtitle-status-display.js';
 
 	interface Subtitle {
 		id: string;
@@ -18,7 +19,11 @@
 	interface Props {
 		files: MovieFile[];
 		subtitles?: Subtitle[];
+		/** Requirement-aware subtitle progress from the movie loader. */
+		subtitleProgress?: SubtitleRequirementProgress | null;
 		isStreamerProfile?: boolean;
+		/** Viewer mode: hide per-file acquisition and delete controls. */
+		readOnly?: boolean;
 		onDeleteFile?: (fileId: string) => void;
 		onSearch?: () => void;
 		onSubtitleSearch?: () => void;
@@ -29,7 +34,9 @@
 	let {
 		files,
 		subtitles = [],
+		subtitleProgress = null,
 		isStreamerProfile = false,
+		readOnly = false,
 		onDeleteFile,
 		onSearch,
 		onSubtitleSearch,
@@ -50,7 +57,7 @@
 			<FileX size={48} class="text-base-content/30" />
 			<h3 class="mt-4 text-lg font-medium">{m.library_movieFilesTab_noFilesFound()}</h3>
 			<p class="mt-1 text-sm text-base-content/60">{m.library_movieFilesTab_notDownloaded()}</p>
-			{#if onSearch}
+			{#if !readOnly && onSearch}
 				<button class="btn mt-4 gap-2 btn-primary btn-sm" onclick={onSearch}>
 					<Search size={16} />
 					{m.library_movieFilesTab_searchDownloads()}
@@ -64,7 +71,9 @@
 				<FileCard
 					{file}
 					{subtitles}
+					{subtitleProgress}
 					{isStreamerProfile}
+					{readOnly}
 					onDelete={onDeleteFile}
 					{onSubtitleSearch}
 					{onSubtitleAutoSearch}

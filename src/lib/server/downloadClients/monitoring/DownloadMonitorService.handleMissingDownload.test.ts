@@ -11,16 +11,17 @@
 import { describe, it, expect, beforeAll, beforeEach, afterAll, vi } from 'vitest';
 import { mkdir, writeFile, rm } from 'fs/promises';
 import { tmpdir } from 'os';
-import { join } from 'path';
+import { join, resolve } from 'path';
 import { randomUUID } from 'node:crypto';
 import { eq } from 'drizzle-orm';
 import { createTestDb, destroyTestDb, clearTestDb } from '../../../../test/db-helper';
-import { downloadClients, downloadQueue } from '$lib/server/db/schema';
-import type { DownloadClient } from '$lib/types/downloadClient';
+import { downloadClients, downloadQueue } from '#lib/server/db/schema.js';
+import type { DownloadClient } from '#lib/types/downloadClient.js';
+import type { DownloadInfo } from '../core/interfaces';
 
 const testDb = createTestDb();
 
-vi.mock('$lib/server/db', () => ({
+vi.mock('#lib/server/db/index.js', () => ({
 	get db() {
 		return testDb.db;
 	},
@@ -30,7 +31,7 @@ vi.mock('$lib/server/db', () => ({
 	initializeDatabase: vi.fn().mockResolvedValue(undefined)
 }));
 
-vi.mock('$lib/server/db/index.js', () => ({
+vi.mock('#lib/server/db/index.js', () => ({
 	get db() {
 		return testDb.db;
 	},
@@ -62,6 +63,8 @@ function makeClient(overrides: Partial<DownloadClient> = {}): DownloadClient {
 		hasPassword: false,
 		hasApiToken: false,
 		removeAfterImport: false,
+		allowMovies: true,
+		allowTv: true,
 		movieCategory: 'movies',
 		tvCategory: 'tv',
 		recentPriority: 'normal',
@@ -97,10 +100,32 @@ async function getRow(id: string) {
 	return row;
 }
 
-async function callHandleMissing(row: typeof downloadQueue.$inferSelect, client: DownloadClient) {
+function makeDownload(overrides: Partial<DownloadInfo> = {}): DownloadInfo {
+	return {
+		id: randomUUID(),
+		name: 'Active.Download',
+		hash: randomUUID().replace(/-/g, ''),
+		progress: 0.5,
+		status: 'downloading',
+		size: 1_000,
+		downloadSpeed: 1,
+		uploadSpeed: 0,
+		savePath: baseDir,
+		contentPath: join(baseDir, 'active-download'),
+		canMoveFiles: false,
+		canBeRemoved: false,
+		...overrides
+	};
+}
+
+async function callHandleMissing(
+	row: typeof downloadQueue.$inferSelect,
+	client: DownloadClient,
+	allDownloads: DownloadInfo[] = []
+) {
 	const service = getDownloadMonitor();
 	// @ts-expect-error - exercising the private recovery method directly
-	await service.handleMissingDownload(row, client, []);
+	await service.handleMissingDownload(row, client, allDownloads);
 }
 
 beforeAll(async () => {
@@ -125,13 +150,13 @@ beforeEach(async () => {
 	});
 });
 
-describe('handleMissingDownload — initial recovery (vanished download)', () => {
+describe('handleMissingDownload - initial recovery (vanished download)', () => {
 	it('Tier 1: recovers when the stored outputPath still exists', async () => {
 		const dir = join(baseDir, 'tier1', randomUUID());
 		await mkdir(dir, { recursive: true });
 		await writeFile(join(dir, 'file.mkv'), 'x');
 
-		const row = await insertQueueRow({ outputPath: dir });
+		const row = await insertQueueRow({ outputPath: dir, progress: '1' });
 		await callHandleMissing(row, makeClient());
 
 		const after = await getRow(row.id);
@@ -147,18 +172,18 @@ describe('handleMissingDownload — initial recovery (vanished download)', () =>
 		await writeFile(join(completed, 'file.mkv'), 'x');
 
 		const stale = join(baseDir, '.incomplete', folder); // does NOT exist
-		const row = await insertQueueRow({ outputPath: stale });
+		const row = await insertQueueRow({ outputPath: stale, progress: '1' });
 		await callHandleMissing(row, makeClient());
 
 		const after = await getRow(row.id);
 		expect(after.status).toBe('completed');
-		expect(after.outputPath).toBe(completed);
+		expect(resolve(after.outputPath!)).toBe(resolve(completed));
 		expect(requestImport).toHaveBeenCalledWith(row.id);
 	});
 
 	it('both tiers miss → transitions to awaiting (not failed)', async () => {
 		const stale = join(baseDir, '.incomplete', `Missing.${randomUUID().slice(0, 6)}`);
-		const row = await insertQueueRow({ outputPath: stale });
+		const row = await insertQueueRow({ outputPath: stale, progress: '1' });
 		await callHandleMissing(row, makeClient());
 
 		const after = await getRow(row.id);
@@ -167,9 +192,137 @@ describe('handleMissingDownload — initial recovery (vanished download)', () =>
 		expect(after.lastAttemptAt).not.toBeNull();
 		expect(requestImport).not.toHaveBeenCalled();
 	});
+
+	// The #532 regressions: stat() success alone must never mark a vanished
+	// download complete when the path belongs to the client, another active
+	// download, or only holds partial data.
+
+	it('does not recover from the client save-path root', async () => {
+		await writeFile(join(baseDir, 'unrelated.mkv'), 'x');
+		const row = await insertQueueRow({ outputPath: baseDir, progress: '1' });
+
+		await callHandleMissing(row, makeClient());
+
+		const after = await getRow(row.id);
+		expect(after.status).toBe('awaiting');
+		expect(requestImport).not.toHaveBeenCalled();
+	});
+
+	it('does not recover from a configured category root', async () => {
+		const categoryRoot = join(baseDir, 'movies');
+		await mkdir(categoryRoot, { recursive: true });
+		await writeFile(join(categoryRoot, 'unrelated.mkv'), 'x');
+		const row = await insertQueueRow({ outputPath: categoryRoot, progress: '1' });
+
+		await callHandleMissing(row, makeClient());
+
+		const after = await getRow(row.id);
+		expect(after.status).toBe('awaiting');
+		expect(requestImport).not.toHaveBeenCalled();
+	});
+
+	it('does not recover a path inside another active download', async () => {
+		const activePath = join(baseDir, 'other-active', randomUUID());
+		const candidate = join(activePath, 'nested');
+		await mkdir(candidate, { recursive: true });
+		await writeFile(join(candidate, 'file.mkv'), 'x');
+		const row = await insertQueueRow({ outputPath: candidate, progress: '1' });
+
+		await callHandleMissing(row, makeClient(), [makeDownload({ contentPath: activePath })]);
+
+		const after = await getRow(row.id);
+		expect(after.status).toBe('awaiting');
+		expect(requestImport).not.toHaveBeenCalled();
+	});
+
+	it('does not recover an ancestor of another active download path', async () => {
+		const candidate = join(baseDir, 'active-parent', randomUUID());
+		const activePath = join(candidate, 'torrent-folder');
+		await mkdir(activePath, { recursive: true });
+		await writeFile(join(activePath, 'file.mkv'), 'x');
+		const row = await insertQueueRow({ outputPath: candidate, progress: '1' });
+
+		await callHandleMissing(row, makeClient(), [makeDownload({ contentPath: activePath })]);
+
+		const after = await getRow(row.id);
+		expect(after.status).toBe('awaiting');
+		expect(requestImport).not.toHaveBeenCalled();
+	});
+
+	it('does not recover a partially downloaded torrent even when its files are fully allocated', async () => {
+		const candidate = join(baseDir, 'partial', randomUUID());
+		await mkdir(candidate, { recursive: true });
+		await writeFile(join(candidate, 'file.mkv'), Buffer.alloc(2 * 1024 * 1024));
+		const row = await insertQueueRow({
+			outputPath: candidate,
+			progress: '0.5',
+			size: 2 * 1024 * 1024
+		});
+
+		await callHandleMissing(row, makeClient());
+
+		const after = await getRow(row.id);
+		expect(after.status).toBe('awaiting');
+		expect(requestImport).not.toHaveBeenCalled();
+	});
+
+	it('applies the active-download guard to the reconstructed Tier 2 path', async () => {
+		const folder = `Tier2.Active.${randomUUID().slice(0, 6)}`;
+		const candidate = join(baseDir, 'movies', folder);
+		const activePath = join(candidate, 'active-torrent');
+		await mkdir(activePath, { recursive: true });
+		await writeFile(join(activePath, 'file.mkv'), 'x');
+		const stale = join(baseDir, '.incomplete', folder);
+		const row = await insertQueueRow({ outputPath: stale, progress: '1' });
+
+		await callHandleMissing(row, makeClient(), [makeDownload({ contentPath: activePath })]);
+
+		const after = await getRow(row.id);
+		expect(after.status).toBe('awaiting');
+		expect(requestImport).not.toHaveBeenCalled();
+	});
+
+	it('still recovers when the download owning the path is finished', async () => {
+		const candidate = join(baseDir, 'finished-owner', randomUUID());
+		await mkdir(candidate, { recursive: true });
+		await writeFile(join(candidate, 'file.mkv'), 'x');
+		const row = await insertQueueRow({ outputPath: candidate, progress: '1' });
+
+		await callHandleMissing(row, makeClient(), [
+			makeDownload({ contentPath: candidate, progress: 1, status: 'seeding' })
+		]);
+
+		const after = await getRow(row.id);
+		expect(after.status).toBe('completed');
+		expect(requestImport).toHaveBeenCalledWith(row.id);
+	});
+
+	it.skipIf(process.platform === 'win32')(
+		'does not recover sparse incomplete content',
+		async () => {
+			const candidate = join(baseDir, 'sparse', randomUUID());
+			await mkdir(candidate, { recursive: true });
+			const sparseFile = join(candidate, 'file.mkv');
+			const { open } = await import('fs/promises');
+			const handle = await open(sparseFile, 'w');
+			await handle.truncate(100 * 1024 * 1024);
+			await handle.close();
+			const row = await insertQueueRow({
+				outputPath: candidate,
+				progress: '1',
+				size: 100 * 1024 * 1024
+			});
+
+			await callHandleMissing(row, makeClient());
+
+			const after = await getRow(row.id);
+			expect(after.status).toBe('awaiting');
+			expect(requestImport).not.toHaveBeenCalled();
+		}
+	);
 });
 
-describe('handleMissingDownload — awaiting backoff retry', () => {
+describe('handleMissingDownload - awaiting backoff retry', () => {
 	it('re-checks Tier 1 (stored outputPath) on retry once files appear (delayed sync)', async () => {
 		// The fix: awaiting retry must re-stat the stored outputPath, not only Tier 2.
 		const dir = join(baseDir, 'awaiting-tier1', randomUUID());
@@ -179,6 +332,7 @@ describe('handleMissingDownload — awaiting backoff retry', () => {
 		const row = await insertQueueRow({
 			status: 'awaiting',
 			outputPath: dir,
+			progress: '1',
 			importAttempts: 1,
 			// 10 min ago > 5 min backoff for attempt 1
 			lastAttemptAt: new Date(Date.now() - 10 * 60_000).toISOString()
@@ -239,7 +393,7 @@ describe('handleMissingDownload — awaiting backoff retry', () => {
 	});
 });
 
-describe('handleMissingDownload — completed grace period (addedAt fallback)', () => {
+describe('handleMissingDownload - completed grace period (addedAt fallback)', () => {
 	it('keeps a recently-added completed item without completedAt inside the grace window', async () => {
 		// No completedAt recorded: the grace period must fall back to addedAt, not Date.now(),
 		// otherwise a genuinely old completion would be treated as fresh forever.
@@ -264,5 +418,37 @@ describe('handleMissingDownload — completed grace period (addedAt fallback)', 
 
 		const after = await getRow(row.id);
 		expect(after.status).toBe('removed');
+	});
+});
+
+describe('handleMissingDownload - permanently failed import (importFailed guard)', () => {
+	/**
+	 * Regression test for a real report: an item whose import attempts were
+	 * already exhausted (status 'failed', importFailed true) kept getting
+	 * flipped back to 'completed' and re-queued for import every monitor
+	 * poll, because the "usenet download missing from client but output
+	 * path still exists" recovery branch never checked importFailed before
+	 * this fix - creating a tight, indefinite retry loop that made the app
+	 * unresponsive.
+	 */
+	it('does not re-queue a usenet item for import once importFailed is set, even if the output path still exists', async () => {
+		const outputPath = join(baseDir, `still-here-${randomUUID()}.mkv`);
+		await writeFile(outputPath, 'x');
+
+		const row = await insertQueueRow({
+			status: 'failed',
+			importFailed: true,
+			protocol: 'usenet',
+			outputPath,
+			completedAt: new Date(Date.now() - 60 * 60_000).toISOString()
+		});
+
+		requestImport.mockClear();
+		await callHandleMissing(row, makeClient());
+
+		expect(requestImport).not.toHaveBeenCalled();
+
+		const after = await getRow(row.id);
+		expect(after.status).toBe('failed');
 	});
 });

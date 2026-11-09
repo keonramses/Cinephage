@@ -1,5 +1,10 @@
 import { describe, it, expect } from 'vitest';
-import { NamingService, DEFAULT_NAMING_CONFIG, type MediaNamingInfo } from './NamingService';
+import {
+	NamingService,
+	DEFAULT_NAMING_CONFIG,
+	releaseToNamingInfo,
+	type MediaNamingInfo
+} from './NamingService';
 
 describe('NamingService', () => {
 	describe('Movie Naming', () => {
@@ -140,6 +145,41 @@ describe('NamingService', () => {
 			const service = new NamingService();
 			const result = service.generateSeasonFolderName(12);
 			expect(result).toBe('Season 12');
+		});
+
+		it('should render series tokens in season folder when series context is given', () => {
+			const service = new NamingService({
+				...DEFAULT_NAMING_CONFIG,
+				seasonFolderFormat: '{Title} ({Year}) - Season {Season:00}'
+			});
+			const result = service.generateSeasonFolderName(1, {
+				title: 'Breaking Bad',
+				year: 2008,
+				tvdbId: 81189
+			});
+			expect(result).toBe('Breaking Bad (2008) - Season 01');
+		});
+
+		it('should render media server ID tokens in season folder', () => {
+			const service = new NamingService({
+				...DEFAULT_NAMING_CONFIG,
+				seasonFolderFormat: 'Season {Season:00} {SeriesId}'
+			});
+			const result = service.generateSeasonFolderName(1, {
+				title: 'Breaking Bad',
+				year: 2008,
+				tvdbId: 81189
+			});
+			expect(result).toBe('Season 01 {tvdb-81189}');
+		});
+
+		it('should leave series tokens empty in season folder without series context', () => {
+			const service = new NamingService({
+				...DEFAULT_NAMING_CONFIG,
+				seasonFolderFormat: '{Year} - Season {Season:00}'
+			});
+			const result = service.generateSeasonFolderName(1);
+			expect(result).toBe('Season 01');
 		});
 	});
 
@@ -679,6 +719,142 @@ describe('NamingService', () => {
 			service.updateConfig({ mediaServerIdFormat: 'jellyfin' });
 			const config = service.getConfig();
 			expect(config.mediaServerIdFormat).toBe('jellyfin');
+		});
+	});
+
+	describe('releaseToNamingInfo with honest parser languages', () => {
+		it('maps empty parsed languages to undefined audioLanguages (renders und)', () => {
+			// The parser no longer asserts 'en' for untagged releases; naming must
+			// treat an empty list as "no audio-language evidence".
+			const info = releaseToNamingInfo({
+				title: 'Movie',
+				year: 2023,
+				resolution: '1080p',
+				languages: []
+			});
+
+			expect(info.audioLanguages).toBeUndefined();
+		});
+
+		it('keeps explicitly tagged languages as audioLanguages', () => {
+			const info = releaseToNamingInfo({
+				title: 'Movie',
+				year: 2023,
+				languages: ['de', 'fr']
+			});
+
+			expect(info.audioLanguages).toEqual(['de', 'fr']);
+		});
+
+		it('passes the multi marker through for the token layer to neutralize', () => {
+			// 'multi' is not English and not a language; {AudioLanguages} renders
+			// it as `und` (normalizeLanguageTag maps markers to und).
+			const info = releaseToNamingInfo({
+				title: 'Movie',
+				year: 2023,
+				languages: ['multi']
+			});
+
+			expect(info.audioLanguages).toEqual(['multi']);
+		});
+	});
+
+	describe('Path-segment safety', () => {
+		it('strips path separators from scraped titles', () => {
+			const service = new NamingService({ movieFolderFormat: '{Title} ({Year})' });
+			const info: MediaNamingInfo = {
+				title: 'Face/Off',
+				year: 1997,
+				tmdbId: 432
+			};
+			const result = service.generateMovieFolderName(info);
+			expect(result).not.toContain('/');
+			expect(result).toBe('FaceOff (1997)');
+		});
+
+		it('drops dot-segments that would escape the library root', () => {
+			const service = new NamingService({ movieFolderFormat: '{Title}/Files' });
+			const info: MediaNamingInfo = {
+				title: '..',
+				year: 0,
+				tmdbId: 0
+			};
+			const result = service.generateMovieFolderName(info);
+			// The '..' segment must be filtered, never joined into the path.
+			expect(result.split('/')).not.toContain('..');
+			expect(result).toBe('Files');
+		});
+
+		it('keeps intended format separators working', () => {
+			const service = new NamingService({ movieFolderFormat: 'Movies/{CleanTitle} ({Year})' });
+			const info: MediaNamingInfo = {
+				title: 'The Dark Knight',
+				year: 2008,
+				tmdbId: 155
+			};
+			expect(service.generateMovieFolderName(info)).toBe('Movies/The Dark Knight (2008)');
+		});
+
+		it('strips a leading dot-ellipsis from a movie folder name so it is not hidden on Linux', () => {
+			const service = new NamingService({ movieFolderFormat: '{Title} ({Year})' });
+			const info: MediaNamingInfo = {
+				title: '...And Justice for All',
+				year: 1979,
+				tmdbId: 17443
+			};
+			const result = service.generateMovieFolderName(info);
+			expect(result.startsWith('.')).toBe(false);
+			expect(result).toBe('And Justice for All (1979)');
+		});
+
+		it('strips a leading dot-ellipsis from a movie file name', () => {
+			const service = new NamingService({ movieFileFormat: '{Title} ({Year})' });
+			const info: MediaNamingInfo = {
+				title: '...And Justice for All',
+				year: 1979,
+				tmdbId: 17443,
+				originalExtension: '.mkv'
+			};
+			const result = service.generateMovieFileName(info);
+			expect(result.startsWith('.')).toBe(false);
+			expect(result).toBe('And Justice for All (1979).mkv');
+		});
+
+		it('strips a leading dot-ellipsis from a series folder name', () => {
+			const service = new NamingService({ seriesFolderFormat: '{Title} ({Year})' });
+			const info: MediaNamingInfo = {
+				title: '...Baby One More Time',
+				year: 2024,
+				tvdbId: 1
+			};
+			const result = service.generateSeriesFolderName(info);
+			expect(result.startsWith('.')).toBe(false);
+			expect(result).toBe('Baby One More Time (2024)');
+		});
+
+		it('strips a leading dot-ellipsis from an episode file name', () => {
+			const service = new NamingService({
+				episodeFileFormat: '{Title} - S{Season:00}E{Episode:00}'
+			});
+			const info: MediaNamingInfo = {
+				title: '...Baby One More Time',
+				seasonNumber: 1,
+				episodeNumbers: [1],
+				originalExtension: '.mkv'
+			};
+			const result = service.generateEpisodeFileName(info);
+			expect(result.startsWith('.')).toBe(false);
+			expect(result).toBe('Baby One More Time - S01E01.mkv');
+		});
+
+		it('still allows an internal dot (e.g. "Mr. Robot") to survive untouched', () => {
+			const service = new NamingService({ movieFolderFormat: '{Title} ({Year})' });
+			const info: MediaNamingInfo = {
+				title: 'Mr. Robot',
+				year: 2015,
+				tmdbId: 1
+			};
+			expect(service.generateMovieFolderName(info)).toBe('Mr. Robot (2015)');
 		});
 	});
 });

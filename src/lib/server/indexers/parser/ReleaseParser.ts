@@ -13,7 +13,7 @@ import type { ParsedRelease } from './types.js';
 import { extractResolution } from './patterns/resolution.js';
 import { extractSource } from './patterns/source.js';
 import { extractBitDepth, extractCodec } from './patterns/codec.js';
-import { extractEnhancedAudio, extractHdr } from './patterns/audio.js';
+import { extractEnhancedAudio, extractHdrFormats } from './patterns/audio.js';
 import { extractLanguages } from './patterns/language.js';
 import { extractEpisode, extractTitleBeforeEpisode } from './patterns/episode.js';
 import { extractReleaseGroup } from './patterns/releaseGroup.js';
@@ -86,7 +86,11 @@ const STREAMING_SERVICE_PATTERNS: Array<{ service: string; pattern: RegExp }> = 
 ];
 
 export interface ParseOptions {
-	/** Source indexer language (ISO 639-1 code) - used for language tagging */
+	/**
+	 * Source indexer language (ISO 639-1 code). Recorded verbatim on the
+	 * parsed release as source metadata (where the release came from) - it is
+	 * NOT merged into `languages`, which reflects only what the title asserts.
+	 */
 	sourceLanguage?: string;
 	/**
 	 * Content context of the search that produced this title. In 'movie' mode,
@@ -121,7 +125,8 @@ export class ReleaseParser {
 		const codecMatch = extractCodec(normalized);
 		const bitDepthMatch = extractBitDepth(normalized);
 		const enhancedAudio = extractEnhancedAudio(normalized);
-		const hdrMatch = extractHdr(normalized);
+		const hdrMatches = extractHdrFormats(normalized);
+		const hdrFormats = hdrMatches.map((match) => match.hdr);
 		const streamingService = this.extractStreamingService(normalized);
 
 		// Extract episode info (determines if TV release)
@@ -138,13 +143,15 @@ export class ReleaseParser {
 			codecMatch?.index,
 			bitDepthMatch?.index,
 			enhancedAudio.index,
-			hdrMatch?.index
+			hdrMatches[0]?.index
 		]);
 		const year = this.extractYear(normalized);
 		const edition = this.extractEdition(normalized);
 
-		// Merge detected languages with source language
-		const languages = this.mergeLanguages(languageMatch.languages, options?.sourceLanguage);
+		// Title-detected languages only: the indexer definition language is
+		// source metadata (where the release came from), not audio evidence,
+		// and stays available separately via `sourceLanguage`.
+		const languages = languageMatch.languages;
 
 		// Extract special flags
 		const isProper = FLAG_PATTERNS.proper.test(normalized);
@@ -178,7 +185,8 @@ export class ReleaseParser {
 			resolution: resolutionMatch?.resolution ?? 'unknown',
 			source: sourceMatch?.source ?? 'unknown',
 			codec: codecMatch?.codec ?? 'unknown',
-			hdr: hdrMatch?.hdr ?? null,
+			hdr: hdrFormats[0] ?? null,
+			hdrFormats,
 			bitDepth: bitDepthMatch?.bitDepth ?? 'unknown',
 			audioCodec: enhancedAudio.codec,
 			audioChannels: enhancedAudio.channels,
@@ -206,7 +214,7 @@ export class ReleaseParser {
 	 * the episode title, not a release group. To stay conservative, a group is
 	 * only rejected when an episode was matched AND the candidate is the last
 	 * word of the text after the SxxEyy marker, cut at the earliest quality
-	 * token that follows it (only tokens after the marker matter — earlier
+	 * token that follows it (only tokens after the marker matter - earlier
 	 * ones don't bound the span): real groups almost always follow quality
 	 * tokens or sit in brackets, which keeps them.
 	 */
@@ -248,7 +256,7 @@ export class ReleaseParser {
 
 		const span = stripped.slice(spanStart, spanEnd).trim();
 		// Tokenize ignoring bracket-wrapped quality blocks and punctuation so
-		// bracketed audio (e.g. "[AAC 2 0]" — dots were normalized to spaces)
+		// bracketed audio (e.g. "[AAC 2 0]" - dots were normalized to spaces)
 		// does not mask the title tail when no quality matcher registered.
 		const spanTokens = span
 			.replace(/\[[^\]]*\]/g, ' ')
@@ -328,26 +336,6 @@ export class ReleaseParser {
 	}
 
 	/**
-	 * Merge detected languages with source indexer language.
-	 * Source language is added if not already detected from the title.
-	 */
-	private mergeLanguages(detectedLanguages: string[], sourceLanguage?: string): string[] {
-		if (!sourceLanguage) {
-			return detectedLanguages;
-		}
-
-		// Normalize source language to ISO 639-1
-		const normalizedSource = sourceLanguage.toLowerCase().split('-')[0];
-
-		// If source language is not already detected, add it
-		if (!detectedLanguages.includes(normalizedSource)) {
-			return [...detectedLanguages, normalizedSource];
-		}
-
-		return detectedLanguages;
-	}
-
-	/**
 	 * Extract clean title (movie/show name only)
 	 */
 	private extractCleanTitle(
@@ -382,9 +370,10 @@ export class ReleaseParser {
 		// Also apply to TV shows to avoid duplicate years
 		if (context.year) {
 			const yearStr = String(context.year);
-			// Match year with optional parentheses: "(2025)" or just "2025"
+			// Match year with optional edition: "(2025)", "(2025-Director's Cut)",
+			// "(2025 Director's Cut)", or "2025"
 			const yearPatterns = [
-				new RegExp(`\\s*\\(${yearStr}\\)\\s*`), // (2025)
+				new RegExp(`\\s*\\(${yearStr}(?:[- ][^)]*)?\\)\\s*`), // (2025), (2025-Edition), (2025 Edition)
 				new RegExp(`\\s+${yearStr}(?:\\s|$)`) // 2025 at word boundary
 			];
 			for (const pattern of yearPatterns) {

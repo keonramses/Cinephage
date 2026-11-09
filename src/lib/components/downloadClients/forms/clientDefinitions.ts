@@ -1,4 +1,4 @@
-import type { DownloadClientDefinition } from '$lib/types/downloadClient';
+import type { DownloadClientDefinition } from '#lib/types/downloadClient.js';
 
 /**
  * Available download client definitions.
@@ -21,7 +21,7 @@ export const clientDefinitions: DownloadClientDefinition[] = [
 		description: 'Lightweight, cross-platform BitTorrent client',
 		defaultPort: 9091,
 		protocol: 'torrent',
-		supportsCategories: false,
+		supportsCategories: true,
 		supportsPriority: true,
 		supportsSeedingLimits: true
 	},
@@ -53,7 +53,8 @@ export const clientDefinitions: DownloadClientDefinition[] = [
 		protocol: 'torrent',
 		supportsCategories: false,
 		supportsPriority: false,
-		supportsSeedingLimits: false
+		// aria2 honors seed-time goals at add time (seed-time option).
+		supportsSeedingLimits: true
 	},
 	// Usenet clients
 	{

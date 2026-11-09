@@ -17,11 +17,11 @@ import type { ScoreComponents } from './types.js';
 import type { ScoringProfile, SizeValidationContext, PackPreference } from '../scoring/index.js';
 import { calculatePackBonus } from '../scoring/types.js';
 import { getFormat } from '../scoring/formats/index.js';
-import { createChildLogger } from '$lib/logging';
+import { createChildLogger } from '#lib/logging/index.js';
 
 const logger = createChildLogger({ logDomain: 'indexers' as const });
 import { getProtocolHandler, type ProtocolContext } from '../indexers/protocols';
-import type { ProtocolSettings } from '$lib/server/indexers/types/index.js';
+import type { ProtocolSettings } from '#lib/server/indexers/types/index.js';
 
 /**
  * Indexer configuration for protocol-specific rejection
@@ -265,12 +265,25 @@ export class ReleaseEnricher {
 			);
 		}
 
+		// Add indexer-allowlist rejection (soft - release stays visible as rejected)
+		const allowedIndexerIds = profile?.allowedIndexerIds;
+		if (
+			allowedIndexerIds &&
+			allowedIndexerIds.length > 0 &&
+			release.indexerId &&
+			!allowedIndexerIds.includes(release.indexerId)
+		) {
+			rejections.push(
+				`Indexer '${release.indexerName ?? release.indexerId}' is not selected in profile '${profile?.name || 'default'}'`
+			);
+		}
+
 		// Add protocol-specific rejection (dead torrents, seeder minimums, etc.)
 		if (protocolRejectionReason) {
 			rejections.push(protocolRejectionReason);
 		}
 
-		// Add required formats rejection (soft — release is still grabbable manually)
+		// Add required formats rejection (soft - release is still grabbable manually)
 		const requiredFormats = profile?.requiredFormats ?? [];
 		if (requiredFormats.length > 0) {
 			const matchedIds = new Set(
@@ -447,7 +460,7 @@ export class ReleaseEnricher {
 		const hardcodedSubsPenalty = parsed.hasHardcodedSubs ? -50 : 0;
 
 		// Calculate total score. No clamping: under the additive scoring model a
-		// negative total is meaningful ("less preferred than neutral") — the grab
+		// negative total is meaningful ("less preferred than neutral") - the grab
 		// decision compares these raw totals, so the UI must display the same
 		// number it uses. Banned releases stay at -Infinity downstream.
 		const totalScore = Math.round(baseScore + enhancementBonus + packBonus + hardcodedSubsPenalty);

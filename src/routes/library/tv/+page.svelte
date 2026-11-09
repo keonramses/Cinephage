@@ -1,17 +1,18 @@
 <script lang="ts">
 	import { page } from '$app/state';
-	import { goto, beforeNavigate, afterNavigate } from '$app/navigation';
+	import { goto, beforeNavigate, afterNavigate, refreshAll } from '$app/navigation';
 	import { resolve } from '$app/paths';
-	import { resolvePath } from '$lib/utils/routing';
+	import { resolvePath } from '#lib/utils/routing.js';
 	import { SvelteSet } from 'svelte/reactivity';
-	import LibraryMediaCard from '$lib/components/library/LibraryMediaCard.svelte';
-	import LibraryMediaTable from '$lib/components/library/LibraryMediaTable.svelte';
-	import LibraryDrawer from '$lib/components/library/LibraryDrawer.svelte';
-	import LibraryBulkActionBar from '$lib/components/library/LibraryBulkActionBar.svelte';
-	import BulkQualityProfileModal from '$lib/components/library/BulkQualityProfileModal.svelte';
-	import BulkDeleteModal from '$lib/components/library/BulkDeleteModal.svelte';
-	import DeleteConfirmationModal from '$lib/components/ui/modal/DeleteConfirmationModal.svelte';
-	import { MediaSearchModal } from '$lib/components/search';
+	import LibraryMediaCard from '#lib/components/library/LibraryMediaCard.svelte';
+	import LibraryMediaTable from '#lib/components/library/LibraryMediaTable.svelte';
+	import LibraryDrawer from '#lib/components/library/LibraryDrawer.svelte';
+	import LibraryBulkActionBar from '#lib/components/library/LibraryBulkActionBar.svelte';
+	import BulkLanguageProfileModal from '#lib/components/library/BulkLanguageProfileModal.svelte';
+	import BulkQualityProfileModal from '#lib/components/library/BulkQualityProfileModal.svelte';
+	import BulkDeleteModal from '#lib/components/library/BulkDeleteModal.svelte';
+	import DeleteConfirmationModal from '#lib/components/ui/modal/DeleteConfirmationModal.svelte';
+	import { MediaSearchModal } from '#lib/components/search/index.js';
 	import {
 		Tv,
 		X,
@@ -24,42 +25,59 @@
 		Eye,
 		EyeOff,
 		ChevronDown
-	} from 'lucide-svelte';
-	import { toasts } from '$lib/stores/toast.svelte';
-	import { viewPreferences } from '$lib/stores/view-preferences.svelte';
+	} from '@lucide/svelte';
+	import { toasts } from '#lib/stores/toast.svelte.js';
+	import { viewPreferences } from '#lib/stores/view-preferences.svelte.js';
 	import { enhance } from '$app/forms';
 	import {
 		batchSeries,
 		batchDeleteSeriesFiles,
 		updateSeries,
 		deleteSeries
-	} from '$lib/api/library.js';
-	import { ApiError } from '$lib/api/client.js';
-	import { createSearchProgress } from '$lib/stores/searchProgress.svelte';
-	import { getPrimaryAutoSearchIssue } from '$lib/utils/autoSearchIssues';
-	import { createProgressiveRenderer } from '$lib/utils/progressive-render.svelte.js';
-	import * as m from '$lib/paraglide/messages.js';
-	import { seriesStatusFilterOptions } from '$lib/utils/format-status.js';
+	} from '#lib/api/library.js';
+	import { ApiError } from '#lib/api/client.js';
+	import { createSearchProgress } from '#lib/stores/searchProgress.svelte.js';
+	import { getPrimaryAutoSearchIssue } from '#lib/utils/autoSearchIssues.js';
+	import { createProgressiveRenderer } from '#lib/utils/progressive-render.svelte.js';
+	import * as m from '#lib/paraglide/messages.js';
+	import { seriesStatusFilterOptions } from '#lib/utils/format-status.js';
 
 	let { data } = $props();
 
+	// Viewer accounts browse a read-only library; admin controls stay hidden.
+	const isAdminUser = $derived(data.user?.role === 'admin');
+
 	const SCROLL_KEY = 'cinephage:library:tv:scrollY';
 
-	beforeNavigate(({ to }) => {
-		if (to?.url.pathname.startsWith('/library/tv/')) {
-			localStorage.setItem(SCROLL_KEY, String(window.scrollY));
-		} else {
-			localStorage.removeItem(SCROLL_KEY);
+	beforeNavigate(({ to, shallow, type }) => {
+		if (shallow && type === 'goto') return;
+
+		try {
+			if (to?.url.pathname.startsWith('/library/tv/')) {
+				localStorage.setItem(SCROLL_KEY, String(window.scrollY));
+			} else {
+				localStorage.removeItem(SCROLL_KEY);
+			}
+		} catch {
+			// storage unavailable (blocked cookies / ETP)
 		}
 	});
 
-	afterNavigate(({ from }) => {
-		if (from?.url.pathname.startsWith('/library/tv/')) {
-			const saved = localStorage.getItem(SCROLL_KEY);
-			if (saved) {
-				requestAnimationFrame(() => window.scrollTo({ top: parseInt(saved), behavior: 'instant' }));
-				localStorage.removeItem(SCROLL_KEY);
+	afterNavigate(({ from, shallow, type }) => {
+		if (shallow && type === 'goto') return;
+
+		try {
+			if (from?.url.pathname.startsWith('/library/tv/')) {
+				const saved = localStorage.getItem(SCROLL_KEY);
+				if (saved) {
+					requestAnimationFrame(() =>
+						window.scrollTo({ top: parseInt(saved), behavior: 'instant' })
+					);
+					localStorage.removeItem(SCROLL_KEY);
+				}
 			}
+		} catch {
+			// storage unavailable (blocked cookies / ETP)
 		}
 	});
 
@@ -89,7 +107,16 @@
 	// Progressive rendering: only render a screenful + buffer at a time
 	const renderer = createProgressiveRenderer(() => filteredSeries);
 	let bulkLoading = $state(false);
-	let currentBulkAction = $state<'monitor' | 'unmonitor' | 'quality' | 'delete' | null>(null);
+	let currentBulkAction = $state<
+		'monitor' | 'unmonitor' | 'quality' | 'delete' | 'language' | null
+	>(null);
+	let isLanguageModalOpen = $state(false);
+
+	async function handleBulkLanguageApplied(updated: number) {
+		selectedSeries.clear();
+		toasts.success(m.toast_library_tv_qualityUpdatedCount({ count: updated }));
+		await refreshAll();
+	}
 	let isQualityModalOpen = $state(false);
 	let isDeleteModalOpen = $state(false);
 	let pendingDeleteSeriesId = $state<string | null>(null);
@@ -335,7 +362,11 @@
 								s.id === seriesId ? { ...s, episodeFileCount: 0, percentComplete: 0 } : s
 							)
 						};
-						toasts.success(m.toast_library_tv_filesDeleted({ title: show.title }));
+						toasts.success(
+							deleteFiles
+								? m.toast_library_tv_filesDeleted({ title: show.title })
+								: m.toast_library_tv_unmatched({ title: show.title })
+						);
 					}
 					isDeleteModalOpen = false;
 					pendingDeleteSeriesId = null;
@@ -361,6 +392,10 @@
 		{ value: 'added-asc', label: m.library_tv_sortAddedAsc() },
 		{ value: 'progress-desc', label: m.library_tv_sortProgressDesc() },
 		{ value: 'progress-asc', label: m.library_tv_sortProgressAsc() },
+		{ value: 'missing-desc', label: m.library_tv_sortMissingDesc() },
+		{ value: 'missing-asc', label: m.library_tv_sortMissingAsc() },
+		{ value: 'missingPercent-desc', label: m.library_tv_sortMissingPercentDesc() },
+		{ value: 'missingPercent-asc', label: m.library_tv_sortMissingPercentAsc() },
 		{ value: 'year-desc', label: m.library_tv_sortYearDesc() },
 		{ value: 'year-asc', label: m.library_tv_sortYearAsc() },
 		{ value: 'size-desc', label: m.library_tv_sortSizeDesc() },
@@ -410,6 +445,14 @@
 				{ value: 'complete', label: m.library_tv_filterComplete() },
 				{ value: 'inProgress', label: m.library_tv_filterInProgress() },
 				{ value: 'notStarted', label: m.library_tv_filterNotStarted() }
+			]
+		},
+		{
+			key: 'missing',
+			label: m.library_tv_filterMissing(),
+			options: [
+				{ value: 'all', label: m.library_tv_filterAll() },
+				{ value: 'missing', label: m.library_tv_filterHasMissing() }
 			]
 		},
 		{
@@ -463,7 +506,7 @@
 	]);
 
 	function updateUrlParam(key: string, value: string) {
-		const url = new URL(page.url);
+		const url = new URL(page.url.href);
 		const query = searchQuery.trim();
 		if (query) url.searchParams.set('q', query);
 		else url.searchParams.delete('q');
@@ -478,17 +521,17 @@
 		} else {
 			url.searchParams.set(key, value);
 		}
-		goto(resolvePath(url.pathname + url.search), { keepFocus: true, noScroll: true });
+		goto(resolvePath(url.pathname + url.search), { reset: false });
 	}
 
 	function clearFilters() {
 		searchQuery = '';
-		const url = new URL(resolve('/library/tv'), page.url.origin);
+		const url = new URL(resolve('library/tv'), page.url.origin);
 		if (data.libraryScope?.isSubLibraryScope && data.libraryScope?.selected?.slug) {
 			url.searchParams.set('library', data.libraryScope.selected.slug);
 		}
 		url.searchParams.delete('q');
-		goto(resolvePath(url.pathname + url.search), { keepFocus: true, noScroll: true });
+		goto(resolvePath(url.pathname + url.search), { reset: false });
 	}
 
 	function handleMonitorAll() {
@@ -504,6 +547,7 @@
 		monitored: data.filters.monitored,
 		status: data.filters.status,
 		progress: data.filters.progress,
+		missing: data.filters.missing,
 		qualityProfile: data.filters.qualityProfile,
 		resolution: data.filters.resolution,
 		videoCodec: data.filters.videoCodec,
@@ -531,10 +575,7 @@
 	const bulkHasActiveDownloads = $derived(bulkActiveDownloadCount > 0);
 </script>
 
-<svelte:head>
-	<title>{m.library_tv_pageTitle()}</title>
-</svelte:head>
-
+<svelte:head><title>{m.library_tv_pageTitle()}</title></svelte:head>
 <svelte:window onkeydown={handleKeydown} />
 
 <div class="min-h-screen bg-base-100 pb-20">
@@ -589,50 +630,52 @@
 
 			<!-- Right: Quick Actions -->
 			<div class="flex shrink-0 items-center gap-1.5">
-				<div class="dropdown dropdown-end">
-					<div
-						tabindex="0"
-						role="button"
-						class="btn gap-1.5 btn-ghost btn-xs sm:btn-sm"
-						aria-label="Monitoring actions"
-					>
-						<Eye class="h-4 w-4" />
-						<span class="hidden xl:inline">Monitoring</span>
-						<ChevronDown class="hidden h-3 w-3 sm:block" />
-					</div>
-					<ul
-						class="menu dropdown-content z-50 mt-2 w-44 rounded-box border border-base-300 bg-base-100 p-2 shadow-xl"
-					>
-						<li>
-							<button onclick={handleMonitorAll}>
-								<Eye class="h-4 w-4" />
-								{m.library_tv_monitorAll()}
-							</button>
-						</li>
-						<li>
-							<button onclick={handleUnmonitorAll}>
-								<EyeOff class="h-4 w-4" />
-								{m.library_tv_unmonitorAll()}
-							</button>
-						</li>
-					</ul>
-				</div>
+				{#if isAdminUser}
+					<div class="dropdown dropdown-end">
+						<div
+							tabindex="0"
+							role="button"
+							class="btn gap-1.5 btn-ghost btn-xs sm:btn-sm"
+							aria-label="Monitoring actions"
+						>
+							<Eye class="h-4 w-4" />
+							<span class="hidden xl:inline">Monitoring</span>
+							<ChevronDown class="hidden h-3 w-3 sm:block" />
+						</div>
+						<ul
+							class="menu dropdown-content z-50 mt-2 w-44 rounded-box border border-base-300 bg-base-100 p-2 shadow-xl"
+						>
+							<li>
+								<button onclick={handleMonitorAll}
+									><Eye class="h-4 w-4" />{m.library_tv_monitorAll()}</button
+								>
+							</li>
 
-				<button
-					class="btn gap-1.5 btn-ghost btn-xs sm:btn-sm {showCheckboxes ? 'btn-primary' : ''}"
-					onclick={handleSelectToggle}
-				>
-					{#if !showCheckboxes}
-						<CheckSquare class="h-4 w-4" />
-						<span class="hidden sm:inline">{m.library_tv_select()}</span>
-					{:else if !allSelected}
-						<CheckSquare class="h-4 w-4" />
-						<span class="hidden sm:inline">{m.library_tv_selectAll()}</span>
-					{:else}
-						<XSquare class="h-4 w-4" />
-						<span class="hidden sm:inline">{m.library_tv_done()}</span>
-					{/if}
-				</button>
+							<li>
+								<button onclick={handleUnmonitorAll}>
+									<EyeOff class="h-4 w-4" />
+									{m.library_tv_unmonitorAll()}
+								</button>
+							</li>
+						</ul>
+					</div>
+
+					<button
+						class="btn gap-1.5 btn-ghost btn-xs sm:btn-sm {showCheckboxes ? 'btn-primary' : ''}"
+						onclick={handleSelectToggle}
+					>
+						{#if !showCheckboxes}
+							<CheckSquare class="h-4 w-4" />
+							<span class="hidden sm:inline">{m.library_tv_select()}</span>
+						{:else if !allSelected}
+							<CheckSquare class="h-4 w-4" />
+							<span class="hidden sm:inline">{m.library_tv_selectAll()}</span>
+						{:else}
+							<XSquare class="h-4 w-4" />
+							<span class="hidden sm:inline">{m.library_tv_done()}</span>
+						{/if}
+					</button>
+				{/if}
 
 				<!-- View Toggle -->
 				<button
@@ -708,7 +751,7 @@
 						stroke-linejoin="round"
 						stroke-width="2"
 						d="M10 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2m7-2a9 9 0 11-18 0 9 9 0 0118 0z"
-					/>
+					></path>
 				</svg>
 				<span>{data.error}</span>
 			</div>
@@ -721,9 +764,10 @@
 					<p class="mt-2">{m.library_tv_tryDifferentSearch()}</p>
 				</div>
 				<div class="mt-6 flex gap-3">
-					<button class="btn btn-ghost" onclick={() => (searchQuery = '')}>
-						{m.library_tv_clearSearchBtn()}
-					</button>
+					<button class="btn btn-ghost" onclick={() => (searchQuery = '')}
+						>{m.library_tv_clearSearchBtn()}</button
+					>
+
 					<a
 						href={resolvePath(`/discover?type=tv&q=${encodeURIComponent(searchQuery)}`)}
 						class="btn btn-primary"
@@ -766,6 +810,7 @@
 									selectable={showCheckboxes}
 									selected={selectedSeries.has(show.id)}
 									onSelectChange={handleItemSelectChange}
+									preferOriginalTitleDefault={data.preferOriginalTitleDefault}
 								/>
 							{/each}
 						</div>
@@ -779,10 +824,11 @@
 							downloadingIds={downloadingSeriesIdSet}
 							{autoSearchingIds}
 							onSelectChange={handleItemSelectChange}
-							onMonitorToggle={handleMonitorToggle}
-							onDelete={handleDeleteSeries}
-							onAutoGrab={handleAutoGrab}
-							onManualGrab={handleManualGrab}
+							onMonitorToggle={isAdminUser ? handleMonitorToggle : undefined}
+							onDelete={isAdminUser ? handleDeleteSeries : undefined}
+							onAutoGrab={isAdminUser ? handleAutoGrab : undefined}
+							onManualGrab={isAdminUser ? handleManualGrab : undefined}
+							preferOriginalTitleDefault={data.preferOriginalTitleDefault}
 						/>
 					{/if}
 
@@ -835,17 +881,29 @@
 	/>
 </div>
 
-<!-- Bulk Action Bar -->
-<LibraryBulkActionBar
-	{selectedCount}
-	loading={bulkLoading}
-	currentAction={currentBulkAction}
-	mediaType="tv"
-	onMonitor={() => handleBulkMonitor(true)}
-	onUnmonitor={() => handleBulkMonitor(false)}
-	onChangeQuality={() => (isQualityModalOpen = true)}
-	onDelete={() => (isDeleteModalOpen = true)}
-	onClear={clearSelection}
+<!-- Bulk Action Bar (admin only) -->
+{#if isAdminUser}
+	<LibraryBulkActionBar
+		{selectedCount}
+		loading={bulkLoading}
+		currentAction={currentBulkAction}
+		mediaType="tv"
+		onMonitor={() => handleBulkMonitor(true)}
+		onUnmonitor={() => handleBulkMonitor(false)}
+		onChangeQuality={() => (isQualityModalOpen = true)}
+		onLanguage={() => (isLanguageModalOpen = true)}
+		onDelete={() => (isDeleteModalOpen = true)}
+		onClear={clearSelection}
+	/>
+{/if}
+
+<!-- Bulk Language Profile Modal -->
+<BulkLanguageProfileModal
+	open={isLanguageModalOpen}
+	mediaType="series"
+	selectedIds={[...selectedSeries]}
+	onClose={() => (isLanguageModalOpen = false)}
+	onApplied={handleBulkLanguageApplied}
 />
 
 <!-- Bulk Quality Profile Modal -->

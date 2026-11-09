@@ -1,5 +1,11 @@
 import { sql } from 'drizzle-orm';
-import { episodeFiles, movieFiles, movies, scoringProfiles, series } from '$lib/server/db/schema';
+import {
+	episodeFiles,
+	movieFiles,
+	movies,
+	scoringProfiles,
+	series
+} from '#lib/server/db/schema.js';
 import type { StorageInsightRule, RuleContext, InsightFinding } from '../types.js';
 
 /**
@@ -22,7 +28,7 @@ const RESOLUTION_ORDER: Record<string, number> = {
  *
  * NOTE: The monitoring system's CutoffUnmetSpecification was softened to always
  * accept (hard cutoffs removed). This rule is the NEW logic that surfaces
- * below-cutoff items for display purposes — it does NOT trigger automatic
+ * below-cutoff items for display purposes - it does NOT trigger automatic
  * upgrades.
  */
 export class QualityBelowCutoffRule implements StorageInsightRule {
@@ -59,7 +65,7 @@ export class QualityBelowCutoffRule implements StorageInsightRule {
 
 		// Multi-quality mode: a movie may have several movie_files at DIFFERENT
 		// resolutions. Only the BEST file per movie should be evaluated against the
-		// cutoff — an intentional lower-resolution tier is not a below-cutoff
+		// cutoff - an intentional lower-resolution tier is not a below-cutoff
 		// candidate when a higher tier already satisfies the profile.
 		const bestPerMovie = new Map<string, MovieRow>();
 		for (const row of movieRows) {
@@ -94,7 +100,14 @@ export class QualityBelowCutoffRule implements StorageInsightRule {
 			.where(sql`${series.tmdbId} IS NOT NULL`)
 			.all();
 
-		const allRows = [...dedupedMovieRows, ...episodeRows];
+		// Movie and series tmdbIds are independent namespaces, so every row
+		// carries its own itemType rather than letting downstream consumers
+		// guess which table a tmdbId belongs to (a movie and an unrelated
+		// show can share the same numeric id).
+		const allRows = [
+			...dedupedMovieRows.map((r) => ({ ...r, itemType: 'movie' as const })),
+			...episodeRows.map((r) => ({ ...r, itemType: 'episode' as const }))
+		];
 
 		const belowCutoff = allRows.filter((row) => {
 			if (!row.minResolution) return false;
@@ -117,6 +130,7 @@ export class QualityBelowCutoffRule implements StorageInsightRule {
 					items: belowCutoff.map((r) => ({
 						tmdbId: r.tmdbId,
 						title: r.title,
+						itemType: r.itemType,
 						currentResolution: resolutionOf(r.quality),
 						minResolution: r.minResolution
 					}))

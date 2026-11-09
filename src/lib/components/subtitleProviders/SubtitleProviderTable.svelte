@@ -1,5 +1,5 @@
 <script lang="ts">
-	import * as m from '$lib/paraglide/messages.js';
+	import * as m from '#lib/paraglide/messages.js';
 	import {
 		ChevronUp,
 		ChevronDown,
@@ -11,11 +11,11 @@
 		ToggleRight,
 		Settings,
 		Trash2
-	} from 'lucide-svelte';
+	} from '@lucide/svelte';
 	import SubtitleProviderRow from './SubtitleProviderRow.svelte';
 	import SubtitleProviderStatusBadge from './SubtitleProviderStatusBadge.svelte';
-	import type { SubtitleProviderConfig } from '$lib/server/subtitles/types';
-	import type { ProviderDefinition } from '$lib/server/subtitles/providers/interfaces';
+	import type { SubtitleProviderConfig } from '#lib/server/subtitles/types.js';
+	import type { ProviderDefinition } from '#lib/server/subtitles/providers/interfaces.js';
 
 	interface SubtitleProviderWithDefinition extends SubtitleProviderConfig {
 		definitionName?: string;
@@ -206,7 +206,7 @@
 				<label class="flex items-center gap-2 text-xs font-medium">
 					<input
 						type="checkbox"
-						class="checkbox checkbox-sm"
+						class="checkbox checkbox-sm checkbox-primary"
 						checked={allSelected}
 						indeterminate={someSelected}
 						onchange={(e) => onSelectAll(e.currentTarget.checked)}
@@ -271,7 +271,7 @@
 						{:else}
 							<input
 								type="checkbox"
-								class="checkbox checkbox-sm"
+								class="checkbox checkbox-sm checkbox-primary"
 								checked={selectedIds.has(provider.id)}
 								onchange={(e) => onSelect(provider.id, e.currentTarget.checked)}
 							/>
@@ -413,7 +413,7 @@
 						{:else}
 							<input
 								type="checkbox"
-								class="checkbox checkbox-sm"
+								class="checkbox checkbox-sm checkbox-primary"
 								checked={allSelected}
 								indeterminate={someSelected}
 								onchange={(e) => onSelectAll(e.currentTarget.checked)}
@@ -495,7 +495,7 @@
 							{:else}
 								<input
 									type="checkbox"
-									class="checkbox checkbox-sm"
+									class="checkbox checkbox-sm checkbox-primary"
 									checked={selectedIds.has(provider.id)}
 									onchange={(e) => onSelect(provider.id, e.currentTarget.checked)}
 								/>

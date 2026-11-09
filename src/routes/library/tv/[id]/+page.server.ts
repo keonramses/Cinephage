@@ -1,5 +1,5 @@
-import { db } from '$lib/server/db/index.js';
-import { delayProfileService } from '$lib/server/monitoring/specifications/DelaySpecification.js';
+import { db } from '#lib/server/db/index.js';
+import { delayProfileService } from '#lib/server/monitoring/specifications/DelaySpecification.js';
 import {
 	series,
 	seasons,
@@ -10,18 +10,24 @@ import {
 	downloadQueue,
 	subtitles,
 	libraries
-} from '$lib/server/db/schema.js';
+} from '#lib/server/db/schema.js';
 import { eq, asc, inArray, and } from 'drizzle-orm';
 import { error } from '@sveltejs/kit';
 import type { PageServerLoad } from './$types';
-import { isSeriesSearching } from '$lib/server/library/ActiveSearchTracker.js';
-import { ACTIVE_DOWNLOAD_STATUSES } from '$lib/types/queue';
-import type { QualityProfileSummary } from '$lib/types/library';
-import type { TVShowDetails } from '$lib/types/tmdb';
-import { tmdb } from '$lib/server/tmdb.js';
-import { resolveMissingAnimeProviderRefs } from '$lib/server/metadata/provider-ref-resolver.js';
-import { getMetadataProviderConfig } from '$lib/server/metadata/provider-settings.js';
-import { createChildLogger } from '$lib/logging';
+import { isSeriesSearching } from '#lib/server/library/ActiveSearchTracker.js';
+import { ACTIVE_DOWNLOAD_STATUSES } from '#lib/types/queue.js';
+import type { QualityProfileSummary } from '#lib/types/library.js';
+import type { TVShowDetails } from '#lib/types/tmdb.js';
+import { tmdb } from '#lib/server/tmdb.js';
+import { getMetadataProviderConfig } from '#lib/server/metadata/provider-settings.js';
+import { getLanguageProfileService } from '#lib/server/subtitles/services/LanguageProfileService.js';
+import { getLanguageSettingsService } from '#lib/server/subtitles/services/LanguageSettingsService.js';
+import type {
+	EffectiveSubtitleRequirements,
+	EffectiveLanguageProfile,
+	EpisodeSubtitleCounts
+} from '#lib/shared/language-profile.js';
+import { createChildLogger } from '#lib/logging/index.js';
 
 const logger = createChildLogger({ module: 'LibraryTvPage', logDomain: 'scans' });
 
@@ -65,8 +71,12 @@ export interface EpisodeWithFile {
 	runtime: number | null;
 	monitored: boolean | null;
 	hasFile: boolean | null;
+	/** Tri-state subtitle gate (null = inherit from series). */
+	wantsSubtitlesOverride: boolean | null;
 	file: EpisodeFileInfo | null;
 	subtitles?: SubtitleInfo[];
+	/** Cutoff-aware requirement progress; null when the series has no effective profile. */
+	subtitleCounts?: EpisodeSubtitleCounts | null;
 }
 
 export interface EpisodeFileInfo {
@@ -115,6 +125,8 @@ export interface LibrarySeriesPageData {
 		tmdbId: number;
 		tvdbId: number | null;
 		imdbId: string | null;
+		/** Probed audio contradicts the effective audio preference (phase D) */
+		languageShortfall?: boolean | null;
 		providerRefs: Partial<Record<'tmdb' | 'anilist' | 'mal', string>> | null;
 		title: string;
 		originalTitle: string | null;
@@ -133,6 +145,7 @@ export interface LibrarySeriesPageData {
 		seasonFolder: boolean | null;
 		seriesType: string | null;
 		wantsSubtitles: boolean | null;
+		languageProfileId: string | null;
 		added: string;
 		episodeCount: number | null;
 		episodeFileCount: number | null;
@@ -170,6 +183,13 @@ export interface LibrarySeriesPageData {
 	};
 	librarySlug: string | null;
 	libraryName: string | null;
+	/** The profile governing the series plus the level it was resolved from. */
+	effectiveLanguageProfile: EffectiveLanguageProfile | null;
+	effectiveSubtitleRequirements: EffectiveSubtitleRequirements | null;
+	/** Language profiles available for the per-item subtitle profile override. */
+	languageProfiles: Array<{ id: string; name: string }>;
+	/** Instance default for original-title display (language_settings.prefer_original_title). */
+	preferOriginalTitleDefault: boolean;
 }
 
 export const load: PageServerLoad = async ({ params }): Promise<LibrarySeriesPageData> => {
@@ -197,6 +217,7 @@ export const load: PageServerLoad = async ({ params }): Promise<LibrarySeriesPag
 			rootFolderPath: rootFolders.path,
 			scoringProfileId: series.scoringProfileId,
 			monitored: series.monitored,
+			languageShortfall: series.languageShortfall,
 			seasonFolder: series.seasonFolder,
 			seriesType: series.seriesType,
 			wantsSubtitles: series.wantsSubtitles,
@@ -208,6 +229,9 @@ export const load: PageServerLoad = async ({ params }): Promise<LibrarySeriesPag
 			librarySlug: libraries.slug,
 			libraryName: libraries.name,
 			libraryIsDefault: libraries.isDefault,
+			languageProfileId: series.languageProfileId,
+			metadataLanguageMode: series.metadataLanguageMode,
+			metadataLanguageValue: series.metadataLanguageValue,
 			metadataLanguage: series.metadataLanguage,
 			preferOriginalTitle: series.preferOriginalTitle
 		})
@@ -267,48 +291,38 @@ export const load: PageServerLoad = async ({ params }): Promise<LibrarySeriesPag
 		}
 	}
 
-	// Fetch subtitles for all episodes in this series
+	// Fetch subtitles for all episodes in this series. Full rows are loaded so
+	// the batch requirement-count pass can resolve on-disk paths for each row.
 	const episodeIds = allEpisodes.map((ep) => ep.id);
 	const allSubtitles =
 		episodeIds.length > 0
-			? await db
-					.select({
-						id: subtitles.id,
-						episodeId: subtitles.episodeId,
-						language: subtitles.language,
-						isForced: subtitles.isForced,
-						isHearingImpaired: subtitles.isHearingImpaired,
-						format: subtitles.format,
-						matchScore: subtitles.matchScore,
-						providerId: subtitles.providerId,
-						dateAdded: subtitles.dateAdded,
-						wasSynced: subtitles.wasSynced,
-						syncOffset: subtitles.syncOffset
-					})
-					.from(subtitles)
-					.where(inArray(subtitles.episodeId, episodeIds))
+			? await db.select().from(subtitles).where(inArray(subtitles.episodeId, episodeIds))
 			: [];
 
-	// Create a map of episode ID to subtitles
-	const episodeIdToSubtitles = new Map<string, SubtitleInfo[]>();
+	// Group subtitles by episode id, seeding every episode (even without rows)
+	// so each one gets a requirement-count entry.
+	const subtitlesByEpisode = new Map<string, Array<typeof subtitles.$inferSelect>>();
+	for (const ep of allEpisodes) {
+		subtitlesByEpisode.set(ep.id, []);
+	}
 	for (const sub of allSubtitles) {
 		if (sub.episodeId) {
-			const existing = episodeIdToSubtitles.get(sub.episodeId) || [];
-			existing.push({
-				id: sub.id,
-				language: sub.language,
-				isForced: sub.isForced ?? undefined,
-				isHearingImpaired: sub.isHearingImpaired ?? undefined,
-				format: sub.format ?? undefined,
-				matchScore: sub.matchScore,
-				providerId: sub.providerId,
-				dateAdded: sub.dateAdded,
-				wasSynced: sub.wasSynced ?? undefined,
-				syncOffset: sub.syncOffset
-			});
-			episodeIdToSubtitles.set(sub.episodeId, existing);
+			subtitlesByEpisode.get(sub.episodeId)?.push(sub);
 		}
 	}
+
+	// Cutoff-aware per-episode requirement progress, computed server-side in
+	// ONE batched pass over the already-fetched rows + the series' effective
+	// profile (constant query count - safe for very large libraries).
+	const profileService = getLanguageProfileService();
+	const [effectiveLanguageProfile, effectiveSubtitleRequirements, episodeSubtitleCounts] =
+		await Promise.all([
+			profileService.getEffectiveProfileForSeries(id),
+			profileService.getEffectiveSubtitleRequirements({ seriesId: id }),
+			profileService.getSeriesEpisodeSubtitleCounts(id, subtitlesByEpisode)
+		]);
+	const languageSettings = await getLanguageSettingsService().get();
+	const preferOriginalTitleDefault = languageSettings.preferOriginalTitle;
 
 	// Build seasons with episodes
 	const seasonsWithEpisodes: SeasonWithEpisodes[] = allSeasons.map((season) => {
@@ -327,8 +341,21 @@ export const load: PageServerLoad = async ({ params }): Promise<LibrarySeriesPag
 				runtime: ep.runtime,
 				monitored: ep.monitored,
 				hasFile: ep.hasFile,
+				wantsSubtitlesOverride: ep.wantsSubtitlesOverride ?? null,
 				file: episodeIdToFile.get(ep.id) || null,
-				subtitles: episodeIdToSubtitles.get(ep.id) || []
+				subtitles: (subtitlesByEpisode.get(ep.id) || []).map((sub): SubtitleInfo => ({
+					id: sub.id,
+					language: sub.language,
+					isForced: sub.isForced ?? undefined,
+					isHearingImpaired: sub.isHearingImpaired ?? undefined,
+					format: sub.format ?? undefined,
+					matchScore: sub.matchScore,
+					providerId: sub.providerId,
+					dateAdded: sub.dateAdded,
+					wasSynced: sub.wasSynced ?? undefined,
+					syncOffset: sub.syncOffset
+				})),
+				subtitleCounts: episodeSubtitleCounts.get(ep.id) ?? null
 			}));
 
 		return {
@@ -366,6 +393,12 @@ export const load: PageServerLoad = async ({ params }): Promise<LibrarySeriesPag
 		description: p.description ?? '',
 		isBuiltIn: !!p.isBuiltIn,
 		isDefault: p.id === resolvedDefaultId
+	}));
+
+	// Language profiles for the edit modal's subtitle-profile override select.
+	const languageProfiles = (await profileService.getProfiles()).map((p) => ({
+		id: p.id,
+		name: p.name
 	}));
 
 	// Fetch TV root folders
@@ -416,16 +449,18 @@ export const load: PageServerLoad = async ({ params }): Promise<LibrarySeriesPag
 		mal: providerConfig.animeEnrichmentEnabled
 	};
 
-	const enrichedProviderRefs = await resolveMissingAnimeProviderRefs({
-		title: seriesData.title,
-		aliases: [seriesData.originalTitle ?? ''],
-		year: seriesData.year,
-		isAnime: (seriesData.seriesType ?? '').toLowerCase() === 'anime',
-		configured: configuredMetadataProviders,
-		existingRefs:
-			(seriesData.providerRefs as Partial<Record<'tmdb' | 'anilist' | 'mal', string>> | null) ??
-			undefined
-	});
+	// AniList/Jikan(MAL) enrichment is NOT looked up here. It used to be
+	// (first awaited directly, then streamed as an unawaited promise), but
+	// even streamed it still visibly delayed first paint in practice -
+	// something between this app and the browser (proxy, adapter, or
+	// SvelteKit's own streaming semantics) wasn't actually deferring it the
+	// way the "don't await" pattern assumes. Moved to a dedicated endpoint
+	// (/api/library/series/[id]/anime-refs) that the client calls after the
+	// page has already rendered - see +page.svelte. This page only ever
+	// shows whatever provider refs are already stored.
+	const existingProviderRefs =
+		(seriesData.providerRefs as Partial<Record<'tmdb' | 'anilist' | 'mal', string>> | null) ??
+		undefined;
 
 	const tmdbDetails = await tmdb.getTVShow(seriesData.tmdbId).catch((err) => {
 		logger.warn(
@@ -447,7 +482,7 @@ export const load: PageServerLoad = async ({ params }): Promise<LibrarySeriesPag
 	return {
 		series: {
 			...seriesData,
-			providerRefs: enrichedProviderRefs,
+			providerRefs: existingProviderRefs ?? {},
 			added: seriesData.added ?? new Date().toISOString(),
 			percentComplete
 		},
@@ -460,6 +495,10 @@ export const load: PageServerLoad = async ({ params }): Promise<LibrarySeriesPag
 		isSearching,
 		configuredMetadataProviders,
 		librarySlug,
-		libraryName
+		libraryName,
+		effectiveLanguageProfile,
+		effectiveSubtitleRequirements,
+		languageProfiles,
+		preferOriginalTitleDefault
 	};
 };

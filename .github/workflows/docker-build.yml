@@ -4,8 +4,9 @@
 # - Pull requests to dev: Build only (validates Docker image)
 # - Push to dev: Build and push preview tags (dev, dev-YYYYMMDD-RUN)
 # - Push to main: Build only validation with no image publication
-# - Stable publication happens only when called from the stable release workflow with release_tag
-# - Runs on pushes to main/dev, pull requests to dev, and stable release workflow calls
+# - Stable publication happens when called from the stable release workflow with release_tag,
+#   or via manual dispatch (e.g. rebuilding a tag that was renamed/retagged after the fact)
+# - Runs on pushes to main/dev, pull requests to dev, stable release workflow calls, and manual dispatch
 #
 # Images are pushed to ghcr.io/<owner>/cinephage
 #
@@ -23,6 +24,17 @@ on:
         default: ''
       checkout_ref:
         description: 'Git ref to checkout (defaults to workflow ref)'
+        required: false
+        type: string
+        default: ''
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: 'Semver release tag to build and publish as stable (e.g. v1.0.0)'
+        required: true
+        type: string
+      checkout_ref:
+        description: 'Git ref to checkout (defaults to release_tag)'
         required: false
         type: string
         default: ''
@@ -52,6 +64,17 @@ jobs:
       should_publish: ${{ steps.meta.outputs.should_publish }}
 
     steps:
+      - name: Validate manually dispatched release tag
+        if: github.event_name == 'workflow_dispatch'
+        run: |
+          set -euo pipefail
+
+          TAG="${{ inputs.release_tag }}"
+          if ! [[ "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::release_tag must be a semver tag like v1.0.0 (got: ${TAG})"
+            exit 1
+          fi
+
       - name: Compute version and arch tags
         id: meta
         run: |
@@ -91,13 +114,13 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
-          ref: ${{ inputs.checkout_ref || github.ref }}
+          ref: ${{ inputs.checkout_ref || inputs.release_tag || github.ref }}
 
       - name: Set lowercase image name
         run: echo "IMAGE_NAME_LC=${GITHUB_REPOSITORY,,}" >> "$GITHUB_ENV"
 
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@d7f5e7f509e45cec5c76c4d5afdd7de93d0b3df5 # v4.1.0
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
 
       - name: Log in to Container Registry
         if: needs.prepare.outputs.should_publish == 'true'
@@ -112,10 +135,15 @@ jobs:
 
       - name: Test Docker image
         run: |
+          # CAMOUFOX_AUTO_FETCH=false: the entrypoint provisions the ~1.4GB
+          # Camoufox browser synchronously before starting the server, and a
+          # throwaway CI container is always a first run - the health window
+          # would expire mid-download. Real deployments exercise that path.
           docker run -d --name cinephage-test \
             -p 3000:3000 \
             -e ORIGIN=http://localhost:3000 \
             -e BETTER_AUTH_SECRET=ci-healthcheck-secret-change-in-production \
+            -e CAMOUFOX_AUTO_FETCH=false \
             cinephage:test
 
           for i in {1..12}; do
@@ -137,7 +165,7 @@ jobs:
 
       - name: Build and push Docker image
         id: build-push
-        uses: docker/build-push-action@f9f3042f7e2789586610d6e8b85c8f03e5195baf # v7
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7
         with:
           context: .
           platforms: linux/amd64
@@ -152,7 +180,7 @@ jobs:
 
   build-arm64:
     name: Build arm64
-    runs-on: ubuntu-24.04-arm
+    runs-on: ubuntu-26.04-arm
     needs: [prepare]
     permissions:
       contents: read
@@ -165,13 +193,13 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
-          ref: ${{ inputs.checkout_ref || github.ref }}
+          ref: ${{ inputs.checkout_ref || inputs.release_tag || github.ref }}
 
       - name: Set lowercase image name
         run: echo "IMAGE_NAME_LC=${GITHUB_REPOSITORY,,}" >> "$GITHUB_ENV"
 
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@d7f5e7f509e45cec5c76c4d5afdd7de93d0b3df5 # v4.1.0
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
 
       - name: Log in to Container Registry
         if: needs.prepare.outputs.should_publish == 'true'
@@ -183,7 +211,7 @@ jobs:
 
       - name: Build and push Docker image
         id: build-push
-        uses: docker/build-push-action@f9f3042f7e2789586610d6e8b85c8f03e5195baf # v7
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7
         with:
           context: .
           platforms: linux/arm64
@@ -217,7 +245,7 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@d7f5e7f509e45cec5c76c4d5afdd7de93d0b3df5 # v4.1.0
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
 
       - name: Extract Docker metadata
         id: meta

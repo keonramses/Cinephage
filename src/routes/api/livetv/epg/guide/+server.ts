@@ -7,18 +7,22 @@
  * - start: ISO date string (default: now)
  * - end: ISO date string (default: +6 hours)
  * - channelIds: Comma-separated channel IDs (optional, defaults to lineup channels)
+ * - lang: Optional display language tag (e.g. "en", "fr", "pt-BR"; the base tag
+ *   is used). Invalid/unknown values are ignored. When omitted, the plain EPG
+ *   text columns are returned unchanged.
  */
 
-import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
-import { getEpgService } from '$lib/server/livetv/epg';
+import { getEpgService } from '#lib/server/livetv/epg/index.js';
 import {
 	buildResolvedEpgChannelPlan,
 	mapGuideDataToRequestedChannels
-} from '$lib/server/livetv/epg/epg-utils';
-import { channelLineupService } from '$lib/server/livetv/lineup';
-import { createChildLogger } from '$lib/logging';
-import { ValidationError } from '$lib/errors';
+} from '#lib/server/livetv/epg/epg-utils.js';
+import { channelLineupService } from '#lib/server/livetv/lineup/index.js';
+import { createChildLogger } from '#lib/logging/index.js';
+import { normalizeLanguageTag } from '#lib/server/languages/normalize.js';
+import { getLanguageSettingsService } from '#lib/server/subtitles/services/LanguageSettingsService.js';
+import { ValidationError } from '#lib/errors/index.js';
 import { z } from 'zod';
 
 const logger = createChildLogger({ module: 'LiveTvEpgGuide', logDomain: 'livetv' });
@@ -29,6 +33,29 @@ const paramsSchema = z.object({
 	start: z.string().datetime().optional(),
 	end: z.string().datetime().optional()
 });
+
+/**
+ * Resolve the display language for localized EPG text.
+ *
+ * Order: explicit `?lang=` (canonicalized; region/script preserved so
+ * `pt-BR` can beat a bare `pt`) → the instance `language_settings`
+ * metadata locale → null (plain columns, pre-i18n behavior). Invalid input is
+ * ignored, never an error.
+ */
+async function resolveLangParam(url: URL): Promise<string | null> {
+	const raw = url.searchParams.get('lang');
+	if (raw && raw.trim()) {
+		const tag = normalizeLanguageTag(raw);
+		return tag === 'und' ? null : tag;
+	}
+	try {
+		const settings = await getLanguageSettingsService().get();
+		const tag = normalizeLanguageTag(settings.metadataLocale);
+		return tag === 'und' ? null : tag;
+	} catch {
+		return null;
+	}
+}
 
 export const GET: RequestHandler = async ({ url }) => {
 	try {
@@ -67,7 +94,7 @@ export const GET: RequestHandler = async ({ url }) => {
 		}
 
 		if (channelIds.length === 0) {
-			return json({
+			return Response.json({
 				success: true,
 				programs: {},
 				timeRange: {
@@ -89,7 +116,12 @@ export const GET: RequestHandler = async ({ url }) => {
 		);
 		const guideMap = mapGuideDataToRequestedChannels(
 			resolvedPlan,
-			epgService.getGuideData(resolvedPlan.sourceChannelIds, start, end)
+			epgService.getGuideData(
+				resolvedPlan.sourceChannelIds,
+				start,
+				end,
+				await resolveLangParam(url)
+			)
 		);
 
 		// Convert map to object for JSON
@@ -98,7 +130,7 @@ export const GET: RequestHandler = async ({ url }) => {
 			programs[channelId] = channelPrograms;
 		}
 
-		return json({
+		return Response.json({
 			success: true,
 			programs,
 			timeRange: {
@@ -109,7 +141,7 @@ export const GET: RequestHandler = async ({ url }) => {
 	} catch (error) {
 		// Validation errors
 		if (error instanceof ValidationError) {
-			return json(
+			return Response.json(
 				{
 					success: false,
 					error: error.message,
@@ -119,7 +151,7 @@ export const GET: RequestHandler = async ({ url }) => {
 			);
 		}
 		logger.error('[API] Failed to get EPG guide', error instanceof Error ? error : undefined);
-		return json(
+		return Response.json(
 			{
 				success: false,
 				error: error instanceof Error ? error.message : 'Failed to get EPG guide data'

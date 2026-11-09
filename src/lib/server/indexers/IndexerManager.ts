@@ -5,8 +5,8 @@
  * Handles definition loading, indexer creation, and search orchestration.
  */
 
-import { db } from '$lib/server/db';
-import { indexers as indexersTable } from '$lib/server/db/schema';
+import { db } from '#lib/server/db/index.js';
+import { indexers as indexersTable } from '#lib/server/db/schema.js';
 import {
 	type TorrentProtocolSettings,
 	type UsenetProtocolSettings,
@@ -14,9 +14,32 @@ import {
 } from './types/index.js';
 import { eq } from 'drizzle-orm';
 import { randomUUID } from 'node:crypto';
-import { createChildLogger } from '$lib/logging';
+import { createChildLogger } from '#lib/logging/index.js';
+import {
+	decryptSecretJsonValues,
+	encryptSecretJsonValues
+} from '#lib/server/crypto/secretFields.js';
 
 const logger = createChildLogger({ logDomain: 'indexers' as const });
+
+/** AAD purpose for credentials inside indexers.settings. */
+const INDEXER_SETTINGS_PURPOSE = 'indexer-settings';
+
+/** Encrypt credential keys inside an indexer settings object (idempotent). */
+function encryptIndexerSettings(
+	indexerId: string,
+	settings: Record<string, unknown>
+): Record<string, unknown> {
+	return encryptSecretJsonValues(INDEXER_SETTINGS_PURPOSE, indexerId, settings);
+}
+
+/** Decrypt credential envelopes inside an indexer settings object. */
+function decryptIndexerSettings(
+	indexerId: string,
+	settings: Record<string, unknown>
+): Record<string, unknown> {
+	return decryptSecretJsonValues(INDEXER_SETTINGS_PURPOSE, indexerId, settings);
+}
 
 import type {
 	IIndexer,
@@ -38,8 +61,8 @@ import { getPersistentStatusTracker } from './status';
 import { getRateLimitRegistry } from './ratelimit';
 import { cleanupIndexerCookies } from './http/IndexerHttp';
 import { CINEPHAGE_STREAM_DEFINITION_ID } from './types';
-import { getCinephageModuleRegistry } from '$lib/server/cinephage/registry/CinephageModuleRegistry.js';
-import type { CinephageModule } from '$lib/server/cinephage/modules/types.js';
+import { getCinephageModuleRegistry } from '#lib/server/cinephage/registry/CinephageModuleRegistry.js';
+import type { CinephageModule } from '#lib/server/cinephage/modules/types.js';
 
 /** Manager options */
 export interface IndexerManagerOptions {
@@ -96,7 +119,7 @@ export class IndexerManager {
 	/**
 	 * Consult the Cinephage module registry for modules that publish virtual
 	 * indexer rows (capability: providesIndexer). Each such module owns its
-	 * row's lifecycle — we ask it to sync, and it handles idempotent seeding.
+	 * row's lifecycle - we ask it to sync, and it handles idempotent seeding.
 	 */
 	private async syncBuiltinIndexers(): Promise<void> {
 		const registry = getCinephageModuleRegistry();
@@ -256,10 +279,13 @@ export class IndexerManager {
 		// Build protocol settings from config
 		const protocolSettings = this.buildProtocolSettings(config, effectiveProtocol);
 
-		// Insert and return the generated ID
+		// Insert and return the generated ID. The id is generated client-side so
+		// the settings' credential envelope can bind to it (AAD) before insert.
+		const id = randomUUID();
 		const result = await db
 			.insert(indexersTable)
 			.values({
+				id,
 				name: config.name,
 				definitionId: config.definitionId,
 				enabled: config.enabled,
@@ -268,7 +294,11 @@ export class IndexerManager {
 				baseUrl: config.baseUrl ?? defaultUrl,
 				alternateUrls: config.alternateUrls ?? null,
 				priority: config.priority,
-				settings: config.settings as Record<string, string | number | boolean>,
+				rateLimitPerMinute: config.rateLimitPerMinute ?? null,
+				settings: encryptIndexerSettings(
+					id,
+					(config.settings as Record<string, unknown>) ?? {}
+				) as Record<string, string | number | boolean>,
 				protocolSettings: protocolSettings ?? undefined,
 
 				// Search capability toggles
@@ -277,8 +307,7 @@ export class IndexerManager {
 			})
 			.returning({ id: indexersTable.id });
 
-		const id = result[0]?.id;
-		if (!id) {
+		if (!result[0]?.id) {
 			throw new Error('Failed to create indexer: no ID returned');
 		}
 
@@ -338,7 +367,7 @@ export class IndexerManager {
 		// Built-in indexers (e.g. cinephage-stream owned by the CinephageAPI
 		// subsystem's library-streaming module) reject edits to fields the
 		// owning subsystem manages. User can still toggle enable state,
-		// search-mode toggles, and priority — those reflect search behavior
+		// search-mode toggles, and priority - those reflect search behavior
 		// and don't conflict with subsystem-owned config.
 		if (existing.isBuiltIn) {
 			const restricted: Array<keyof typeof updates> = [
@@ -364,7 +393,14 @@ export class IndexerManager {
 		if (updates.baseUrl !== undefined) updateData.baseUrl = updates.baseUrl;
 		if (updates.alternateUrls !== undefined) updateData.alternateUrls = updates.alternateUrls;
 		if (updates.priority !== undefined) updateData.priority = updates.priority;
-		if (updates.settings !== undefined) updateData.settings = updates.settings;
+		if (updates.rateLimitPerMinute !== undefined)
+			updateData.rateLimitPerMinute = updates.rateLimitPerMinute;
+		if (updates.settings !== undefined) {
+			updateData.settings = encryptIndexerSettings(
+				id,
+				(updates.settings as Record<string, unknown>) ?? {}
+			);
+		}
 		if (updates.additionalCategories !== undefined)
 			updateData.additionalCategories = updates.additionalCategories;
 
@@ -460,7 +496,7 @@ export class IndexerManager {
 
 	/** Delete an indexer */
 	async deleteIndexer(id: string): Promise<void> {
-		// Built-in indexers cannot be deleted — they are owned by a subsystem
+		// Built-in indexers cannot be deleted - they are owned by a subsystem
 		// (e.g. CinephageAPI library-streaming owns cinephage-stream). The
 		// subsystem would re-seed the row on the next init anyway.
 		const existing = await this.getIndexer(id);
@@ -656,7 +692,7 @@ export class IndexerManager {
 		id: string;
 		name: string;
 		type: string;
-		language: string;
+		language?: string;
 		description?: string;
 		protocol?: string;
 	}> {
@@ -706,11 +742,15 @@ export class IndexerManager {
 			baseUrl: row.baseUrl,
 			alternateUrls: row.alternateUrls ?? [],
 			priority: row.priority ?? 25,
+			rateLimitPerMinute: row.rateLimitPerMinute ?? null,
 			protocol,
 			// Note: cinephage-stream's settings JSON is no longer used as a
-			// source of truth after migration 103 — its config lives in the
+			// source of truth after migration 103 - its config lives in the
 			// CinephageAPI subsystem tables. The row's settings are null/empty.
-			settings: (row.settings as Record<string, string>) ?? {},
+			settings: decryptIndexerSettings(
+				row.id,
+				(row.settings as Record<string, unknown> | null) ?? {}
+			) as Record<string, string>,
 
 			// Search capability toggles
 			enableAutomaticSearch: row.enableAutomaticSearch ?? true,

@@ -1,8 +1,8 @@
 <script lang="ts">
-	import type { DefinitionSetting } from '$lib/types/indexer';
-	import { HelpCircle, Info, Cookie, Shield, User } from 'lucide-svelte';
-	import * as m from '$lib/paraglide/messages.js';
-	import { isSensitiveDefinitionSetting } from '$lib/shared/sensitiveSettings';
+	import type { DefinitionSetting } from '#lib/types/indexer.js';
+	import { HelpCircle, Info, Cookie, Shield, User } from '@lucide/svelte';
+	import * as m from '#lib/paraglide/messages.js';
+	import { isSensitiveDefinitionSetting } from '#lib/shared/sensitiveSettings.js';
 
 	interface Props {
 		settingsDefinitions: DefinitionSetting[];
@@ -102,7 +102,7 @@
 					<label class="flex cursor-pointer items-start gap-3 py-2">
 						<input
 							type="checkbox"
-							class="checkbox mt-0.5 shrink-0 checkbox-sm"
+							class="checkbox mt-0.5 shrink-0 checkbox-sm checkbox-primary"
 							checked={settings[setting.name] === 'true'}
 							onchange={(e) =>
 								updateSetting(setting.name, e.currentTarget.checked ? 'true' : 'false')}

@@ -1,21 +1,22 @@
 <script lang="ts">
 	import { goto } from '$app/navigation';
-	import { User, Lock, CheckCircle, AlertCircle } from 'lucide-svelte';
-	import { authClient } from '$lib/auth/client.js';
-	import { toasts } from '$lib/stores/toast.svelte';
+	import { User, Lock, CheckCircle, AlertCircle } from '@lucide/svelte';
+	import { authClient } from '#lib/auth/client.js';
+	import { toasts } from '#lib/stores/toast.svelte.js';
+	import { ensureVersionPrefix } from '#lib/version.js';
 
-	const GITHUB_URL = 'https://github.com/MoldyTaint/Cinephage';
+	const GITHUB_URL = 'https://github.com/Cinephage/Cinephage';
 	const DISCORD_URL = 'https://discord.gg/scGCBTSWEt';
 
 	let { data } = $props();
-	import { createApiKeys } from '$lib/api';
+	import { createApiKeys } from '#lib/api/index.js';
 	import {
 		isHardReservedUsername,
 		USERNAME_MAX_LENGTH,
 		USERNAME_MIN_LENGTH,
 		USERNAME_PATTERN
-	} from '$lib/auth/username-policy.js';
-	import * as m from '$lib/paraglide/messages.js';
+	} from '#lib/auth/username-policy.js';
+	import * as m from '#lib/paraglide/messages.js';
 
 	let currentStep = $state(1);
 	let isLoading = $state(false);
@@ -386,7 +387,7 @@
 			{/if}
 
 			<div class="mt-6 flex items-center justify-center gap-4 text-xs text-base-content/40">
-				<span>v{data.version}</span>
+				<span>{ensureVersionPrefix(data.version)}</span>
 				<a
 					href={DISCORD_URL}
 					target="_blank"

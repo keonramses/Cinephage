@@ -2,10 +2,10 @@
  * Integration tests for the two-tier stalled download policy in
  * DownloadMonitorService.handleStalledDownloads.
  *
- * Policy (2026-08-27 audit follow-up): stalling is not inherently bad —
+ * Policy (2026-08-27 audit follow-up): stalling is not inherently bad -
  * torrents routinely resume when a seeder returns. Two tiers:
  * - Low progress (at/below threshold): removed after a LONG window (3 days,
- *   was 1 hour) — these never got off the ground.
+ *   was 1 hour) - these never got off the ground.
  * - Meaningful progress (above threshold): previously never reaped (zombie
  *   accumulation); now removed after an even longer window (14 days) so the
  *   system eventually tries a different release.
@@ -15,11 +15,11 @@ import { describe, it, expect, beforeAll, beforeEach, afterAll, vi } from 'vites
 import { randomUUID } from 'node:crypto';
 import { eq } from 'drizzle-orm';
 import { createTestDb, destroyTestDb, clearTestDb } from '../../../../test/db-helper';
-import { downloadClients, downloadQueue } from '$lib/server/db/schema';
+import { downloadClients, downloadQueue } from '#lib/server/db/schema.js';
 
 const testDb = createTestDb();
 
-vi.mock('$lib/server/db', () => ({
+vi.mock('#lib/server/db/index.js', () => ({
 	get db() {
 		return testDb.db;
 	},
@@ -29,7 +29,7 @@ vi.mock('$lib/server/db', () => ({
 	initializeDatabase: vi.fn().mockResolvedValue(undefined)
 }));
 
-vi.mock('$lib/server/db/index.js', () => ({
+vi.mock('#lib/server/db/index.js', () => ({
 	get db() {
 		return testDb.db;
 	},
@@ -40,7 +40,7 @@ vi.mock('$lib/server/db/index.js', () => ({
 }));
 
 const addToBlocklist = vi.fn().mockResolvedValue(undefined);
-vi.mock('$lib/server/monitoring/specifications/BlocklistSpecification.js', () => ({
+vi.mock('#lib/server/monitoring/specifications/BlocklistSpecification.js', () => ({
 	blocklistService: { addToBlocklist }
 }));
 

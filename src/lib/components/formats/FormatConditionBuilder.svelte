@@ -1,7 +1,8 @@
 <script lang="ts">
-	import * as m from '$lib/paraglide/messages.js';
+	import { ALL_LANGUAGE_OPTIONS } from '#lib/shared/languages.js';
+	import * as m from '#lib/paraglide/messages.js';
 	import { SvelteMap } from 'svelte/reactivity';
-	import type { FormatCondition, ConditionType } from '$lib/types/format';
+	import type { FormatCondition, ConditionType } from '#lib/types/format.js';
 	import {
 		CONDITION_TYPE_LABELS,
 		CONDITION_TYPE_DESCRIPTIONS,
@@ -22,8 +23,8 @@
 		AVAILABLE_FLAGS,
 		FLAG_LABELS,
 		FLAG_DESCRIPTIONS
-	} from '$lib/types/format';
-	import { Plus, Trash2, Info, AlertCircle } from 'lucide-svelte';
+	} from '#lib/types/format.js';
+	import { Plus, Trash2, Info, AlertCircle } from '@lucide/svelte';
 
 	interface Props {
 		conditions: FormatCondition[];
@@ -32,6 +33,8 @@
 	}
 
 	let { conditions, readonly = false, onUpdate }: Props = $props();
+
+	const LANGUAGE_OPTIONS = ALL_LANGUAGE_OPTIONS;
 
 	// Condition types available for selection
 	const conditionTypes: ConditionType[] = [
@@ -45,6 +48,7 @@
 		'streaming_service',
 		'flag',
 		'indexer',
+		'language',
 		'release_title',
 		'release_group'
 	];
@@ -83,6 +87,7 @@
 			delete condition.streamingService;
 			delete condition.flag;
 			delete condition.indexer;
+			delete condition.language;
 
 			// Set default for the new type
 			switch (updates.type) {
@@ -118,6 +123,9 @@
 					break;
 				case 'indexer':
 					condition.indexer = '';
+					break;
+				case 'language':
+					condition.language = 'en';
 					break;
 			}
 		}
@@ -372,6 +380,20 @@
 										</div>
 									{/if}
 								</div>
+							{:else if condition.type === 'language'}
+								<select
+									id="condition-value-{index}"
+									class="select-bordered select select-sm"
+									value={condition.language}
+									disabled={readonly}
+									onchange={(e) => updateCondition(index, { language: e.currentTarget.value })}
+								>
+									<option value="multi">{m.formats_languageOptionMulti()}</option>
+									<option value="orig">{m.formats_languageOptionOriginal()}</option>
+									{#each LANGUAGE_OPTIONS as lang (lang.code)}
+										<option value={lang.code}>{lang.name} ({lang.code})</option>
+									{/each}
+								</select>
 							{:else if condition.type === 'indexer'}
 								<input
 									id="condition-value-{index}"
@@ -391,7 +413,7 @@
 						<label class="flex cursor-pointer items-center gap-2">
 							<input
 								type="checkbox"
-								class="checkbox checkbox-sm"
+								class="checkbox checkbox-sm checkbox-primary"
 								checked={condition.required}
 								disabled={readonly}
 								onchange={(e) => updateCondition(index, { required: e.currentTarget.checked })}
@@ -405,7 +427,7 @@
 						<label class="flex cursor-pointer items-center gap-2">
 							<input
 								type="checkbox"
-								class="checkbox checkbox-sm"
+								class="checkbox checkbox-sm checkbox-primary"
 								checked={condition.negate}
 								disabled={readonly}
 								onchange={(e) => updateCondition(index, { negate: e.currentTarget.checked })}

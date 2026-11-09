@@ -8,11 +8,11 @@
 import { describe, it, expect, beforeEach, afterAll, vi } from 'vitest';
 import { createTestDb, destroyTestDb } from '../../../../test/db-helper';
 import { namingSettingsService } from './NamingSettingsService';
-import { namingSettings } from '$lib/server/db/schema';
+import { namingSettings } from '#lib/server/db/schema.js';
 
 const testDb = createTestDb();
 
-vi.mock('$lib/server/db', () => ({
+vi.mock('#lib/server/db/index.js', () => ({
 	get db() {
 		return testDb.db;
 	},
@@ -120,7 +120,7 @@ describe('buildMovieFolderName', () => {
 				'Star Wars: Episode IV - A New Hope'
 			);
 
-			// Default format uses {CleanTitle} — should render the first param (English title)
+			// Default format uses {CleanTitle} - should render the first param (English title)
 			expect(result).toContain('Star Wars');
 			expect(result).toContain('1977');
 		});

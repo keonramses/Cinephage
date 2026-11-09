@@ -12,10 +12,10 @@
 		CheckCircle,
 		AlertTriangle,
 		XCircle
-	} from 'lucide-svelte';
-	import type { MediaBrowserServerPublic } from '$lib/server/notifications/mediabrowser/types';
-	import * as m from '$lib/paraglide/messages.js';
-	import { formatDisplayDate } from '$lib/utils/format.js';
+	} from '@lucide/svelte';
+	import type { MediaBrowserServerPublic } from '#lib/server/notifications/mediabrowser/types.js';
+	import * as m from '#lib/paraglide/messages.js';
+	import { formatDisplayDate } from '#lib/utils/format.js';
 
 	interface Props {
 		servers: MediaBrowserServerPublic[];
@@ -118,7 +118,7 @@
 				<label class="flex items-center gap-2 text-xs font-medium">
 					<input
 						type="checkbox"
-						class="checkbox checkbox-sm"
+						class="checkbox checkbox-sm checkbox-primary"
 						checked={allSelected}
 						indeterminate={someSelected}
 						onchange={(e) => onSelectAll(e.currentTarget.checked)}
@@ -143,7 +143,7 @@
 					<div class="flex min-w-0 items-start gap-2.5">
 						<input
 							type="checkbox"
-							class="checkbox checkbox-sm"
+							class="checkbox checkbox-sm checkbox-primary"
 							checked={selectedIds.has(server.id)}
 							onchange={(e) => onSelect(server.id, e.currentTarget.checked)}
 						/>
@@ -263,7 +263,7 @@
 					<th class="w-10">
 						<input
 							type="checkbox"
-							class="checkbox checkbox-sm"
+							class="checkbox checkbox-sm checkbox-primary"
 							checked={allSelected}
 							indeterminate={someSelected}
 							onchange={(e) => onSelectAll(e.currentTarget.checked)}
@@ -325,7 +325,7 @@
 						<td class="w-10">
 							<input
 								type="checkbox"
-								class="checkbox checkbox-sm"
+								class="checkbox checkbox-sm checkbox-primary"
 								checked={selectedIds.has(server.id)}
 								onchange={(e) => onSelect(server.id, e.currentTarget.checked)}
 							/>

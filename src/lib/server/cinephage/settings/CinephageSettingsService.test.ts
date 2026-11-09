@@ -1,11 +1,11 @@
 import { describe, it, expect, afterAll, vi, beforeEach } from 'vitest';
 import { createTestDb, destroyTestDb, type TestDatabase } from '../../../../test/db-helper.js';
-import { cinephageApiConfig, cinephageApiModules } from '$lib/server/db/schema.js';
+import { cinephageApiConfig, cinephageApiModules } from '#lib/server/db/schema.js';
 import { eq } from 'drizzle-orm';
 
 const testDb: TestDatabase = createTestDb();
 
-vi.mock('$lib/server/db', () => ({
+vi.mock('#lib/server/db/index.js', () => ({
 	get db() {
 		return testDb.db;
 	},
@@ -15,7 +15,7 @@ vi.mock('$lib/server/db', () => ({
 	initializeDatabase: vi.fn().mockResolvedValue(undefined)
 }));
 
-vi.mock('$lib/server/db/index.js', () => ({
+vi.mock('#lib/server/db/index.js', () => ({
 	get db() {
 		return testDb.db;
 	},
@@ -137,7 +137,7 @@ describe('CinephageSettingsService', () => {
 			await service.updateModuleSettings('library-streaming', { useHttps: true });
 			await service.updateModuleSettings('library-streaming', { externalHost: 'foo' });
 			const mod = await service.getModuleConfig('library-streaming');
-			// Settings are replaced, not merged — modules own their full settings shape
+			// Settings are replaced, not merged - modules own their full settings shape
 			expect(mod.settings).toEqual({ externalHost: 'foo' });
 		});
 	});

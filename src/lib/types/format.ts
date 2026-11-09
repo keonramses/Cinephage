@@ -15,7 +15,7 @@ import type {
 	AudioCodec,
 	AudioChannels,
 	HdrFormat
-} from '$lib/server/scoring';
+} from '#lib/server/scoring/index.js';
 
 // Re-export server types for convenience
 export type {
@@ -117,7 +117,8 @@ export const CONDITION_TYPE_LABELS: Record<ConditionType, string> = {
 	hdr: 'HDR Format',
 	streaming_service: 'Streaming Service',
 	flag: 'Special Flag',
-	indexer: 'Indexer Name'
+	indexer: 'Indexer Name',
+	language: 'Audio Language'
 };
 
 /**
@@ -135,7 +136,9 @@ export const CONDITION_TYPE_DESCRIPTIONS: Record<ConditionType, string> = {
 	hdr: 'Match against the detected HDR format (Dolby Vision, HDR10+, etc.)',
 	streaming_service: 'Match against the detected streaming service (Netflix, Amazon, etc.)',
 	flag: 'Match against special release flags (Remux, Repack, Proper, 3D)',
-	indexer: 'Match against the indexer name that provided the release (YTS, etc.)'
+	indexer: 'Match against the indexer name that provided the release (YTS, etc.)',
+	language:
+		'Match against languages parsed from the release name, incl. the Multi and Original markers'
 };
 
 /**
@@ -300,6 +303,20 @@ export const HDR_LABELS: Record<NonNullable<HdrFormat> | 'sdr', string> = {
 	pq: 'PQ',
 	sdr: 'SDR (No HDR)'
 };
+
+/**
+ * Render a set of detected HDR formats for display.
+ *
+ * Combo releases legitimately carry more than one format ("Dolby Vision +
+ * HDR10+"), so they are joined rather than collapsed to the headline format.
+ * Returns null when nothing was detected.
+ */
+export function formatHdrFormats(formats: readonly string[] | null | undefined): string | null {
+	if (!formats || formats.length === 0) return null;
+	return formats
+		.map((format) => HDR_LABELS[format as NonNullable<HdrFormat>] ?? format)
+		.join(' + ');
+}
 
 /**
  * Available streaming services for condition matching

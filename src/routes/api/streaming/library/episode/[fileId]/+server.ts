@@ -12,12 +12,12 @@ import { createReadStream, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { Readable } from 'node:stream';
 import type { RequestHandler } from './$types';
-import { db } from '$lib/server/db/index.js';
-import { episodeFiles, series, rootFolders } from '$lib/server/db/schema.js';
+import { db } from '#lib/server/db/index.js';
+import { episodeFiles, series, rootFolders } from '#lib/server/db/schema.js';
 import { eq } from 'drizzle-orm';
-import { isPathInsideManagedRoot } from '$lib/server/filesystem/path-guard.js';
-import { getContentType, parseRangeHeader } from '$lib/server/streaming/usenet/types.js';
-import { createChildLogger } from '$lib/logging';
+import { isPathInsideManagedRoot } from '#lib/server/filesystem/path-guard.js';
+import { getContentType, parseRangeHeader } from '#lib/server/streaming/usenet/types.js';
+import { createChildLogger } from '#lib/logging/index.js';
 
 const logger = createChildLogger({
 	logDomain: 'streams' as const,
@@ -47,7 +47,7 @@ async function resolveEpisodeFile(
 	if (!(await isPathInsideManagedRoot(absolutePath))) {
 		logger.warn(
 			{ fileId, absolutePath },
-			'[LocalEpisodeStream] Path outside managed root — rejecting'
+			'[LocalEpisodeStream] Path outside managed root - rejecting'
 		);
 		return null;
 	}

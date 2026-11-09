@@ -489,6 +489,7 @@ export const searchBlockSchema = z.object({
 	preprocessingfilters: z.array(filterBlockSchema).optional(),
 	rows: rowsBlockSchema.optional(),
 	fields: z.record(z.string(), fieldDefinitionSchema).optional(),
+	response: responseBlockSchema.optional(),
 
 	// Database query configuration (for streaming protocol with dataSource: 'database')
 	movieQuery: databaseQuerySchema.optional(),
@@ -571,7 +572,7 @@ export const yamlDefinitionSchema = z.object({
 	name: z.string(),
 	description: z.string().optional(),
 	type: z.enum(['public', 'semi-private', 'private']).default('public'),
-	language: z.string().default('en-US'),
+	language: z.string().optional(),
 	encoding: z.string().default('UTF-8'),
 	// Protocol type: torrent, usenet, or streaming
 	protocol: z.enum(['torrent', 'usenet', 'streaming']).default('torrent'),

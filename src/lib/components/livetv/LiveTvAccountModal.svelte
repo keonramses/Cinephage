@@ -1,21 +1,22 @@
 <script lang="ts">
-	import { X, Loader2, XCircle, Tv, Radio, List, Globe } from 'lucide-svelte';
-	import ModalWrapper from '$lib/components/ui/modal/ModalWrapper.svelte';
-	import { TestResult } from '$lib/components/ui/modal';
+	import { X, Loader2, XCircle, Tv, Radio, List, Globe } from '@lucide/svelte';
+	import ModalWrapper from '#lib/components/ui/modal/ModalWrapper.svelte';
+	import { TestResult } from '#lib/components/ui/modal/index.js';
 	import LiveTvProviderPicker from './LiveTvProviderPicker.svelte';
 	import StalkerAccountForm from './forms/StalkerAccountForm.svelte';
 	import XstreamAccountForm from './forms/XstreamAccountForm.svelte';
 	import M3uAccountForm from './forms/M3uAccountForm.svelte';
 	import CinephageIptvAccountForm from './forms/CinephageIptvAccountForm.svelte';
+	import CinephageLiveAccountForm from './forms/CinephageLiveAccountForm.svelte';
 	import { getProviderDefinition } from './providerDefinitions';
 	import type {
 		LiveTvAccount,
 		LiveTvProviderType,
 		LiveTvAccountTestResult
-	} from '$lib/types/livetv';
-	import * as m from '$lib/paraglide/messages.js';
-	import { isBlankOrRedacted } from '$lib/shared/sensitiveSettings';
-	import { formatDisplayDate } from '$lib/utils/format.js';
+	} from '#lib/types/livetv.js';
+	import * as m from '#lib/paraglide/messages.js';
+	import { isBlankOrRedacted, REDACTED_VALUE } from '#lib/shared/sensitiveSettings.js';
+	import { formatDisplayDate } from '#lib/utils/format.js';
 
 	interface Props {
 		open: boolean;
@@ -42,11 +43,15 @@
 		epgUrl: string;
 		autoRefresh: boolean;
 		enabled: boolean;
+		/** Stalker portal UI language (2-letter code); defaults to 'en'. */
+		language?: string;
 		cinephageIptvConfig?: { countries: string[] };
 	}
 
 	export interface TestConfig {
 		providerType: LiveTvProviderType;
+		/** Stored account to resolve [REDACTED] secrets against (edit mode). */
+		accountId?: string;
 		portalUrl?: string;
 		macAddress?: string;
 		baseUrl?: string;
@@ -55,6 +60,8 @@
 		url?: string;
 		fileContent?: string;
 		epgUrl?: string;
+		/** Stalker portal UI language (2-letter code); defaults to 'en'. */
+		language?: string;
 		cinephageIptvConfig?: { countries: string[] };
 	}
 
@@ -81,6 +88,7 @@
 	// Stalker form state
 	let portalUrl = $state('');
 	let macAddress = $state('');
+	let language = $state('en');
 
 	// XStream form state
 	let baseUrl = $state('');
@@ -126,6 +134,7 @@
 			// Stalker fields
 			portalUrl = account?.stalkerConfig?.portalUrl ?? '';
 			macAddress = account?.stalkerConfig?.macAddress ?? '';
+			language = account?.stalkerConfig?.language ?? 'en';
 
 			// XStream fields
 			baseUrl = account?.xstreamConfig?.baseUrl ?? '';
@@ -169,6 +178,8 @@
 
 	const isCinephageIptvValid = $derived(name.trim().length > 0 && selectedCountries.length > 0);
 
+	const isCinephageLiveValid = $derived(name.trim().length > 0);
+
 	const canSubmit = $derived(() => {
 		switch (selectedProvider) {
 			case 'stalker':
@@ -179,6 +190,8 @@
 				return isM3uValid();
 			case 'cinephage-iptv':
 				return isCinephageIptvValid;
+			case 'cinephage-live':
+				return isCinephageLiveValid;
 			default:
 				return false;
 		}
@@ -197,6 +210,7 @@
 			case 'stalker':
 				data.portalUrl = portalUrl.trim();
 				data.macAddress = macAddress.toUpperCase();
+				data.language = language;
 				break;
 			case 'xstream':
 				data.baseUrl = baseUrl.trim();
@@ -215,6 +229,9 @@
 			case 'cinephage-iptv':
 				data.cinephageIptvConfig = { countries: selectedCountries };
 				break;
+			case 'cinephage-live':
+				// No provider config: catalog + streams use the instance identity.
+				break;
 		}
 
 		return data;
@@ -225,18 +242,23 @@
 			providerType: selectedProvider as LiveTvProviderType
 		};
 
+		// In edit mode the stored credential never reaches this browser, so an
+		// untouched password field tests against the server-side value via the
+		// redaction marker + accountId.
+		if (mode === 'edit' && account) {
+			config.accountId = account.id;
+		}
+
 		switch (selectedProvider) {
 			case 'stalker':
 				config.portalUrl = portalUrl.trim();
 				config.macAddress = macAddress.toUpperCase();
+				config.language = language;
 				break;
 			case 'xstream':
 				config.baseUrl = baseUrl.trim();
 				config.username = username.trim();
-				config.password =
-					(isBlankOrRedacted(password?.trim())
-						? account?.xstreamConfig?.password
-						: password.trim()) || '';
+				config.password = isBlankOrRedacted(password?.trim()) ? REDACTED_VALUE : password.trim();
 				if (epgUrl.trim()) {
 					config.epgUrl = epgUrl.trim();
 				}
@@ -253,6 +275,9 @@
 				break;
 			case 'cinephage-iptv':
 				config.cinephageIptvConfig = { countries: selectedCountries };
+				break;
+			case 'cinephage-live':
+				// No provider config: catalog + streams use the instance identity.
 				break;
 		}
 
@@ -363,6 +388,8 @@
 							<List class="h-5 w-5 text-primary" />
 						{:else if selectedProvider === 'cinephage-iptv'}
 							<Globe class="h-5 w-5 text-primary" />
+						{:else if selectedProvider === 'cinephage-live'}
+							<Tv class="h-5 w-5 text-primary" />
 						{/if}
 					</div>
 					<div>
@@ -390,12 +417,14 @@
 				{macAddress}
 				{epgUrl}
 				{enabled}
+				{language}
 				{mode}
 				onNameChange={(v) => (name = v)}
 				onPortalUrlChange={(v) => (portalUrl = v)}
 				onMacAddressChange={(v) => (macAddress = v)}
 				onEpgUrlChange={(v) => (epgUrl = v)}
 				onEnabledChange={(v) => (enabled = v)}
+				onLanguageChange={(v) => (language = v)}
 			/>
 		{:else if selectedProvider === 'xstream'}
 			<XstreamAccountForm
@@ -447,6 +476,14 @@
 				{mode}
 				onNameChange={(v) => (name = v)}
 				onCountriesChange={(v) => (selectedCountries = v)}
+				onEnabledChange={(v) => (enabled = v)}
+			/>
+		{:else if selectedProvider === 'cinephage-live'}
+			<CinephageLiveAccountForm
+				{name}
+				{enabled}
+				{mode}
+				onNameChange={(v) => (name = v)}
 				onEnabledChange={(v) => (enabled = v)}
 			/>
 		{/if}

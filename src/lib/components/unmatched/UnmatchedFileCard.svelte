@@ -1,5 +1,5 @@
 <script lang="ts">
-	import * as m from '$lib/paraglide/messages.js';
+	import * as m from '#lib/paraglide/messages.js';
 	import {
 		Clapperboard,
 		Tv,
@@ -8,9 +8,9 @@
 		AlertCircle,
 		Search,
 		Trash2
-	} from 'lucide-svelte';
-	import type { UnmatchedFile } from '$lib/types/unmatched.js';
-	import { formatDisplayDateShort } from '$lib/utils/format.js';
+	} from '@lucide/svelte';
+	import type { UnmatchedFile } from '#lib/types/unmatched.js';
+	import { formatDisplayDateShort } from '#lib/utils/format.js';
 
 	interface Props {
 		file: UnmatchedFile;
@@ -122,7 +122,7 @@
 		{#if showCheckboxes}
 			<input
 				type="checkbox"
-				class="checkbox mt-1 shrink-0 checkbox-sm"
+				class="checkbox mt-1 shrink-0 checkbox-sm checkbox-primary"
 				checked={selected}
 				onchange={onSelect}
 			/>

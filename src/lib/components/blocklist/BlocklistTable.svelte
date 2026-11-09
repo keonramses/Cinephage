@@ -1,6 +1,6 @@
 <script lang="ts">
-	import { ChevronDown, ChevronUp, Trash2 } from 'lucide-svelte';
-	import * as m from '$lib/paraglide/messages.js';
+	import { ChevronDown, ChevronUp, Trash2 } from '@lucide/svelte';
+	import * as m from '#lib/paraglide/messages.js';
 
 	import type { BlocklistEntry } from './index.js';
 
@@ -56,7 +56,7 @@
 		return map[reason] ?? reason;
 	}
 
-	import { getLocale } from '$lib/paraglide/runtime.js';
+	import { getLocale } from '#lib/paraglide/runtime.js';
 
 	function formatDate(dateStr: string | null): string {
 		if (!dateStr) return '-';
@@ -109,7 +109,7 @@
 				<th class="w-10">
 					<input
 						type="checkbox"
-						class="checkbox checkbox-xs"
+						class="checkbox checkbox-xs checkbox-primary"
 						checked={allSelected}
 						indeterminate={someSelected}
 						onchange={(e) => onSelectAll((e.currentTarget as HTMLInputElement).checked)}
@@ -179,7 +179,7 @@
 					<td>
 						<input
 							type="checkbox"
-							class="checkbox checkbox-xs"
+							class="checkbox checkbox-xs checkbox-primary"
 							checked={selectedIds.has(entry.id)}
 							onchange={(e) => onSelect(entry.id, (e.currentTarget as HTMLInputElement).checked)}
 							aria-label={m.blocklist_tableSelectEntry({ title: entry.title })}

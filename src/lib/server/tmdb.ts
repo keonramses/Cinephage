@@ -1,6 +1,8 @@
 import { db } from './db';
-import { settings } from './db/schema';
+import { languageSettings, settings } from './db/schema';
 import { eq } from 'drizzle-orm';
+import { normalizeMetadataLocale, normalizeRegionCode } from '#lib/server/languages/normalize.js';
+import { decryptSettingValue } from '#lib/server/settings/secretSettings.js';
 import type {
 	GlobalTmdbFilters,
 	MovieDetails,
@@ -11,10 +13,11 @@ import type {
 	Collection,
 	PersonDetails,
 	PersonCombinedCredits,
-	ReleaseDatesResponse
-} from '$lib/types/tmdb';
-import { TMDB } from '$lib/config/constants';
-import { createChildLogger } from '$lib/logging';
+	ReleaseDatesResponse,
+	TmdbNetwork
+} from '#lib/types/tmdb.js';
+import { DISCOVER_NETWORKS, TMDB } from '#lib/config/constants.js';
+import { createChildLogger } from '#lib/logging/index.js';
 
 const logger = createChildLogger({ logDomain: 'system' as const });
 import { tmdbCache, getCacheKey } from './tmdb-cache';
@@ -40,11 +43,19 @@ const inFlightRequests = new Map<string, Promise<unknown>>();
 // These settings change very rarely (admin-only operations).
 const SETTINGS_CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
 let _cachedApiKey: string | null = null;
-let _cachedFilters: GlobalTmdbFilters | null = null;
+let _cachedFilters: Partial<GlobalTmdbFilters> | null = null;
 let _settingsCacheTimestamp = 0;
 let _settingsCachePromise: Promise<void> | null = null;
 
-async function loadTmdbSettings(): Promise<{ apiKey: string; filters: GlobalTmdbFilters | null }> {
+// Row id of the language_settings singleton. Kept as a literal (instead of
+// importing LanguageSettingsService) to avoid import cycles - tmdb.ts sits
+// below most services in the dependency graph.
+const LANGUAGE_SETTINGS_SINGLETON_ID = 'singleton';
+
+async function loadTmdbSettings(): Promise<{
+	apiKey: string;
+	filters: Partial<GlobalTmdbFilters> | null;
+}> {
 	const now = Date.now();
 	if (_cachedApiKey !== null && now - _settingsCacheTimestamp < SETTINGS_CACHE_TTL_MS) {
 		return { apiKey: _cachedApiKey, filters: _cachedFilters };
@@ -59,15 +70,39 @@ async function loadTmdbSettings(): Promise<{ apiKey: string; filters: GlobalTmdb
 					db.query.settings.findFirst({ where: eq(settings.key, 'global_filters') })
 				]);
 
-				_cachedApiKey = apiKeySetting?.value ?? null;
-				_cachedFilters = null;
+				_cachedApiKey = decryptSettingValue('tmdb_api_key', apiKeySetting?.value) ?? null;
+
+				// language_settings is the TMDB locale/region authority. It is read
+				// independently of global_filters: a fresh install without the
+				// legacy row must still honor the Languages hub, and the legacy row
+				// being absent/unparseable must not silently force en-US.
+				let filters: Partial<GlobalTmdbFilters> = {};
 				if (filtersSetting) {
 					try {
-						_cachedFilters = JSON.parse(filtersSetting.value);
+						filters = JSON.parse(filtersSetting.value) as Partial<GlobalTmdbFilters>;
 					} catch (e) {
 						logger.error({ err: e }, 'Failed to parse global filters');
 					}
 				}
+
+				let localeRow: typeof languageSettings.$inferSelect | undefined;
+				try {
+					localeRow = await db.query.languageSettings.findFirst({
+						where: eq(languageSettings.id, LANGUAGE_SETTINGS_SINGLETON_ID)
+					});
+				} catch (e) {
+					logger.warn({ err: e }, 'Failed to read language_settings for TMDB locale');
+				}
+				const locale = normalizeMetadataLocale(localeRow?.metadataLocale);
+				if (locale) {
+					filters.language = locale;
+				}
+				const region = normalizeRegionCode(localeRow?.region);
+				if (region) {
+					filters.region = region;
+				}
+
+				_cachedFilters = Object.keys(filters).length > 0 ? filters : null;
 				_settingsCacheTimestamp = Date.now();
 			} finally {
 				_settingsCachePromise = null;
@@ -104,7 +139,7 @@ async function fetchWithRetry(url: string, options?: RequestInit, retries = 3): 
 		await new Promise((resolve) => setTimeout(resolve, delayMs));
 	}
 
-	// Unreachable — satisfies TypeScript return type
+	// Unreachable - satisfies TypeScript return type
 	return fetch(url, options);
 }
 
@@ -139,7 +174,13 @@ export const tmdb = {
 		const isGetRequest = !options.method || options.method === 'GET';
 
 		const { apiKey, filters } = await loadTmdbSettings();
-		const cacheKey = getCacheKey(path, skipFilters, filters?.language, skipKeywordBlocklist);
+		const cacheKey = getCacheKey(
+			path,
+			skipFilters,
+			filters?.language,
+			skipKeywordBlocklist,
+			filters?.region
+		);
 
 		if (isGetRequest) {
 			const cached = tmdbCache.get(cacheKey);
@@ -162,7 +203,7 @@ export const tmdb = {
 				url.searchParams.set('api_key', apiKey);
 
 				// Apply Global Filters (Pre-request)
-				// Only apply as defaults — caller's explicit params take precedence.
+				// Only apply as defaults - caller's explicit params take precedence.
 				if (filters && !skipFilters) {
 					if (filters.include_adult !== undefined && !url.searchParams.has('include_adult')) {
 						url.searchParams.set('include_adult', String(filters.include_adult));
@@ -186,13 +227,15 @@ export const tmdb = {
 						}
 					}
 
-					// Apply Discover-specific filters — only when caller hasn't set them
+					// Apply Discover-specific filters - only when caller hasn't set them
 					if (path.includes('/discover/')) {
-						if (filters.min_vote_average > 0 && !url.searchParams.has('vote_average.gte')) {
-							url.searchParams.set('vote_average.gte', String(filters.min_vote_average));
+						const minVoteAverage = filters.min_vote_average ?? 0;
+						const minVoteCount = filters.min_vote_count ?? 0;
+						if (minVoteAverage > 0 && !url.searchParams.has('vote_average.gte')) {
+							url.searchParams.set('vote_average.gte', String(minVoteAverage));
 						}
-						if (filters.min_vote_count > 0 && !url.searchParams.has('vote_count.gte')) {
-							url.searchParams.set('vote_count.gte', String(filters.min_vote_count));
+						if (minVoteCount > 0 && !url.searchParams.has('vote_count.gte')) {
+							url.searchParams.set('vote_count.gte', String(minVoteCount));
 						}
 						if (
 							filters.excluded_genre_ids &&
@@ -206,7 +249,7 @@ export const tmdb = {
 					// Apply globally blocked keywords as without_keywords for discover paths
 					if (path.includes('/discover/') && !skipKeywordBlocklist) {
 						const { keywordBlocklistService } =
-							await import('$lib/server/settings/KeywordBlocklistService.js');
+							await import('#lib/server/settings/KeywordBlocklistService.js');
 						const blockedIds = await keywordBlocklistService.getBlockedKeywordIds();
 						if (blockedIds.length > 0) {
 							const existing = url.searchParams.get('without_keywords');
@@ -215,6 +258,22 @@ export const tmdb = {
 							url.searchParams.set('without_keywords', merged.join(','));
 						}
 					}
+				}
+
+				// Image language follows the effective response language: a
+				// details request asking for images gets `null,<base>` for the
+				// locale that will actually be used (caller param wins, then
+				// language_settings metadata_locale via filters).
+				const effectiveLanguage = url.searchParams.get('language') ?? filters?.language;
+				if (
+					effectiveLanguage &&
+					!url.searchParams.has('include_image_language') &&
+					url.searchParams.has('append_to_response')
+				) {
+					url.searchParams.set(
+						'include_image_language',
+						`null,${effectiveLanguage.split('-')[0].toLowerCase()}`
+					);
 				}
 
 				const res = await fetchWithRetry(url.toString(), options);
@@ -245,33 +304,29 @@ export const tmdb = {
 						adult?: boolean;
 					}
 
+					const resolvedFilters = filters;
+					const minVoteAverage = resolvedFilters.min_vote_average ?? 0;
+					const minVoteCount = resolvedFilters.min_vote_count ?? 0;
+					const excludedGenreIds = resolvedFilters.excluded_genre_ids ?? [];
+
 					data.results = data.results.filter((item: FilterableItem) => {
 						// Filter by Score
-						if (
-							filters!.min_vote_average > 0 &&
-							(item.vote_average ?? 0) < filters!.min_vote_average
-						) {
+						if (minVoteAverage > 0 && (item.vote_average ?? 0) < minVoteAverage) {
 							return false;
 						}
 						// Filter by Vote Count
-						if (filters!.min_vote_count > 0 && (item.vote_count ?? 0) < filters!.min_vote_count) {
+						if (minVoteCount > 0 && (item.vote_count ?? 0) < minVoteCount) {
 							return false;
 						}
 						// Filter by Excluded Genres
-						if (
-							filters!.excluded_genre_ids &&
-							filters!.excluded_genre_ids.length > 0 &&
-							item.genre_ids
-						) {
-							const hasExcludedGenre = item.genre_ids.some((id) =>
-								filters!.excluded_genre_ids.includes(id)
-							);
+						if (excludedGenreIds.length > 0 && item.genre_ids) {
+							const hasExcludedGenre = item.genre_ids.some((id) => excludedGenreIds.includes(id));
 							if (hasExcludedGenre) {
 								return false;
 							}
 						}
 						// Filter by Adult (Double check)
-						if (!filters!.include_adult && item.adult) {
+						if (!resolvedFilters.include_adult && item.adult) {
 							return false;
 						}
 						return true;
@@ -301,21 +356,29 @@ export const tmdb = {
 	async getMovieReleaseInfo(id: number): Promise<MovieReleaseInfo> {
 		return this.fetch(`/movie/${id}?append_to_response=release_dates`) as Promise<MovieReleaseInfo>;
 	},
-	async getMovie(id: number): Promise<MovieDetails> {
-		return this.fetch(
-			`/movie/${id}?append_to_response=credits,videos,images,recommendations,similar,watch/providers,release_dates,keywords&include_image_language=null,en`
-		) as Promise<MovieDetails>;
+	async getMovie(id: number, language?: string | null): Promise<MovieDetails> {
+		const params = new URLSearchParams({
+			append_to_response:
+				'credits,videos,images,recommendations,similar,watch/providers,release_dates,keywords'
+		});
+		if (language) params.set('language', language);
+		return this.fetch(`/movie/${id}?${params.toString()}`) as Promise<MovieDetails>;
 	},
 	async getTVShow(id: number, language?: string | null): Promise<TVShowDetails> {
-		const languageQuery = language ? `language=${language}&` : '';
-		return this.fetch(
-			`/tv/${id}?${languageQuery}append_to_response=credits,videos,images,recommendations,similar,watch/providers,content_ratings,keywords&include_image_language=null,en`
-		) as Promise<TVShowDetails>;
+		const params = new URLSearchParams({
+			append_to_response:
+				'credits,videos,images,recommendations,similar,watch/providers,content_ratings,keywords'
+		});
+		if (language) params.set('language', language);
+		return this.fetch(`/tv/${id}?${params.toString()}`) as Promise<TVShowDetails>;
 	},
 	async getSeason(tvId: number, seasonNumber: number, language?: string | null): Promise<Season> {
-		return this.fetch(
-			`/tv/${tvId}/season/${seasonNumber}${language ? `?language=${language}` : ''}`
-		) as Promise<Season>;
+		const base = `/tv/${tvId}/season/${seasonNumber}`;
+		if (!language) {
+			return this.fetch(base) as Promise<Season>;
+		}
+		const params = new URLSearchParams({ language });
+		return this.fetch(`${base}?${params.toString()}`) as Promise<Season>;
 	},
 	async getEpisodeGroups(tvId: number): Promise<EpisodeGroupsResponse> {
 		return this.fetch(`/tv/${tvId}/episode_groups`) as Promise<EpisodeGroupsResponse>;
@@ -401,6 +464,23 @@ export const tmdb = {
 	 */
 	async getTvAlternateTitles(tmdbId: number): Promise<TvAlternateTitlesResponse> {
 		return this.fetch(`/tv/${tmdbId}/alternative_titles`) as Promise<TvAlternateTitlesResponse>;
+	},
+
+	/**
+	 * Get all translations for a movie (language-tagged titles/overviews).
+	 * Unlike alternative_titles, this endpoint identifies the language of each
+	 * title (ISO 639-1), which alternative_titles does not supply.
+	 */
+	async getMovieTranslations(tmdbId: number): Promise<TranslationsResponse> {
+		return this.fetch(`/movie/${tmdbId}/translations`) as Promise<TranslationsResponse>;
+	},
+
+	/**
+	 * Get all translations for a TV show (language-tagged names/overviews).
+	 * TV translations carry the title in `data.name` (movies use `data.title`).
+	 */
+	async getTvTranslations(tmdbId: number): Promise<TranslationsResponse> {
+		return this.fetch(`/tv/${tmdbId}/translations`) as Promise<TranslationsResponse>;
 	},
 
 	/**
@@ -548,6 +628,28 @@ export const tmdb = {
 	},
 
 	/**
+	 * Curated popular networks for the discover network filter. TMDB has no
+	 * network list or search endpoint, so ids come from DISCOVER_NETWORKS while
+	 * names and logos are fetched live (cached like any other GET); the curated
+	 * name is only a fallback when /network/{id} fails.
+	 */
+	async getNetworks(): Promise<TmdbNetwork[]> {
+		return Promise.all(
+			DISCOVER_NETWORKS.map(async ({ id, name }) => {
+				try {
+					const data = (await this.fetch(`/network/${id}`)) as {
+						name?: string;
+						logo_path?: string | null;
+					} | null;
+					return { id, name: data?.name || name, logo_path: data?.logo_path ?? null };
+				} catch {
+					return { id, name, logo_path: null };
+				}
+			})
+		);
+	},
+
+	/**
 	 * Search keywords
 	 */
 	async searchKeywords(query: string): Promise<{ results: TmdbKeyword[] }> {
@@ -634,6 +736,31 @@ export interface MovieAlternateTitlesResponse {
 export interface TvAlternateTitlesResponse {
 	id: number;
 	results: TmdbAlternateTitle[];
+}
+
+/**
+ * A single translation entry from /movie|tv/{id}/translations.
+ * Movies carry the localized title in data.title; TV shows use data.name.
+ */
+export interface TmdbTranslation {
+	iso_639_1: string; // Language code (e.g., 'en', 'ja', 'hu')
+	iso_3166_1: string; // Country code (e.g., 'US', 'JP')
+	name: string;
+	english_name: string;
+	data: {
+		title?: string; // Movies
+		name?: string; // TV shows
+		overview?: string;
+		homepage?: string;
+	};
+}
+
+/**
+ * Translations response from TMDB
+ */
+export interface TranslationsResponse {
+	id: number;
+	translations: TmdbTranslation[];
 }
 
 /**
